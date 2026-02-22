@@ -1,23 +1,30 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 const Header = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user, signOut } = useAuth();
+  const location = useLocation();
+  const isLanding = location.pathname === "/";
 
-  const navItems = [
-    { label: "Templates", href: "#templates" },
-    { label: "How It Works", href: "#how-it-works" },
-    { label: "Pricing", href: "#pricing" },
-  ];
+  const navItems = isLanding
+    ? [
+        { label: "Templates", href: "#templates" },
+        { label: "How It Works", href: "#how-it-works" },
+        { label: "Pricing", href: "#pricing" },
+      ]
+    : [];
 
   return (
     <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-lg border-b border-border/50">
       <div className="container px-4 md:px-6 h-16 flex items-center justify-between">
-        <a href="/" className="font-display text-xl font-bold text-primary">
+        <Link to={user ? "/dashboard" : "/"} className="font-display text-xl font-bold text-primary">
           YourInvite
-        </a>
+        </Link>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-8">
@@ -33,8 +40,23 @@ const Header = () => {
         </nav>
 
         <div className="hidden md:flex items-center gap-3">
-          <Button variant="ghost" size="sm">Log in</Button>
-          <Button size="sm" className="rounded-lg">Get Started</Button>
+          {user ? (
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/dashboard">Dashboard</Link>
+              </Button>
+              <Button variant="outline" size="sm" onClick={signOut}>Log out</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/login">Log in</Link>
+              </Button>
+              <Button size="sm" className="rounded-lg" asChild>
+                <Link to="/signup">Get Started</Link>
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Mobile toggle */}
@@ -68,8 +90,23 @@ const Header = () => {
                 </a>
               ))}
               <div className="flex gap-3 pt-2">
-                <Button variant="outline" size="sm" className="flex-1">Log in</Button>
-                <Button size="sm" className="flex-1">Get Started</Button>
+                {user ? (
+                  <>
+                    <Button variant="outline" size="sm" className="flex-1" asChild>
+                      <Link to="/dashboard" onClick={() => setMobileOpen(false)}>Dashboard</Link>
+                    </Button>
+                    <Button size="sm" className="flex-1" onClick={() => { signOut(); setMobileOpen(false); }}>Log out</Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="outline" size="sm" className="flex-1" asChild>
+                      <Link to="/login" onClick={() => setMobileOpen(false)}>Log in</Link>
+                    </Button>
+                    <Button size="sm" className="flex-1" asChild>
+                      <Link to="/signup" onClick={() => setMobileOpen(false)}>Get Started</Link>
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>

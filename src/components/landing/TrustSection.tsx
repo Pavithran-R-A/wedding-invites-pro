@@ -4,7 +4,7 @@ import { Shield, CreditCard, Globe, Heart } from "lucide-react";
 const signals = [
   {
     icon: Shield,
-    text: "Secure Payments via Razorpay",
+    text: "Secure Payments via PhonePe",
   },
   {
     icon: CreditCard,
