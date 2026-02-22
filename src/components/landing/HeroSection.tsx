@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { ArrowRight, Sparkles } from "lucide-react";
@@ -56,12 +57,14 @@ const HeroSection = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.4 }}
           >
-            <Button size="lg" className="text-base px-8 py-6 rounded-xl shadow-lg shadow-primary/20">
-              Create Your Invite
-              <ArrowRight className="ml-1 w-4 h-4" />
+            <Button size="lg" className="text-base px-8 py-6 rounded-xl shadow-lg shadow-primary/20" asChild>
+              <Link to="/signup">
+                Create Your Invite
+                <ArrowRight className="ml-1 w-4 h-4" />
+              </Link>
             </Button>
-            <Button variant="outline" size="lg" className="text-base px-8 py-6 rounded-xl">
-              View Templates
+            <Button variant="outline" size="lg" className="text-base px-8 py-6 rounded-xl" asChild>
+              <a href="#templates">View Templates</a>
             </Button>
           </motion.div>
 
