@@ -1,26 +1,22 @@
 // All amounts in paise (1/100 of rupee)
 export const BASE_FEE = 19900;
 
-export const GUEST_TIERS = [
-  { limit: 50, price: 9900, label: 'Up to 50 guests' },
-  { limit: 150, price: 24900, label: 'Up to 150 guests' },
-  { limit: 300, price: 39900, label: 'Up to 300 guests' },
-  { limit: Infinity, price: 69900, label: 'Unlimited guests' },
-] as const;
+// Per-guest pricing in paise
+export const PRICE_PER_GUEST = 499; // ₹4.99 per guest
 
 export const FEATURES = {
-  rsvp: { price: 0, label: 'RSVP Form', description: 'Collect responses from your guests', category: 'core', included: true, whyPay: '' },
   whatsapp: { price: 4900, label: 'WhatsApp Sharing', description: 'Share your invite with one tap', category: 'core', whyPay: 'Without this, guests may miss your invite — 90% of Indian families use WhatsApp daily.' },
   qr: { price: 4900, label: 'QR Code', description: 'Printable QR for quick access', category: 'core', whyPay: 'Elders can scan and view — no typing needed. Avoid confusion at the door.' },
   branded_qr: { price: 9900, label: 'Branded QR', description: 'Custom designed QR with your names', category: 'core', whyPay: 'Make your QR part of the invite design — elegant and personal.' },
+  rsvp: { price: 4900, label: 'RSVP Form', description: 'Collect responses from your guests', category: 'core', whyPay: 'Know exactly who is coming. Avoid empty chairs or overcrowding.' },
+  meal_report: { price: 4900, label: 'Meal Report', description: 'Detailed meal count by type', category: 'reports', whyPay: 'You will avoid wasted plates — know exact meal counts before the caterer arrives.' },
+  csv_export: { price: 2900, label: 'CSV Export', description: 'Download your guest list', category: 'reports', whyPay: 'Easily share guest lists with your family, caterer, or event planner.' },
   priority_design_48h: { price: 99900, label: 'Priority Design (48hr)', description: 'Professional mockup in 48 hours', category: 'human_services', whyPay: 'Running out of time? Our designers deliver a polished invite in 48 hours.' },
   full_designer: { price: 249900, label: 'Full Designer Service', description: 'Dedicated designer for your invite', category: 'human_services', whyPay: 'A personal designer who understands South Indian wedding aesthetics.' },
   wording_edit_basic: { price: 19900, label: 'Wording Edit', description: 'Human-verified wording in your language', category: 'human_services', whyPay: 'Avoid embarrassing wording mistakes — our experts check every line.' },
   accommodation: { price: 4900, label: 'Accommodation Tracking', description: 'Track who needs stay arrangements', category: 'logistics', whyPay: 'Avoid last-minute room shortfalls — know exactly how many beds you need.' },
   transport: { price: 4900, label: 'Transport Tracking', description: 'Manage pickup and drop logistics', category: 'logistics', whyPay: 'No guest left behind at the station — plan vehicles accurately.' },
   seating_planner: { price: 19900, label: 'Seating Planner', description: 'Plan seating for your event', category: 'logistics', whyPay: 'Avoid awkward seat shortfalls. Plan by family group and dietary needs.' },
-  meal_report: { price: 0, label: 'Meal Report', description: 'Detailed meal count by type', category: 'reports', included: true, whyPay: '' },
-  csv_export: { price: 0, label: 'CSV Export', description: 'Download your guest list', category: 'reports', included: true, whyPay: '' },
   reminder_single: { price: 4900, label: 'Reminder Blast (1 round)', description: 'Send one reminder to all guests', category: 'reports', whyPay: 'Guests forget — one reminder doubles your RSVP response rate.' },
   reminder_bundle: { price: 14900, label: 'Reminder Bundle', description: 'Unlimited reminders until the event', category: 'reports', whyPay: 'Keep nudging until every guest responds. Peace of mind guaranteed.' },
 } as const;
@@ -36,14 +32,8 @@ export const FEATURE_CATEGORIES = {
 
 export const GST_RATE = 0.18;
 
-export function getGuestTierPrice(guestCount: number): number {
-  const tier = GUEST_TIERS.find(t => guestCount <= t.limit);
-  return tier ? tier.price : GUEST_TIERS[GUEST_TIERS.length - 1].price;
-}
-
-export function getGuestTierLabel(guestCount: number): string {
-  const tier = GUEST_TIERS.find(t => guestCount <= t.limit);
-  return tier ? tier.label : GUEST_TIERS[GUEST_TIERS.length - 1].label;
+export function getGuestSubtotal(guestCount: number): number {
+  return guestCount * PRICE_PER_GUEST;
 }
 
 export interface PriceBreakdown {
@@ -64,10 +54,10 @@ export function calculatePrice(
   // Base fee
   items.push({ label: 'Project Creation Fee', amount: BASE_FEE });
 
-  // Guest tier
+  // Guest pricing (per head)
   if (guestCount > 0) {
-    const guestPrice = getGuestTierPrice(guestCount);
-    items.push({ label: getGuestTierLabel(guestCount), amount: guestPrice });
+    const guestSubtotal = getGuestSubtotal(guestCount);
+    items.push({ label: `${guestCount} guests × ${formatPaise(PRICE_PER_GUEST)}/guest`, amount: guestSubtotal });
   }
 
   // Features
@@ -98,8 +88,8 @@ export function formatPaise(paise: number): string {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: rupees % 1 !== 0 ? 2 : 0,
+    maximumFractionDigits: 2,
   }).format(rupees);
 }
 
@@ -137,7 +127,7 @@ export function calculatePrintCost(
 
   const perCard = Math.round(paper.pricePerCard * gsmOption.multiplier * finishOption.multiplier);
   const printerCost = perCard * qty;
-  const platformMarkup = Math.round(printerCost * 0.15); // 15% platform fee
+  const platformMarkup = Math.round(printerCost * 0.15);
 
   return { printerCost, platformMarkup };
 }

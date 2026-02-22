@@ -7,16 +7,10 @@ const corsHeaders = {
 };
 
 const BASE_FEE = 19900;
-
-const GUEST_TIERS = [
-  { limit: 50, price: 9900, label: "Up to 50 guests" },
-  { limit: 150, price: 24900, label: "Up to 150 guests" },
-  { limit: 300, price: 39900, label: "Up to 300 guests" },
-  { limit: Infinity, price: 69900, label: "Unlimited guests" },
-];
+const PRICE_PER_GUEST = 499; // ₹4.99 per guest
 
 const FEATURES: Record<string, { price: number; label: string; taxable: boolean }> = {
-  rsvp: { price: 0, label: "RSVP Form", taxable: true },
+  rsvp: { price: 4900, label: "RSVP Form", taxable: true },
   whatsapp: { price: 4900, label: "WhatsApp Sharing", taxable: true },
   qr: { price: 4900, label: "QR Code", taxable: true },
   branded_qr: { price: 9900, label: "Branded QR", taxable: true },
@@ -26,8 +20,8 @@ const FEATURES: Record<string, { price: number; label: string; taxable: boolean 
   accommodation: { price: 4900, label: "Accommodation Tracking", taxable: true },
   transport: { price: 4900, label: "Transport Tracking", taxable: true },
   seating_planner: { price: 19900, label: "Seating Planner", taxable: true },
-  meal_report: { price: 0, label: "Meal Report", taxable: true },
-  csv_export: { price: 0, label: "CSV Export", taxable: true },
+  meal_report: { price: 4900, label: "Meal Report", taxable: true },
+  csv_export: { price: 2900, label: "CSV Export", taxable: true },
   reminder_single: { price: 4900, label: "Reminder Blast (1 round)", taxable: true },
   reminder_bundle: { price: 14900, label: "Reminder Bundle", taxable: true },
 };
@@ -64,10 +58,10 @@ Deno.serve(async (req) => {
     // Base fee
     breakdown.push({ label: "Project Creation Fee", amount: BASE_FEE, taxable: true });
 
-    // Guest tier
+    // Per-guest pricing
     if (guestCount > 0) {
-      const tier = GUEST_TIERS.find((t) => guestCount <= t.limit) || GUEST_TIERS[GUEST_TIERS.length - 1];
-      breakdown.push({ label: tier.label, amount: tier.price, taxable: true });
+      const guestSubtotal = guestCount * PRICE_PER_GUEST;
+      breakdown.push({ label: `${guestCount} guests × ₹4.99/guest`, amount: guestSubtotal, taxable: true });
     }
 
     // Features

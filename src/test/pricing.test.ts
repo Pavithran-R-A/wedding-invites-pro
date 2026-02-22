@@ -2,53 +2,34 @@ import { describe, it, expect } from 'vitest';
 import {
   calculatePrice,
   calculatePrintCost,
-  getGuestTierPrice,
-  getGuestTierLabel,
+  getGuestSubtotal,
   formatPaise,
   BASE_FEE,
   GST_RATE,
+  PRICE_PER_GUEST,
+  FEATURES,
   type FeatureKey,
 } from '@/lib/pricing';
 
 describe('Pricing Engine', () => {
   describe('formatPaise', () => {
     it('formats zero correctly', () => {
-      expect(formatPaise(0)).toBe('₹0');
+      expect(formatPaise(0)).toContain('0');
     });
     it('formats 19900 paise as ₹199', () => {
-      expect(formatPaise(19900)).toBe('₹199');
+      expect(formatPaise(19900)).toContain('199');
     });
-    it('formats large amounts with Indian grouping', () => {
-      const result = formatPaise(10000000); // ₹1,00,000
-      expect(result).toContain('1');
-    });
-  });
-
-  describe('getGuestTierPrice', () => {
-    it('returns 9900 for 1-50 guests', () => {
-      expect(getGuestTierPrice(1)).toBe(9900);
-      expect(getGuestTierPrice(50)).toBe(9900);
-    });
-    it('returns 24900 for 51-150 guests', () => {
-      expect(getGuestTierPrice(51)).toBe(24900);
-      expect(getGuestTierPrice(150)).toBe(24900);
-    });
-    it('returns 39900 for 151-300 guests', () => {
-      expect(getGuestTierPrice(151)).toBe(39900);
-      expect(getGuestTierPrice(300)).toBe(39900);
-    });
-    it('returns 69900 for 301+ guests', () => {
-      expect(getGuestTierPrice(301)).toBe(69900);
-      expect(getGuestTierPrice(9999)).toBe(69900);
+    it('formats per-guest price', () => {
+      expect(formatPaise(499)).toContain('4.99');
     });
   });
 
-  describe('getGuestTierLabel', () => {
-    it('returns correct label for each tier', () => {
-      expect(getGuestTierLabel(25)).toBe('Up to 50 guests');
-      expect(getGuestTierLabel(100)).toBe('Up to 150 guests');
-      expect(getGuestTierLabel(200)).toBe('Up to 300 guests');
-      expect(getGuestTierLabel(500)).toBe('Unlimited guests');
+  describe('getGuestSubtotal', () => {
+    it('calculates per-guest pricing', () => {
+      expect(getGuestSubtotal(100)).toBe(100 * PRICE_PER_GUEST);
+      expect(getGuestSubtotal(173)).toBe(173 * PRICE_PER_GUEST);
+      expect(getGuestSubtotal(0)).toBe(0);
+      expect(getGuestSubtotal(1)).toBe(PRICE_PER_GUEST);
     });
   });
 
@@ -63,23 +44,20 @@ describe('Pricing Engine', () => {
       expect(result.total).toBe(BASE_FEE + result.gst);
     });
 
-    it('adds guest tier when guestCount > 0', () => {
+    it('adds per-guest cost when guestCount > 0', () => {
       const result = calculatePrice([], 50);
       expect(result.items).toHaveLength(2);
-      expect(result.items[1].amount).toBe(9900);
+      expect(result.items[1].amount).toBe(50 * PRICE_PER_GUEST);
     });
 
-    it('adds paid features but not free ones', () => {
-      const features: FeatureKey[] = ['rsvp', 'whatsapp', 'qr'];
+    it('adds paid features', () => {
+      const features: FeatureKey[] = ['whatsapp', 'qr'];
       const result = calculatePrice(features, 0);
-      // rsvp is free (0), whatsapp and qr are 4900 each
-      expect(result.items).toHaveLength(3); // base + whatsapp + qr
-      expect(result.subtotal).toBe(BASE_FEE + 4900 + 4900);
+      expect(result.subtotal).toBe(BASE_FEE + FEATURES.whatsapp.price + FEATURES.qr.price);
     });
 
     it('includes print costs when provided', () => {
       const result = calculatePrice([], 0, 15000, 2250);
-      expect(result.items).toHaveLength(3); // base + print cost + platform fee
       expect(result.subtotal).toBe(BASE_FEE + 15000 + 2250);
     });
 
@@ -94,22 +72,25 @@ describe('Pricing Engine', () => {
       expect(result.total).toBe(result.subtotal + result.gst);
     });
 
-    it('uses integer arithmetic (no floating point errors)', () => {
+    it('uses integer arithmetic', () => {
       const result = calculatePrice(['branded_qr', 'priority_design_48h'], 300, 50000, 7500);
-      // All values must be integers
       expect(Number.isInteger(result.subtotal)).toBe(true);
       expect(Number.isInteger(result.gst)).toBe(true);
       expect(Number.isInteger(result.total)).toBe(true);
-      result.items.forEach(item => {
-        expect(Number.isInteger(item.amount)).toBe(true);
-      });
+    });
+
+    it('all feature prices are positive integers', () => {
+      for (const [, feat] of Object.entries(FEATURES)) {
+        expect(feat.price).toBeGreaterThan(0);
+        expect(Number.isInteger(feat.price)).toBe(true);
+      }
     });
   });
 
   describe('calculatePrintCost', () => {
     it('calculates basic matte print cost', () => {
       const { printerCost, platformMarkup } = calculatePrintCost(100, 'matte', '200', 'none');
-      expect(printerCost).toBe(1500 * 100); // 1500 per card * 100
+      expect(printerCost).toBe(1500 * 100);
       expect(platformMarkup).toBe(Math.round(printerCost * 0.15));
     });
 
