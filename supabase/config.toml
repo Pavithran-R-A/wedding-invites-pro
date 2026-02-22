@@ -1,1 +1,4 @@
 project_id = "hgvztvaoebeyjnyfarii"
+
+[functions.pricing-quote]
+verify_jwt = false

@@ -1,5 +1,11 @@
 import { motion } from 'framer-motion';
 import { formatPaise } from '@/lib/pricing';
+import { Info } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface FeatureToggleProps {
   label: string;
@@ -7,10 +13,11 @@ interface FeatureToggleProps {
   price: number;
   checked: boolean;
   included?: boolean;
+  whyPay?: string;
   onChange: (checked: boolean) => void;
 }
 
-const FeatureToggle = ({ label, description, price, checked, included, onChange }: FeatureToggleProps) => {
+const FeatureToggle = ({ label, description, price, checked, included, whyPay, onChange }: FeatureToggleProps) => {
   return (
     <motion.label
       className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-180 ${
@@ -53,7 +60,26 @@ const FeatureToggle = ({ label, description, price, checked, included, onChange 
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">{label}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium">{label}</span>
+            {whyPay && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={e => e.preventDefault()}
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[240px] text-xs">
+                  <p className="font-medium text-primary mb-0.5">Why pay for this?</p>
+                  <p>{whyPay}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
           <span className="text-sm font-semibold text-primary ml-2 shrink-0">
             {included ? 'Included' : price === 0 ? 'Free' : formatPaise(price)}
           </span>
