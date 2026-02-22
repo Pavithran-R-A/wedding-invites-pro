@@ -5,13 +5,17 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
-  FEATURES, FEATURE_CATEGORIES, calculatePrice, type FeatureKey,
+  FEATURES, FEATURE_CATEGORIES, calculatePrice, calculatePrintCost,
+  type FeatureKey, formatPaise,
 } from '@/lib/pricing';
 import Header from '@/components/landing/Header';
 import FeatureToggle from '@/components/checkout/FeatureToggle';
 import PriceMeter from '@/components/checkout/PriceMeter';
 import GuestCountInput from '@/components/checkout/GuestCountInput';
+import PrintOptions from '@/components/checkout/PrintOptions';
 import InvoicePreview from '@/components/checkout/InvoicePreview';
+import TrustBadges from '@/components/checkout/TrustBadges';
+import ElderApproval from '@/components/checkout/ElderApproval';
 
 const ConfigureProject = () => {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +26,13 @@ const ConfigureProject = () => {
   const [guestCount, setGuestCount] = useState(50);
   const [showInvoice, setShowInvoice] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Print options
+  const [printEnabled, setPrintEnabled] = useState(false);
+  const [printQty, setPrintQty] = useState(100);
+  const [paperType, setPaperType] = useState('matte');
+  const [gsm, setGsm] = useState('200');
+  const [finish, setFinish] = useState('none');
 
   useEffect(() => {
     if (!id || !user) return;
@@ -46,9 +57,14 @@ const ConfigureProject = () => {
     );
   };
 
+  const printCosts = useMemo(() => {
+    if (!printEnabled || printQty <= 0) return { printerCost: 0, platformMarkup: 0 };
+    return calculatePrintCost(printQty, paperType, gsm, finish);
+  }, [printEnabled, printQty, paperType, gsm, finish]);
+
   const breakdown = useMemo(
-    () => calculatePrice(selectedFeatures, guestCount),
-    [selectedFeatures, guestCount]
+    () => calculatePrice(selectedFeatures, guestCount, printCosts.printerCost, printCosts.platformMarkup),
+    [selectedFeatures, guestCount, printCosts]
   );
 
   const handleSave = async () => {
@@ -63,7 +79,6 @@ const ConfigureProject = () => {
   };
 
   const handlePay = () => {
-    // Mock payment — will integrate Razorpay when keys are ready
     toast({ title: '🎉 Payment successful!', description: 'Your features are now active.' });
     setShowInvoice(false);
   };
@@ -118,6 +133,7 @@ const ConfigureProject = () => {
                       price={feature.price}
                       checked={selectedFeatures.includes(key)}
                       included={'included' in feature ? feature.included : undefined}
+                      whyPay={feature.whyPay || undefined}
                       onChange={() => toggleFeature(key)}
                     />
                   ))}
@@ -125,7 +141,29 @@ const ConfigureProject = () => {
               </div>
             ))}
 
-            <div className="flex gap-3 pb-8">
+            {/* Print options */}
+            <div className="p-4 border border-border rounded-xl">
+              <h3 className="font-display font-semibold mb-3">Print</h3>
+              <PrintOptions
+                enabled={printEnabled}
+                onToggle={setPrintEnabled}
+                qty={printQty}
+                onQtyChange={setPrintQty}
+                paperType={paperType}
+                onPaperTypeChange={setPaperType}
+                gsm={gsm}
+                onGsmChange={setGsm}
+                finish={finish}
+                onFinishChange={setFinish}
+              />
+            </div>
+
+            {/* Elder approval */}
+            <div className="space-y-2">
+              <ElderApproval projectId={id || ''} projectTitle={project.title} />
+            </div>
+
+            <div className="flex gap-3 pb-24 lg:pb-8">
               <Button variant="outline" className="rounded-xl" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Draft'}
               </Button>
@@ -137,8 +175,9 @@ const ConfigureProject = () => {
 
           {/* Price meter — desktop sidebar */}
           <div className="hidden lg:block">
-            <div className="sticky top-20">
+            <div className="sticky top-20 space-y-4">
               <PriceMeter breakdown={breakdown} />
+              <TrustBadges />
             </div>
           </div>
         </div>
@@ -149,7 +188,7 @@ const ConfigureProject = () => {
             <div>
               <p className="text-xs text-muted-foreground">Total (incl. GST)</p>
               <p className="font-display font-bold text-lg text-primary">
-                {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(breakdown.total / 100)}
+                {formatPaise(breakdown.total)}
               </p>
             </div>
             <Button className="rounded-xl" onClick={() => setShowInvoice(true)}>

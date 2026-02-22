@@ -12,6 +12,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import CreateProject from "./pages/CreateProject";
 import ConfigureProject from "./pages/ConfigureProject";
+import EditProject from "./pages/EditProject";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/create-project" element={<ProtectedRoute><CreateProject /></ProtectedRoute>} />
             <Route path="/project/:id/configure" element={<ProtectedRoute><ConfigureProject /></ProtectedRoute>} />
+            <Route path="/project/:id/edit" element={<ProtectedRoute><EditProject /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
