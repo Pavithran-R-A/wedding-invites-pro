@@ -22,7 +22,7 @@ const ConfigureProject = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [project, setProject] = useState<any>(null);
-  const [selectedFeatures, setSelectedFeatures] = useState<FeatureKey[]>(['rsvp', 'meal_report', 'csv_export']);
+  const [selectedFeatures, setSelectedFeatures] = useState<FeatureKey[]>([]);
   const [guestCount, setGuestCount] = useState(50);
   const [showInvoice, setShowInvoice] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -50,8 +50,6 @@ const ConfigureProject = () => {
   }, [id, user]);
 
   const toggleFeature = (key: FeatureKey) => {
-    const feat = FEATURES[key];
-    if ('included' in feat && feat.included) return;
     setSelectedFeatures(prev =>
       prev.includes(key) ? prev.filter(f => f !== key) : [...prev, key]
     );
@@ -132,7 +130,6 @@ const ConfigureProject = () => {
                       description={feature.description}
                       price={feature.price}
                       checked={selectedFeatures.includes(key)}
-                      included={'included' in feature ? feature.included : undefined}
                       whyPay={feature.whyPay || undefined}
                       onChange={() => toggleFeature(key)}
                     />
