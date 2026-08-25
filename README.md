@@ -1,73 +1,66 @@
-# Welcome to your Lovable project
+# Wedding Invites Pro
 
-## Project info
+Wedding Invites Pro is a web application for creating and managing digital wedding-invitation projects.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+The app gives a user an account, a dashboard for their invitation projects, and separate create/configure/edit flows so the invitation content can be treated like a real saved project rather than a one-page form.
 
-## How can I edit this code?
+## Current application
 
-There are several ways of editing your application.
+- email/account authentication
+- password reset flow
+- protected user dashboard
+- create invitation project
+- configure project details
+- edit an existing project
+- privacy, terms and cookie-policy pages
+- responsive React UI
 
-**Use Lovable**
+## Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+- React 18 + TypeScript
+- Vite
+- React Router
+- Supabase
+- TanStack Query
+- Tailwind CSS
+- Radix/shadcn-style components
+- Framer Motion
+- Vitest + Testing Library
 
-Changes made via Lovable will be committed automatically to this repo.
+## Local development
 
-**Use your preferred IDE**
+Install dependencies:
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+```bash
+npm install
+```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Start the development server:
 
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Run the standard checks with:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+npm run lint
+npm test
+npm run build
+```
 
-**Use GitHub Codespaces**
+The app expects its Supabase/environment configuration to be supplied locally. Use development credentials and keep secrets out of source control.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Code map
 
-## What technologies are used for this project?
+```text
+src/pages/        landing, auth, dashboard and project screens
+src/components/   shared UI, authentication and route guards
+src/App.tsx       application routes
+```
 
-This project is built with:
+The protected project routes are a good place to start when tracing the main user flow.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Status
 
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+This repository began from a Lovable scaffold, but the README now documents the application rather than the generator that created the initial files. The project is still under development, so backend schema, deployment configuration and the final invitation delivery/publishing flow should be checked before treating it as production-ready.
