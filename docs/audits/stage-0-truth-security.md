@@ -185,22 +185,44 @@ Postgres, Stage 0 is **not** downgraded to a note — it is verified.
 
 ---
 
-## 7. Residual findings (not fixed in Stage 0, with rationale)
+## 7. Dependency / supply-chain audit (Phase 0C) and residual findings
 
-`npm audit` reports 6 vulnerabilities (5 moderate, 1 high). `npm audit fix`
-(dry-run) shows **none** are fixable without a breaking major, so they were
-recorded, not force-applied (force-upgrading would destabilise the build and is
-outside Stage 0):
+`package.json`: 52 production dependencies, 21 dev-only. Both audit scopes were
+run.
 
-- `esbuild ≤0.24.2` (via `vite@5.4.21`) — dev-server-only advisory; production
-  build is static. Fix requires `vite@8` (breaking).
-- `@vitest/mocker@3.2.7` (via `vitest@3.2.7`) — test-time only. Fix requires
-  `vitest@5` (breaking).
-- `react-router(-dom)@6.30.6` — open-redirect-via-backslash and SSR-hydration
-  `deserializeErrors`. This SPA has no SSR and uses static `<Link>` targets; fix
-  requires `react-router-dom@7` (breaking).
+```bash
+npm audit                    # 6 vulnerabilities (5 moderate, 1 high)
+npm audit --omit=dev         # 2 moderate
+```
 
-Other residuals:
+Production tree (shipped to customers):
+
+| Severity | Package | Direct/Transitive | Exploit relevance here | Action |
+|---|---|---|---|---|
+| moderate | `react-router@6.30.6` (via `react-router-dom`) | transitive of a direct dep | Open redirect via backslash in `<Link>`/`useNavigate`: reachable only if a route target comes from untrusted input; this app navigates to static, in-app paths. SSR `deserializeErrors` is **not** exploitable — this is a client-only SPA with no SSR. | **Recorded, not upgraded.** Only fix is `react-router-dom@7` (breaking major) → out of Stage 0. Tracked as a Stage 1+ upgrade. |
+| moderate | `react-router-dom@6.30.6` | direct | Same advisory chain as above. | Same. |
+
+Dev/build tree (never shipped; `dist/` is static):
+
+| Severity | Package | Direct/Transitive | Exploit relevance here | Action |
+|---|---|---|---|---|
+| **high** | `vite@5.4.21` | direct (dev) | `server.fs.deny` bypass on Windows alternate paths — a **dev-server-only** file-read issue; requires the attacker to reach the dev server. | **Not upgradable safely** (`vite@8`, breaking). Mitigation available and recommended: bind the dev server to loopback (see residual note below). |
+| moderate | `esbuild@0.21.5` (via `vite`) | transitive | Dev-server cross-origin request/read; dev-only. | Recorded; same `vite@8` path. |
+| moderate | `@vitest/mocker@3.2.7` (via `vitest`) | transitive | Path traversal via redirect mock — test-time only, no production exposure. | Recorded; fix requires `vitest@5` (breaking). |
+| moderate | `vitest@3.2.7` | direct (dev) | Same chain. | Recorded. |
+
+`npm audit fix` (dry-run) confirms **none** of these resolve without a breaking
+major. Per the stage rules, no `npm audit fix --force` and no major upgrades
+were run to make a report look green. The two moderate production advisories
+are the reason CI gates production deps at `--audit-level=high` (currently
+exit 0) rather than failing on everything.
+
+Generator-only dependency check: `lovable-tagger` is a **dev-only** plugin used
+in `vite.config.ts` under `mode === "development"`. `grep -rli lovable dist/`
+returns no matches, so it contributes nothing to shipped code. Retained;
+removing it is optional cleanup, not a Stage 0 security need.
+
+Other residuals (not fixed in Stage 0, with rationale):
 - **Authed data flows not browser-verified end-to-end.** Landing (desktop +
   390px mobile), login, terms, cookie policy and the protected-route redirect
   were verified in a real browser with zero console errors. The logged-in
