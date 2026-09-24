@@ -1,9 +1,14 @@
 # Stage 0 — Truth, Security and Re-Baseline
 
-**STATUS: PASS**
+**STATUS: PASS — after one post-publication security repair (§11)**
+
+The original PASS recorded below was **wrong about one acceptance criterion**:
+client-created projects could carry trusted paid state, because the paid-status
+guard only covered `UPDATE`. An independent GitHub review caught it, it was
+reproduced against the published schema, and it is fixed in §11. Read §11 first.
 
 Repository: `Pavithran-R-A/wedding-invites-pro` (private)
-Date: 2026-09-24
+Date: 2026-09-24 (repair 2026-09-25 UTC / late 2026-09-24 local)
 Scope: Stage 0 only — make the existing repo truthful, safe, auditable and
 technically reproducible **in place**. No rebrand, no Stage 1 product features.
 
@@ -35,7 +40,8 @@ browser tab now reads "YourInvite — Wedding Invitation Designer (Preview)".
 | Production build | `npm run build` | PASS (exit 0) |
 | Audit (production tree) | `npm audit --omit=dev --audit-level=high` | PASS (exit 0) — the gate CI enforces |
 | Audit (full tree) | `npm audit` | 6 advisories (5 moderate, 1 high) — all require breaking majors (see §7) |
-| CI | `.github/workflows/ci.yml` | Newly added; commands verified locally, not yet run on GitHub (see §8) |
+| DB security suite | `bash supabase/tests/rls/run.sh` | PASS — **24 / 24** assertions on live Postgres (§6, §11) |
+| CI | `.github/workflows/ci.yml` | Accepted by GitHub; run created but no runner allocated (account billing) — see §8 |
 
 A `typecheck` script was added to `package.json` (it did not previously exist).
 The lockfile was regenerated with `npm install` because the committed
@@ -142,6 +148,11 @@ Changes:
    `authenticated` callers it resets `NEW.paid_status := OLD.paid_status`, so a
    client can never self-escalate billing state; `service_role` and non-JWT
    contexts keep control.
+   > ⚠️ **This first attempt was incomplete.** It fired `BEFORE UPDATE` only, so
+   > it could not protect an `INSERT`, and the broad `FOR ALL` project policy let
+   > a client create a project that was *already* marked paid. See §11 for the
+   > reproduced bypass and the repair; do not read this bullet as the current
+   > behaviour.
 2. Dropped **`Public RSVP via token`** (anon guests UPDATE) — no real RSVP flow.
 3. Dropped **`Users create orders`** and **`Users create payments`** — money
    rows are backend-only; owner/admin read policies kept.
@@ -170,7 +181,9 @@ project is touched.
 - (C) client `INSERT` into `payments`: **OPEN**
 - (D) anon read printers incl. `api_endpoint`: **OPEN**
 
-**Hardened suite** (`STAGE0 RLS TESTS PASSED (13)`, psql exit 0):
+**Hardened suite as originally published** (`STAGE0 RLS TESTS PASSED (13)`,
+psql exit 0 — now 24, see §11; the 13 are kept listed because they were the
+evidence behind the original PASS):
 1 anon guest-token update blocked · 2 client `paid_status` escalation frozen ·
 3 cross-user project update blocked · 4 client payments INSERT denied ·
 5 client orders INSERT denied · 6 client activity_logs INSERT denied ·
@@ -181,7 +194,11 @@ project is touched.
 13 SECURITY DEFINER helpers pinned to empty `search_path`.
 
 Because the RLS/security behaviour was actually exercised against a live
-Postgres, Stage 0 is **not** downgraded to a note — it is verified.
+Postgres, these results are evidence rather than notes. They were also, on their
+own, **insufficient**: the suite only proved the paths it happened to test, and
+it tested paid state on `UPDATE` only — which is exactly how the §11 bypass
+survived a green run. Executing tests is necessary, not sufficient; coverage has
+to match the threat.
 
 ---
 
@@ -272,10 +289,19 @@ Design constraints honoured:
   0). The known dev-tooling advisories are uploaded as an artifact for
   inspection instead of turning CI permanently red.
 
-CI has not been executed on GitHub in this stage — the workflow is committed
-locally and its individual commands were all run locally (see §2). Its first
-green run happens when this branch is pushed, which requires owner
-authorisation (§10).
+Status of the workflow itself: GitHub accepted the file and created a run for
+the pushed `main` (run `36038783004`, head `9fd7ca8`), so the YAML, triggers and
+job graph are valid. **No job ever started** — both died in ~2s with an empty
+`runner_name`, no log, and the annotation "The job was not started because
+recent account payments have failed or your spending limit needs to be
+increased." That is an account billing condition, not a repository defect, so
+nothing was changed to chase it. CI therefore has **not** been observed green;
+every command it would run passed locally. Re-run it after the billing state is
+fixed:
+
+```bash
+gh run rerun 36038783004 --repo Pavithran-R-A/wedding-invites-pro
+```
 
 ---
 
@@ -288,14 +314,157 @@ npm audit
 npm audit --omit=dev --audit-level=high   # the gate CI enforces
 
 # Database security tests (needs Docker; uses a throwaway container):
-bash supabase/tests/rls/run.sh          # hardened suite -> STAGE0 RLS TESTS PASSED (13)
-bash supabase/tests/rls/run-baseline.sh # pre-hardening snapshot (informational)
+bash supabase/tests/rls/run.sh           # assertion suite -> STAGE0 RLS TESTS PASSED (24)
+bash supabase/tests/rls/run-baseline.sh  # pre-hardening snapshot (informational)
+bash supabase/tests/rls/run-repro.sh     # paid-state INSERT probe, published schema
+REPAIRED=1 bash supabase/tests/rls/run-repro.sh  # same probe, repaired schema
 ```
 
 ---
 
 ## 10. Git safety
 
-No history was rewritten. No force-push. The Stage 0 changes are committed on
-the current branch. **Push is not performed** — it requires explicit owner
-authorisation, which has not been given.
+No history was rewritten and no force-push was used at any point. The Stage 0
+commits were published to `origin/main` on the owner's explicit
+authorisation: `68dbeed` (baseline), `8c9a6df` (CI), `9fd7ca8` (audit doc),
+pushed as a fast-forward from `cf71d14`. Unrelated untracked
+`pnpm-lock.yaml` / `pnpm-workspace.yaml` were deliberately left unstaged and
+unpushed.
+
+---
+
+## 11. Post-publication repair — paid-state INSERT bypass (2026-09-25)
+
+### What was wrong
+
+Stage 0's acceptance criterion says a browser client must not be able to
+self-activate trusted paid/payment state. The published baseline did **not**
+meet it.
+
+Two facts combined:
+
+1. The historical policy `20260222071941…sql:180` is
+   `CREATE POLICY "Users CRUD own projects" … FOR ALL TO authenticated
+   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id)`. The
+   `WITH CHECK` constrains **ownership only**. For an `INSERT` there is no
+   "old row", so this was the entire gate.
+2. `projects_paid_status_guard` was declared `BEFORE UPDATE`, and
+   `protect_paid_status()` only ever assigned from `OLD.paid_status` — so it
+   never saw an insert at all.
+
+Result: `POST /projects {user_id: <self>, paid_status: "fully_paid"}` created a
+project that the database itself attested as paid, with no money movement. The
+original 13-assertion suite missed it because its paid-state test (#2) used an
+`UPDATE` on an existing row.
+
+### How it was found
+
+Independent review of the published GitHub state by ChatGPT
+(`origin/main` at `9fd7ca8`), after Stage 0 had been declared complete. The
+record above is left as it was written rather than edited to look correct.
+
+### Reproduced before being fixed
+
+`supabase/tests/rls/03_paid_state_insert_probe.sql` + `run-repro.sh` run the
+same probe against the published schema (repair migration excluded) and against
+the repaired one. Executed on live Postgres 16 in a throwaway container:
+
+| Case (as `authenticated`, own user id) | Published schema | Repaired schema |
+|---|---|---|
+| INSERT `paid_status = 'fully_paid'` | **VULNERABLE — stored as fully_paid** | REJECTED 42501, no row |
+| INSERT `paid_status = 'base_paid'` | **VULNERABLE — stored as base_paid** | REJECTED 42501, no row |
+| INSERT `paid_status = NULL` | **ACCEPTED — stored as NULL** | REJECTED 42501, no row |
+| INSERT omitting `paid_status` (real create path) | works, stored `unpaid` | works, stored `unpaid` |
+| INSERT for another user | REJECTED 42501 | REJECTED 42501 |
+| `service_role` INSERT paid state | accepted | accepted (unchanged) |
+
+### Repair
+
+Forward-only, `supabase/migrations/20260924213540_stage0_protect_project_paid_state.sql`.
+The published baseline migration was **not** rewritten.
+
+1. `DROP POLICY "Users CRUD own projects"` and replace it with four
+   operation-specific policies. Ownership scoping is the identical predicate
+   (`auth.uid() = user_id`), so nothing is broadened:
+   - SELECT — own rows;
+   - INSERT — own rows **AND `paid_status = 'unpaid'`**;
+   - UPDATE — own rows (billing still frozen by the trigger);
+   - DELETE — own rows.
+   A client that omits `paid_status` is unaffected: the column `DEFAULT
+   'unpaid'` is resolved before `WITH CHECK` runs. An explicit `NULL` is
+   rejected, because `NULL = 'unpaid'` is not true.
+2. `protect_paid_status()` is now `BEFORE INSERT OR UPDATE`, with a `TG_OP`
+   branch (mandatory — `OLD` does not exist for an insert), and it no longer
+   uses the discouraged `auth.role()` JWT claim. It checks the real executing
+   role via `current_user` against a **trusted allowlist**
+   (`service_role`, `supabase_admin`, `postgres`) and fails closed: any other
+   caller on `INSERT` gets `RAISE … ERRCODE 'insufficient_privilege'`, and on
+   `UPDATE` keeps the previous behaviour of restoring `OLD.paid_status`.
+
+Two deliberate decisions:
+
+- **Reject, don't normalise.** A malicious paid-state insert is refused rather
+  than quietly rewritten to `unpaid`, so a client or integrator bug that tries
+  to mint billing state stays visible instead of half-working.
+- **Same SQLSTATE at both layers.** The trigger raises `42501`, identical to an
+  RLS violation, so the observable contract does not depend on which layer
+  evaluates first (PostgreSQL evaluates RLS `WITH CHECK` and BEFORE-row triggers
+  in an order callers should not rely on).
+
+### Defence in depth actually verified
+
+With `ALTER TABLE projects DISABLE ROW LEVEL SECURITY` — i.e. RLS removed
+entirely — the trigger alone still rejected `authenticated` inserting
+`fully_paid` (`client role authenticated may not create a project with
+paid_status fully_paid; only the trusted backend may set billing state`) while
+the legitimate create stored `unpaid`. The protection does not depend on the
+policy alone.
+
+### Other trusted fields checked for the same INSERT/UPDATE gap (step 6)
+
+| Field | Client write path today | Evidence |
+|---|---|---|
+| `projects.paid_status` | none — INSERT pinned to `unpaid`, UPDATE frozen | tests 14–19, 23 |
+| `payments.status`, `payments.amount_paise` | none — no INSERT policy since baseline, no UPDATE policy at all | tests 4, 22 (0 rows) |
+| `orders.status`, `cost_printer_paise`, `price_platform_paise` | none — same shape as payments | tests 5, 22 (0 rows) |
+| `user_roles.role` (authorisation, not money) | none for non-admins — only `Admins manage roles`, whose `USING (has_role(auth.uid(),'admin'))` is also the `WITH CHECK` for a `FOR ALL` policy, so a client cannot self-grant | test 21 |
+| `activity_logs` | none — client INSERT policies dropped | test 6 |
+| `profiles` | self-scoped, no trusted field (name/phone/language/last_login) | policy review |
+
+No second equivalent hole was found; none of these required a change, and no
+payment functionality was designed or built.
+
+### Tests added
+
+`supabase/tests/rls/01_rls_attacks.sql` grew from 13 to **24** assertions, all
+executed. New ones assert the **final stored state** and that no row exists on
+rejection — never merely that something threw:
+
+14 `fully_paid` project INSERT rejected, no row · 15 `base_paid` rejected, no
+row · 16 explicit `NULL` rejected, no row · 17 legitimate create still works and
+stores `unpaid` · 18 cross-user paid create rejected, no row · 19 owner
+UPDATE+DELETE intact with `paid_status` still frozen · 20 `service_role`
+paid-state INSERT still works · 21 client cannot self-grant `admin` ·
+22 client cannot update `payments`/`orders` rows (0 rows) · 23 `anon` project
+INSERT rejected · 24 migration/seed (`postgres`) context can still set paid
+state.
+
+Tests 23–24 exist to pin the new `current_user` boundary in all four contexts
+that matter: `anon`, `authenticated`, `service_role`, and the
+migration/maintenance role.
+
+### Result
+
+`STAGE0 RLS TESTS PASSED (24)`, psql exit 0 under `ON_ERROR_STOP`.
+The criterion "browser clients cannot directly self-activate trusted
+paid/payment state" now holds on both `INSERT` and `UPDATE`, with the trusted
+backend path preserved.
+
+### Assumption carried by this repair
+
+The allowlist trusts database **roles**, not JWT claims. In hosted Supabase,
+`anon` and `authenticated` cannot `SET ROLE service_role` (no membership
+granted), so a browser request cannot reach an allowlisted role. The local
+harness enforces the same shape by granting those roles only to the superuser.
+This is inherited from the shim assumption already documented in §6 and has not
+been re-proved against a hosted project.

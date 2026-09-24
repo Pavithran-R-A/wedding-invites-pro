@@ -40,4 +40,4 @@ echo "==> Running Stage 0 RLS attack suite"
 docker exec -i -e PGCLIENTENCODING=UTF8 "$CTR" \
   psql -U postgres -v ON_ERROR_STOP=1 --single-transaction < supabase/tests/rls/01_rls_attacks.sql
 
-echo "==> RESULT: PASS (psql exited 0 with ON_ERROR_STOP and 13 RAISE-guarded assertions)"
+echo "==> RESULT: PASS (psql exited 0 with ON_ERROR_STOP; see the PASS count in the notice above)"

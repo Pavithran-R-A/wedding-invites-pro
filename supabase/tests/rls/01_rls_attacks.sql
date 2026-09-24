@@ -1,5 +1,5 @@
 -- Stage 0 RLS / security regression tests.
--- Run AFTER bootstrap + the three migration files, as a superuser (postgres).
+-- Run AFTER bootstrap + every migration file, as a superuser (postgres).
 -- The block impersonates each API role with SET ROLE, attempts a real-world
 -- attack, and RAISEs on the FIRST violation of expectation. A clean run ends
 -- with 'STAGE0 RLS TESTS PASSED'; any assertion failure aborts the transaction,
@@ -44,6 +44,7 @@ DO $$
 DECLARE
   s        seed%ROWTYPE;
   n        integer;
+  m        integer;
   status   public.paid_status;
   raised   boolean;
   passed   integer := 0;
@@ -197,6 +198,195 @@ BEGIN
           AND p.proname IN ('has_role','is_project_owner','handle_new_user'));
   END IF;
   passed := passed + 1; RAISE NOTICE 'PASS 13: SECURITY DEFINER helpers hardened (search_path = %%)';
+
+  -- =======================================================================
+  -- 14-22: paid-state INSERT bypass (found by independent review after the
+  -- Stage 0 baseline was published). Each case asserts the FINAL STORED STATE
+  -- and, for rejections, that no row exists at all — never merely that an
+  -- exception was raised, so silent normalisation cannot masquerade as a pass.
+  -- =======================================================================
+
+  -- 14. authenticated must NOT be able to create an already-paid project.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.role','authenticated', false);
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  raised := false;
+  BEGIN
+    EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, $3)'
+      USING s.user_a, 'forged-full', 'fully_paid'::public.paid_status;
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.projects WHERE title = ''forged-full''' INTO n;
+  EXECUTE 'RESET ROLE';
+  IF NOT raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 14: client created a fully_paid project (rejected=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 14: client fully_paid project INSERT rejected, no row created';
+
+  -- 15. Same for base_paid.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  raised := false;
+  BEGIN
+    EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, $3)'
+      USING s.user_a, 'forged-base', 'base_paid'::public.paid_status;
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.projects WHERE title = ''forged-base''' INTO n;
+  EXECUTE 'RESET ROLE';
+  IF NOT raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 15: client created a base_paid project (rejected=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 15: client base_paid project INSERT rejected, no row created';
+
+  -- 16. An explicit NULL billing state is not a legitimate client create.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  raised := false;
+  BEGIN
+    EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, NULL)'
+      USING s.user_a, 'forged-null';
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.projects WHERE title = ''forged-null''' INTO n;
+  EXECUTE 'RESET ROLE';
+  IF NOT raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 16: client created a NULL paid_status project (rejected=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 16: client NULL paid_status INSERT rejected, no row created';
+
+  -- 17. CONTROL: the real create path (paid_status omitted) must still work and
+  --     must land as unpaid, not be rejected by the tightened policy.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  EXECUTE 'INSERT INTO public.projects (user_id, title) VALUES ($1, $2)'
+    USING s.user_a, 'honest-create';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  EXECUTE 'SELECT paid_status FROM public.projects WHERE title = ''honest-create''' INTO status;
+  EXECUTE 'RESET ROLE';
+  IF n <> 1 OR status <> 'unpaid' THEN
+    RAISE EXCEPTION 'FAIL 17: legitimate create broke (rows=% status=%)', n, status;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 17: legitimate client create works and stores unpaid';
+
+  -- 18. Creating on behalf of another user stays impossible.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  raised := false;
+  BEGIN
+    EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, $3)'
+      USING s.user_b, 'planted', 'fully_paid'::public.paid_status;
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.projects WHERE title = ''planted''' INTO n;
+  EXECUTE 'RESET ROLE';
+  IF NOT raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 18: client created a project for another user (rejected=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 18: cross-user paid project INSERT rejected, no row created';
+
+  -- 19. CONTROL: owner UPDATE/DELETE of their own project still works, and an
+  --     UPDATE may not smuggle billing state back in.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  EXECUTE 'UPDATE public.projects SET title = ''renamed-again'', paid_status = ''fully_paid'' WHERE id = $1'
+    USING (SELECT id FROM public.projects WHERE title = 'honest-create');
+  EXECUTE 'SELECT paid_status FROM public.projects WHERE title = ''renamed-again''' INTO status;
+  raised := false;
+  BEGIN
+    EXECUTE 'DELETE FROM public.projects WHERE title = ''renamed-again''';
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.projects WHERE title = ''renamed-again''' INTO n;
+  EXECUTE 'RESET ROLE';
+  IF status IS DISTINCT FROM 'unpaid' THEN
+    RAISE EXCEPTION 'FAIL 19: owner escalated paid_status via UPDATE (stored %)', status;
+  END IF;
+  IF raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 19b: owner could not delete own project (error=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 19: owner update+delete intact, paid_status still frozen';
+
+  -- 20. TRUSTED BACKEND: service_role may still create a project already paid.
+  EXECUTE 'SET ROLE service_role';
+  PERFORM set_config('test.role','service_role', false);
+  EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, $3)'
+    USING s.user_a, 'backend-paid', 'fully_paid'::public.paid_status;
+  EXECUTE 'SELECT paid_status FROM public.projects WHERE title = ''backend-paid''' INTO status;
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('test.role','postgres', false);
+  IF status IS DISTINCT FROM 'fully_paid' THEN
+    RAISE EXCEPTION 'FAIL 20: service_role could not create a paid project (stored %)', status;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 20: service_role paid-state INSERT path intact';
+
+  -- 21. Authorization fact: a client must not be able to grant itself admin.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.role','authenticated', false);
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  raised := false;
+  BEGIN
+    EXECUTE 'INSERT INTO public.user_roles (user_id, role) VALUES ($1, ''admin''::public.app_role)'
+      USING s.user_a;
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.user_roles WHERE user_id = $1 AND role = ''admin''' INTO n USING s.user_a;
+  EXECUTE 'RESET ROLE';
+  IF NOT raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 21: client self-granted admin (rejected=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 21: client cannot self-grant admin role';
+
+  -- 22. Financial rows: an authenticated client must not be able to mark a
+  --     payment collected or an order fulfilled (no UPDATE policy exists).
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.user_a::text, false);
+  EXECUTE 'UPDATE public.payments SET status = ''captured'', amount_paise = 1 WHERE user_id = $1' USING s.user_a;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  EXECUTE 'UPDATE public.orders SET status = ''delivered'', price_platform_paise = 999999 WHERE project_id = $1' USING s.project_a;
+  GET DIAGNOSTICS m = ROW_COUNT;
+  EXECUTE 'RESET ROLE';
+  IF n <> 0 OR m <> 0 THEN
+    RAISE EXCEPTION 'FAIL 22: client modified money rows (payments=% orders=%)', n, m;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 22: client cannot update payments or orders rows (0 rows)';
+
+  -- 23-24. The trigger's caller-role boundary is exercised in all four
+  --        contexts that matter: anon, authenticated (14-19 above),
+  --        service_role (20 above) and the migration/seed context (24 below).
+  EXECUTE 'SET ROLE anon';
+  PERFORM set_config('test.role','anon', false);
+  raised := false;
+  BEGIN
+    EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, $3)'
+      USING s.user_a, 'anon-paid', 'fully_paid'::public.paid_status;
+  EXCEPTION WHEN insufficient_privilege THEN
+    raised := true;
+  END;
+  EXECUTE 'SELECT count(*) FROM public.projects WHERE title = ''anon-paid''' INTO n;
+  EXECUTE 'RESET ROLE';
+  IF NOT raised OR n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 23: anon created a paid project (rejected=% rows=%)', raised, n;
+  END IF;
+  passed := passed + 1; RAISE NOTICE 'PASS 23: anon project INSERT rejected, no row created';
+
+  -- 24. CONTROL: the migration/maintenance context is not frozen, otherwise the
+  --     allowlist would break seeds, restores and legitimate backfill.
+  EXECUTE 'INSERT INTO public.projects (user_id, title, paid_status) VALUES ($1, $2, $3)'
+    USING s.user_b, 'maint-paid', 'base_paid'::public.paid_status;
+  EXECUTE 'SELECT paid_status FROM public.projects WHERE title = ''maint-paid''' INTO status;
+  IF status IS DISTINCT FROM 'base_paid' THEN
+    RAISE EXCEPTION 'FAIL 24: maintenance context could not set paid state (stored %)', status;
+  END IF;
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('test.role','postgres', false);
+  passed := passed + 1; RAISE NOTICE 'PASS 24: migration/seed context can still set paid state';
 
   RAISE NOTICE 'STAGE0 RLS TESTS PASSED (%)', passed;
 END
