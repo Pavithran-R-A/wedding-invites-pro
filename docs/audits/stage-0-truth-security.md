@@ -31,9 +31,11 @@ browser tab now reads "YourInvite — Wedding Invitation Designer (Preview)".
 | Clean install | `npm ci` | PASS (exit 0) — after lockfile re-sync |
 | Typecheck | `npm run typecheck` (`tsc --noEmit -p tsconfig.app.json`) | PASS (exit 0) |
 | Lint | `npm run lint` | PASS — **0 errors**, 8 warnings |
-| Unit tests | `npm test -- --run` | PASS — **9 tests / 2 files** |
+| Unit tests | `npm test` | PASS — **9 tests / 2 files** |
 | Production build | `npm run build` | PASS (exit 0) |
-| Audit | `npm audit` | 6 advisories — all require breaking majors (see §7) |
+| Audit (production tree) | `npm audit --omit=dev --audit-level=high` | PASS (exit 0) — the gate CI enforces |
+| Audit (full tree) | `npm audit` | 6 advisories (5 moderate, 1 high) — all require breaking majors (see §7) |
+| CI | `.github/workflows/ci.yml` | Newly added; commands verified locally, not yet run on GitHub (see §8) |
 
 A `typecheck` script was added to `package.json` (it did not previously exist).
 The lockfile was regenerated with `npm install` because the committed
@@ -205,6 +207,11 @@ Other residuals:
   create/dashboard/configure/editor data flows were **not** exercised because
   that needs a live authenticated Supabase session, and Stage 0 must not create
   or mutate a remote project. This is stated, not glossed over.
+- **Vite dev server binds all interfaces** (`vite.config.ts` → `server.host:
+  "::"`). Combined with the two open dev-server advisories above, this widens
+  local exposure during development. Left unchanged because it is a deliberate
+  LAN/mobile-testing convenience and has **zero** effect on the static
+  production build; recommend `host: "127.0.0.1"` unless device testing needs it.
 - `NavLink.tsx` and other unused scaffold left in place (harmless; removing is
   optional cleanup).
 - The historical `paid_status`/`app_role`/payment/order **enums and columns
@@ -214,12 +221,49 @@ Other residuals:
 
 ---
 
-## 8. How to reproduce
+## 8. CI baseline (Phase 0P)
+
+`.github/workflows/ci.yml` runs on pushes to and PRs against `main`, with
+`permissions: contents: read` and no deployment step.
+
+| Job | Steps |
+| --- | --- |
+| `verify` | `npm ci` → `npm run lint` → `npm run typecheck` → `npm test` → `npm run build` |
+| `security` | `npm ci` (lockfile must satisfy `package.json`) → env-file tracking guard → credential-shape guard → `npm audit --omit=dev --audit-level=high` → non-blocking full audit artifact |
+
+Design constraints honoured:
+
+- **No production secrets.** CI injects only two obviously-fake public
+  placeholders (`https://example.supabase.co`,
+  `sb_publishable_EXAMPLE_PUBLIC_PLACEHOLDER`); the build and tests do not
+  contact a backend.
+- **No false positives on public placeholders.** The credential guard skips
+  `.env.example` and `docs/`, and its patterns target JWT-shaped tokens
+  (two long base64url segments), PEM private keys and AWS access-key IDs —
+  not the deliberately public publishable key. Verified against a synthetic
+  JWT (detected) and the public placeholder form (not detected).
+- **No credentials printed.** The guard reports matching *file paths* only,
+  never the matched text.
+- **Not flaky via third parties.** No external audit/sca service is called;
+  `npm audit` runs against the bundled advisory data. Only the *production*
+  dependency tree is gated (`--omit=dev --audit-level=high`, currently exit
+  0). The known dev-tooling advisories are uploaded as an artifact for
+  inspection instead of turning CI permanently red.
+
+CI has not been executed on GitHub in this stage — the workflow is committed
+locally and its individual commands were all run locally (see §2). Its first
+green run happens when this branch is pushed, which requires owner
+authorisation (§10).
+
+---
+
+## 9. How to reproduce
 
 ```bash
 npm ci
-npm run typecheck && npm run lint && npm test -- --run && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 npm audit
+npm audit --omit=dev --audit-level=high   # the gate CI enforces
 
 # Database security tests (needs Docker; uses a throwaway container):
 bash supabase/tests/rls/run.sh          # hardened suite -> STAGE0 RLS TESTS PASSED (13)
@@ -228,7 +272,7 @@ bash supabase/tests/rls/run-baseline.sh # pre-hardening snapshot (informational)
 
 ---
 
-## 9. Git safety
+## 10. Git safety
 
 No history was rewritten. No force-push. The Stage 0 changes are committed on
 the current branch. **Push is not performed** — it requires explicit owner

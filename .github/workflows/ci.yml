@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Install, lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # No production secrets. The app only ever reads a browser-public
+      # publishable key, and every surface under test builds without a
+      # reachable backend.
+      VITE_SUPABASE_URL: https://example.supabase.co
+      VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_EXAMPLE_PUBLIC_PLACEHOLDER
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Clean install from lockfile
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  security:
+    name: Secret and dependency hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Lockfile matches package.json
+        run: npm ci
+
+      - name: No env files may be tracked
+        run: |
+          set -eu
+          tracked="$(git ls-files | grep -E '^\.env($|\.)' | grep -v '^\.env\.example$' || true)"
+          if [ -n "$tracked" ]; then
+            echo "::error::Secret-bearing env file(s) are tracked in Git:"
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+          echo "No env files tracked."
+
+      - name: Credential-shaped strings in tracked files
+        run: |
+          set -eu
+          # Deliberately public placeholders (.env.example) and this audit
+          # documentation are excluded. Only file paths are reported — never
+          # the matched value.
+          pattern='eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}|service_role["\\ :.-]{0,4}[A-Za-z0-9._-]{20,}|-----BEGIN[ A-Z]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}'
+          hits="$(git ls-files | grep -vE '^\.env\.example$|^docs/' | xargs grep -lE "$pattern" 2>/dev/null || true)"
+          if [ -n "$hits" ]; then
+            echo "::error::Credential-shaped strings found in the files below. Rotate the credential externally, then remove it from the repository."
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "No credential-shaped strings found in tracked files."
+
+      - name: Production dependencies free of high/critical advisories
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Full advisory report (informational, non-blocking)
+        run: npm audit --json > "$RUNNER_TEMP/npm-audit.json" || true
+
+      - name: Upload advisory report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: ${{ runner.temp }}/npm-audit.json
+          retention-days: 14
+          if-no-files-found: ignore
