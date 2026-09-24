@@ -6,52 +6,41 @@ const CookiePolicy = () => {
     <div className="min-h-screen bg-background">
       <Header />
       <main className="container px-4 md:px-6 py-16 max-w-3xl mx-auto prose prose-sm">
-        <h1 className="font-display text-3xl font-bold mb-8">Cookie Policy</h1>
-        <p className="text-muted-foreground mb-6">Last updated: February 2026</p>
+        <h1 className="font-display text-3xl font-bold mb-4">Cookie &amp; Storage Policy</h1>
+        <div className="bg-muted border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
+          Provisional policy for an early development-stage product. This describes what this build
+          actually stores in your browser today.
+        </div>
+        <p className="text-muted-foreground mb-6">Last updated: September 2026</p>
 
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">What Are Cookies</h2>
-        <p className="text-sm text-muted-foreground">
-          Cookies are small text files stored on your device when you visit our website.
-          They help us provide a better experience and understand how you use our platform.
-        </p>
-
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Essential Cookies</h2>
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">What This Build Stores</h2>
         <p className="text-sm text-muted-foreground mb-2">
-          These cookies are necessary for the website to function. They cannot be disabled.
+          This build does not set advertising, analytics, or third-party cookies. It stores a small
+          amount of data in your browser's local storage:
         </p>
         <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
-          <li><strong>Session cookie</strong> — keeps you logged in securely (HttpOnly, SameSite=Strict)</li>
-          <li><strong>CSRF token</strong> — prevents cross-site request forgery</li>
-          <li><strong>Cookie consent</strong> — remembers your cookie preferences</li>
+          <li><strong>Authentication session</strong> — kept by Supabase Auth in local storage so you
+            stay signed in. This is local storage, not an HttpOnly server-set cookie.</li>
+          <li><strong>Cookie-consent acknowledgement</strong> — a single flag recording that you dismissed
+            the privacy notice.</li>
         </ul>
 
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Analytics Cookies</h2>
-        <p className="text-sm text-muted-foreground mb-2">
-          These help us understand how visitors use our site. Only enabled with your consent.
-        </p>
-        <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
-          <li><strong>Page views</strong> — which pages are most visited</li>
-          <li><strong>Feature usage</strong> — which features are popular</li>
-          <li><strong>Performance</strong> — page load times and errors</li>
-        </ul>
-
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Third-Party Cookies</h2>
-        <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
-          <li><strong>Razorpay</strong> — payment processing (set during checkout only)</li>
-          <li><strong>WhatsApp</strong> — sharing integration (set when sharing invite links)</li>
-        </ul>
-
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Managing Cookies</h2>
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Not Used in This Build</h2>
         <p className="text-sm text-muted-foreground">
-          You can control cookie preferences using the cookie consent banner that appears on your
-          first visit. You can also clear cookies through your browser settings at any time.
-          Note: disabling essential cookies will prevent you from using the platform.
+          To be explicit: this build currently does not use analytics cookies, does not implement a
+          CSRF token, and sets no Razorpay, PhonePe, or WhatsApp cookies, because those features are
+          not present yet. If they are introduced later, this policy will be updated accordingly.
+        </p>
+
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Managing Stored Data</h2>
+        <p className="text-sm text-muted-foreground">
+          You can clear this site's local storage through your browser settings at any time. Clearing
+          the session signs you out.
         </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Contact</h2>
         <p className="text-sm text-muted-foreground">
-          Questions about cookies? Email{" "}
-          <a href="mailto:privacy@yourinvite.in" className="text-primary underline">privacy@yourinvite.in</a>.
+          A monitored contact address will be published alongside the production release.
         </p>
       </main>
       <Footer />

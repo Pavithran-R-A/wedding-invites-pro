@@ -6,61 +6,56 @@ const PrivacyPolicy = () => {
     <div className="min-h-screen bg-background">
       <Header />
       <main className="container px-4 md:px-6 py-16 max-w-3xl mx-auto prose prose-sm">
-        <h1 className="font-display text-3xl font-bold mb-8">Privacy Policy</h1>
-        <p className="text-muted-foreground mb-6">Last updated: February 2026</p>
+        <h1 className="font-display text-3xl font-bold mb-4">Privacy Policy</h1>
+        <div className="bg-muted border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
+          Provisional policy for an early development-stage product. This is a pre-launch build; the
+          features and data practices described below reflect what this build actually does today and
+          will be updated as the product matures. This is not formal legal advice.
+        </div>
+        <p className="text-muted-foreground mb-6">Last updated: September 2026</p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Data We Collect</h2>
         <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
-          <li>Account information: name, email address, phone number</li>
-          <li>Project data: invite designs, guest lists, RSVP responses</li>
-          <li>Payment information: processed securely via Razorpay — we never store card details</li>
-          <li>Usage data: pages visited, features used, device information</li>
-          <li>Cookies: essential session cookies and optional analytics cookies</li>
+          <li>Account information you provide at sign-up: your name and email address.</li>
+          <li>Invitation drafts you create: project title, chosen language, template, and design settings.</li>
+          <li>An estimated guest count you choose to store as a planning note.</li>
         </ul>
 
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">How We Use Your Data</h2>
-        <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
-          <li>To provide and improve our wedding invitation services</li>
-          <li>To process payments and manage print orders</li>
-          <li>To send transactional emails (order confirmations, RSVP notifications)</li>
-          <li>To ensure platform security and prevent fraud</li>
-        </ul>
-
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Payment Handling</h2>
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">How Your Session Is Stored</h2>
         <p className="text-sm text-muted-foreground">
-          All payments are processed securely through Razorpay, a PCI-DSS compliant payment gateway.
-          We do not store, process, or have access to your full card number, expiry date, or CVV.
-          Only transaction IDs and payment status are stored in our system.
+          When you sign in, your authentication session is stored by Supabase Auth in your browser's
+          local storage. This is a browser storage mechanism, not an HttpOnly server-set session
+          cookie. Clearing your browser storage signs you out.
         </p>
 
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Data Retention</h2>
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Payments</h2>
         <p className="text-sm text-muted-foreground">
-          Your account and project data is retained for 12 months after your last login.
-          Payment records are retained for 7 years as required by Indian tax law.
-          You may request early deletion of your account data at any time.
+          This build does not process payments and does not take, store, or have access to card
+          details, bank information, or any payment credentials. There is currently no checkout.
         </p>
 
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Data Deletion</h2>
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Analytics and Tracking</h2>
         <p className="text-sm text-muted-foreground">
-          To request deletion of your account and all associated data, email us at{" "}
-          <a href="mailto:privacy@yourinvite.in" className="text-primary underline">privacy@yourinvite.in</a>.
-          We will process your request within 30 days and confirm deletion via email.
-          Note: payment records cannot be deleted due to legal requirements.
+          This build does not run advertising or analytics trackers and does not set analytics
+          cookies.
         </p>
 
-        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Your Rights</h2>
-        <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
-          <li>Access your personal data at any time from your dashboard</li>
-          <li>Export your guest lists and project data</li>
-          <li>Request correction of inaccurate information</li>
-          <li>Request deletion of your account</li>
-          <li>Opt out of non-essential cookies</li>
-        </ul>
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Data Retention and Deletion</h2>
+        <p className="text-sm text-muted-foreground">
+          Your account and drafts are retained while your account exists. Automated retention windows
+          and self-service export/deletion are not yet implemented in this build. A support and
+          deletion-request channel will be provided in a later release.
+        </p>
+
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">Access Control</h2>
+        <p className="text-sm text-muted-foreground">
+          Your project and guest data is isolated per account using Supabase row-level security, so
+          other signed-in users cannot read or modify it.
+        </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Contact</h2>
         <p className="text-sm text-muted-foreground">
-          For any privacy-related queries, email{" "}
-          <a href="mailto:privacy@yourinvite.in" className="text-primary underline">privacy@yourinvite.in</a>.
+          A monitored privacy contact will be published alongside the production release.
         </p>
       </main>
       <Footer />

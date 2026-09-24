@@ -1,22 +1,22 @@
 import { motion } from "framer-motion";
-import { Shield, CreditCard, Globe, Heart } from "lucide-react";
+import { Palette, ShieldCheck, Save, Heart } from "lucide-react";
 
 const signals = [
   {
-    icon: Shield,
-    text: "Secure Payments via PhonePe",
+    icon: Palette,
+    text: "Design & preview invites",
   },
   {
-    icon: CreditCard,
-    text: "No Hidden Charges",
+    icon: ShieldCheck,
+    text: "Data protected by row-level security",
   },
   {
-    icon: Globe,
-    text: "5 Languages Supported",
+    icon: Save,
+    text: "Save drafts to your account",
   },
   {
     icon: Heart,
-    text: "Trusted by 1000+ Families",
+    text: "Crafted for South Indian weddings",
   },
 ];
 

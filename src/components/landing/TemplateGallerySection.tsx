@@ -97,10 +97,11 @@ const TemplateGallerySection = () => {
           transition={{ duration: 0.5 }}
         >
           <h2 className="font-display text-3xl md:text-4xl font-bold mb-4">
-            Beautiful Templates
+            Design Inspiration
           </h2>
           <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-            Designs rooted in South Indian tradition, crafted for modern sharing
+            Illustrative concept styles rooted in South Indian tradition. Selectable templates and
+            full customization arrive in a later stage.
           </p>
         </motion.div>
 
@@ -136,12 +137,12 @@ const TemplateGallerySection = () => {
 
                   {/* Date & Venue */}
                   <p className="text-xs text-muted-foreground mt-2 text-center">{template.date}</p>
-                  <p className="text-[10px] text-muted-foreground/70 text-center mt-0.5 max-w-[80%]">{template.venue}</p>
+                  <p className="text-[10px] text-muted-foreground/70 text-center mt-0.5 max-w-[80%]">Sample venue</p>
 
                   {/* Hover CTA overlay */}
                   <div className="absolute inset-0 bg-foreground/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
                     <Button size="sm" className="rounded-xl shadow-lg" asChild>
-                      <Link to="/signup">Customize This</Link>
+                      <Link to="/signup">Get Started</Link>
                     </Button>
                   </div>
                 </div>

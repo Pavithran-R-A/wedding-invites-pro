@@ -1,26 +1,21 @@
 import { motion } from "framer-motion";
-import { Palette, Share2, Users, Printer } from "lucide-react";
+import { Palette, Eye, Save } from "lucide-react";
 
 const steps = [
   {
     icon: Palette,
-    title: "Pick a Template",
-    description: "Choose from beautiful South Indian wedding templates in your language and style.",
+    title: "Start a Draft",
+    description: "Pick an available template and name your invitation to create a working draft.",
   },
   {
-    icon: Share2,
-    title: "Customize & Share",
-    description: "Add your details, preview live, and share instantly via WhatsApp or QR code.",
+    icon: Eye,
+    title: "Preview & Style",
+    description: "Adjust text styling and see a live preview of your invitation.",
   },
   {
-    icon: Users,
-    title: "Manage RSVPs",
-    description: "Track guests, meal preferences, accommodation, and transport — all in real time.",
-  },
-  {
-    icon: Printer,
-    title: "Order Prints",
-    description: "Send your design to partner printers. Choose paper, finish, and quantity.",
+    icon: Save,
+    title: "Save to Your Account",
+    description: "Your draft is saved privately so you can come back and keep editing.",
   },
 ];
 
@@ -39,11 +34,11 @@ const HowItWorksSection = () => {
             How It Works
           </h2>
           <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-            From template to print-ready invite in minutes
+            Design, preview and save your invitation — sharing, RSVP and printing arrive in later stages.
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {steps.map((step, index) => (
             <motion.div
               key={step.title}

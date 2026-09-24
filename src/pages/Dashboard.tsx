@@ -3,37 +3,44 @@ import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Users, CreditCard } from 'lucide-react';
+import { Plus, FileText, Users } from 'lucide-react';
 import Header from '@/components/landing/Header';
+
+interface ProjectRow {
+  id: string;
+  title: string;
+  language: string | null;
+  created_at: string;
+  guest_count: number | null;
+}
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     const fetchProjects = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('projects')
-        .select('*')
+        .select('id, title, language, created_at, guest_count')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
-      setProjects(data || []);
+      if (error) {
+        setLoadError(true);
+      } else {
+        setProjects((data ?? []) as ProjectRow[]);
+      }
       setLoading(false);
     };
     fetchProjects();
   }, [user]);
 
-  const statusColor = (status: string) => {
-    switch (status) {
-      case 'fully_paid': return 'bg-accent text-accent-foreground';
-      case 'base_paid': return 'bg-secondary text-secondary-foreground';
-      default: return 'bg-muted text-muted-foreground';
-    }
-  };
+  const totalGuests = projects.reduce((sum, p) => sum + (p.guest_count ?? 0), 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -49,8 +56,8 @@ const Dashboard = () => {
           </Button>
         </div>
 
-        {/* Quick stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        {/* Quick stats — only metrics backed by this user's real data */}
+        <div className="grid grid-cols-2 gap-4 mb-8">
           <Card>
             <CardContent className="pt-6 text-center">
               <FileText className="w-6 h-6 mx-auto mb-2 text-primary" />
@@ -61,25 +68,19 @@ const Dashboard = () => {
           <Card>
             <CardContent className="pt-6 text-center">
               <Users className="w-6 h-6 mx-auto mb-2 text-accent" />
-              <p className="text-2xl font-bold">0</p>
-              <p className="text-xs text-muted-foreground">Total Guests</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <span className="text-2xl">📨</span>
-              <p className="text-2xl font-bold mt-1">0</p>
-              <p className="text-xs text-muted-foreground">RSVPs</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <CreditCard className="w-6 h-6 mx-auto mb-2 text-secondary" />
-              <p className="text-2xl font-bold">0</p>
-              <p className="text-xs text-muted-foreground">Orders</p>
+              <p className="text-2xl font-bold">{totalGuests}</p>
+              <p className="text-xs text-muted-foreground">Planned Guests</p>
             </CardContent>
           </Card>
         </div>
+
+        {loadError && (
+          <Card className="mb-6 border-destructive/40">
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">We could not load your invitations. Please refresh to try again.</p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Project list */}
         {loading ? (
@@ -112,9 +113,7 @@ const Dashboard = () => {
                         {new Date(project.created_at).toLocaleDateString('en-IN')} · {project.language?.toUpperCase()}
                       </p>
                     </div>
-                    <Badge className={statusColor(project.paid_status)}>
-                      {project.paid_status?.replace('_', ' ')}
-                    </Badge>
+                    <Badge variant="secondary">Draft</Badge>
                   </CardContent>
                 </Card>
               </Link>

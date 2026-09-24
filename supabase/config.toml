@@ -1,4 +1,5 @@
 project_id = "hgvztvaoebeyjnyfarii"
 
-[functions.pricing-quote]
-verify_jwt = false
+# The legacy `pricing-quote` Edge Function (verify_jwt=false, CORS `*`,
+# caller-supplied printer cost/markup, obsolete per-guest model) was retired
+# in Stage 0. Git history preserves it. No active function is configured here.

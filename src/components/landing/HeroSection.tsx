@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { ArrowRight, Users } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 const HeroSection = () => {
   return (
@@ -55,8 +55,8 @@ const HeroSection = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
           >
-            Create, customize, and manage your entire wedding invite experience.
-            Every detail matters. Every guest counts.
+            Design and preview your wedding invitation draft in minutes.
+            Start free — publishing and sharing tools are coming in a later stage.
           </motion.p>
 
           <motion.div
@@ -82,8 +82,7 @@ const HeroSection = () => {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.7 }}
           >
-            <Users className="w-4 h-4 text-secondary" />
-            <span>Trusted by 1,200+ South Indian weddings</span>
+            <span>Create and preview drafts for free — no card required.</span>
           </motion.div>
         </div>
       </div>
