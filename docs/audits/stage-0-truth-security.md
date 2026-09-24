@@ -468,3 +468,15 @@ granted), so a browser request cannot reach an allowlisted role. The local
 harness enforces the same shape by granting those roles only to the superuser.
 This is inherited from the shim assumption already documented in §6 and has not
 been re-proved against a hosted project.
+
+### CI after the repair push
+
+The repair was pushed normally (`9fd7ca8..8210c43`, fast-forward, no force).
+GitHub created run `36063845026` for head `8210c43`; both jobs again finished in
+~2s with 0 steps executed, an empty `runner_name` and "log not found" — the
+same runner-allocation failure recorded in §8, i.e. the account billing
+condition rather than anything in this diff. The annotations API returned
+`404` for this run, so the message text was not re-readable, but the outcome
+signature is identical. CI has therefore **still** not been observed green for
+either commit; it was not repeatedly re-triggered, and every command it would
+run passed locally.
