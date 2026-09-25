@@ -415,6 +415,18 @@ here: it would be a broad refactor of unverified screens, and the brief says not
 premature-optimize. **No Lighthouse run, no field metrics and no Core Web Vitals claim** — none
 was measured.
 
+### Bundle figures are install-state sensitive
+
+A later rebuild reported **2186 modules and 817.68 kB / 248.75 kB gzip** from the *same* source
+tree, a 75 kB swing with an unchanged CSS hash. Root cause was the environment, not the code: an
+unpruned `node_modules` left by earlier install activity resolved extra transitive copies into the
+graph. Deleting `node_modules` and running `npm ci` against the committed lockfile reproduced the
+table above exactly (2178 modules, `index-Ckuecta3.js` 742.51 / 228.56 kB).
+
+The lockfile-clean numbers are therefore the figures of record, and any future comparison must be
+made from `rm -rf node_modules && npm ci` — a build from a drifted install will look like a
+75 kB regression in code that never changed.
+
 ## Test counts
 
 `npm test` → **4 files, 26 tests, all passing.**
@@ -530,35 +542,42 @@ only, and says so on its first line.
 
 ## Commit and push record
 
-Three commits, on `stage1/vivaahvarnam-product-reset` only, from a clean index. Every path was
-staged explicitly by name; `git add .` and `git add -A` were never used.
+Three substantive commits, on `stage1/vivaahvarnam-product-reset` only, from a clean index. Every
+path was staged explicitly by name; `git add .` and `git add -A` were never used.
 
 | Commit | Message | Surface |
 | --- | --- | --- |
 | `31cc947` | `feat: establish VivaahVarnam product identity` | 41 files, +1081 / −1389 |
 | `9054dbf` | `docs: define VivaahVarnam v1 product architecture` | 17 files, +2495 / −37 |
 | `78cc704` | `chore: add scope-aware product contract verification` | 4 files, +356 / −2 |
-| | **Branch total vs `main`** | **62 files, +3932 / −1428** |
+| | **Substantive total vs `main`** | **62 files, +3932 / −1428** |
+
+Two further commits amend this audit record alone — this commit and
+`docs: record Stage 1 commit, push and CI outcome` — adding the CI/push evidence above and the
+install-sensitivity note in the bundle review. Neither touches application code, so the 62-file
+substantive surface above is unchanged by them. The branch tip is the commit that contains this
+file — `git rev-parse HEAD` and `git ls-remote origin` were confirmed identical after the final
+push, and the exact tip SHA is stated in the Stage 1 handoff report rather than here, because a
+document cannot record its own commit hash.
 
 Author identity was supplied per-invocation with `git -c user.name=… -c user.email=…`; no git
 config was created or modified. No history was rewritten, rebased, amended or force-pushed.
 
-Push and remote verification:
+Push and remote verification, at first push `78cc704` and again after each audit-record push:
 
 | Check | Result |
 | --- | --- |
 | `git push -u origin stage1/vivaahvarnam-product-reset` | New remote branch, normal fast-forward push, no `--force` |
-| Local `HEAD` | `78cc7045755ab0e80c946861b4c7365bfef2ad6d` |
-| Remote branch SHA via `git ls-remote` | `78cc7045755ab0e80c946861b4c7365bfef2ad6d` — match |
-| Remote branch SHA via `gh api …/branches/…` | `78cc7045755ab0e80c946861b4c7365bfef2ad6d` — match |
-| `origin/main` after the push | `5fa8db35b97d36c9141137b316e051eb80d80024` — unchanged, not merged into |
+| Local vs remote SHA, `git ls-remote` | identical |
+| Local vs remote SHA, `gh api …/branches/…` | identical |
+| `origin/main` after every push | `5fa8db35b97d36c9141137b316e051eb80d80024` — unchanged, not merged into |
 | Tags on the repository | `0` |
 | Releases on the repository | `0` |
 | Pull request | **Not created** — not requested by this stage |
 
-The remote tree at `78cc704` was enumerated with `gh api …/git/trees/…?recursive=1` (138 blobs) and
-checked path by path. All 23 required paths are present: the product config, the brand lockup, the
-two new landing sections, the rebuilt README, all nine `docs/product/` documents, all five ADRs,
+The remote tree at the pushed SHA was enumerated with `gh api …/git/trees/…?recursive=1` (138 blobs)
+and checked path by path. All 23 required paths are present: the product config, the brand lockup,
+the two new landing sections, the rebuilt README, all nine `docs/product/` documents, all five ADRs,
 the Stage 2 blueprint, this report, and both checker files. All six retired paths are absent:
 `.lovable/plan.md`, `bun.lockb`, `src/App.css`, `public/placeholder.svg`,
 `TemplateGallerySection.tsx`, `src/test/example.test.ts`. `pnpm-lock.yaml` and
@@ -566,14 +585,19 @@ the Stage 2 blueprint, this report, and both checker files. All six retired path
 instructed — and the only `.env`-shaped path in the tree is `.env.example`, which holds
 placeholders.
 
-Re-verification performed **after** the commits, against `HEAD`, not against an earlier working
-state:
+Re-verification performed **after** the final edit, against a lockfile-clean install:
 
 | Check | Result |
 | --- | --- |
+| `rm -rf node_modules && npm ci` | exit 0 |
 | `git diff --check origin/main..HEAD` | exit 0 — no whitespace errors in the pushed range |
-| `npm run product:check` at `HEAD` | 121 active files scanned, 0 violations |
-| `npm test` at `HEAD` | 4 files, 26 tests passed |
+| `npm run lint` | 0 errors, 8 warnings (`react-refresh` in vendored `src/components/ui/**`) |
+| `npm run typecheck` | exit 0 |
+| `npm run product:check` | 121 active files scanned, 0 violations |
+| `npm test` | 4 files, 26 tests passed |
+| `npm run build` | 2178 modules; `index-Ckuecta3.js` 742.51 kB / 228.56 kB gzip — matches the table of record above |
+| `npm audit --omit=dev --audit-level=high` | exit 0 |
+| `npm audit --omit=dev` | 2 moderate (`react-router` / `react-router-dom`); the only fix is a breaking v7 major — recorded, not performed |
 
 After all commits the working tree reports only the two untracked pnpm files, exactly as it did
 before this stage began.
