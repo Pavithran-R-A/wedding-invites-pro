@@ -432,17 +432,31 @@ here: it would be a broad refactor of unverified screens, and the brief says not
 premature-optimize. **No Lighthouse run, no field metrics and no Core Web Vitals claim** — none
 was measured.
 
-### Bundle figures are install-state sensitive
+### Bundle figures are install-state sensitive — mechanism not established
 
-A later rebuild reported **2186 modules and 817.68 kB / 248.75 kB gzip** from the *same* source
-tree, a 75 kB swing with an unchanged CSS hash. Root cause was the environment, not the code: an
-unpruned `node_modules` left by earlier install activity resolved extra transitive copies into the
-graph. Deleting `node_modules` and running `npm ci` against the committed lockfile reproduced the
-table above exactly (2178 modules, `index-Ckuecta3.js` 742.51 / 228.56 kB).
+Two rebuilds later in this stage reported **2186 modules and 817.68 kB / 248.75 kB gzip** from a
+source tree that `git status` confirmed unchanged, with an **identical CSS hash**
+(`index-COzSQz_f.css`, 67.34 / 11.90 kB). Since the CSS hash did not move, the input source really
+was the same; only the JS graph grew, by 8 modules.
 
-The lockfile-clean numbers are therefore the figures of record, and any future comparison must be
-made from `rm -rf node_modules && npm ci` — a build from a drifted install will look like a
-75 kB regression in code that never changed.
+What was tested:
+
+| Hypothesis | Test | Result |
+| --- | --- | --- |
+| The source changed | `git status --porcelain -uall`, `git diff --quiet HEAD`, CSS hash comparison | **Refuted** — tree clean, CSS hash identical |
+| A leftover `node_modules/.vite` dep-optimizer cache from the dev server | Deleted `node_modules`, reinstalled, then started the dev server to recreate the cache (68 entries) and rebuilt | **Refuted** — build still reported 2178 modules |
+| Drifted package resolution inside a long-lived `node_modules` | `rm -rf node_modules && npm ci`, then rebuild | **Reproduced the table above twice** — 2178 modules, `index-Ckuecta3.js` 742.51 / 228.56 kB |
+
+The last row is the only thing that reproduces, so the honest conclusion is that the drifted
+`node_modules` — not the source — carried the difference, but **the precise mechanism was never
+identified**, and the 817.68 kB state is no longer reproducible to investigate further. An earlier
+draft of this section claimed the drift came from "extra transitive copies"; that attribution was
+not supported by evidence and has been removed.
+
+Practical consequence: **the lockfile-clean numbers in the table above are the figures of record**,
+because they are what a fresh machine gets from `npm ci` — including CI. Any future bundle
+comparison must start from `rm -rf node_modules && npm ci`, or an install artefact will read as a
+~75 kB regression in code that never changed.
 
 ## Test counts
 
