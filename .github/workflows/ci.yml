@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   verify:
-    name: Install, lint, typecheck, test, build
+    name: Install, lint, typecheck, product contract, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -36,6 +36,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Product contract
+        run: npm run product:check
 
       - name: Unit tests
         run: npm test
