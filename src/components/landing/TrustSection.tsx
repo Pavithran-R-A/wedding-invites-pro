@@ -1,44 +1,36 @@
-import { motion } from "framer-motion";
 import { Palette, ShieldCheck, Save, Heart } from "lucide-react";
 
 const signals = [
   {
     icon: Palette,
-    text: "Design & preview invites",
+    text: "Create and preview invitation drafts",
   },
   {
     icon: ShieldCheck,
-    text: "Data protected by row-level security",
+    text: "Your drafts are protected by row-level security",
   },
   {
     icon: Save,
-    text: "Save drafts to your account",
+    text: "Saved privately to your account",
   },
   {
     icon: Heart,
-    text: "Crafted for South Indian weddings",
+    text: "Built for South Indian weddings first",
   },
 ];
 
 const TrustSection = () => {
   return (
-    <section className="py-12 border-y border-border/50">
+    <section className="border-y border-line/70 bg-paper py-10">
       <div className="container px-4 md:px-6">
-        <div className="flex flex-wrap items-center justify-center gap-8 md:gap-16">
-          {signals.map((signal, index) => (
-            <motion.div
-              key={signal.text}
-              className="flex items-center gap-2 text-muted-foreground"
-              initial={{ opacity: 0 }}
-              whileInView={{ opacity: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: index * 0.1 }}
-            >
-              <signal.icon className="w-5 h-5 text-secondary" />
+        <ul className="flex flex-wrap items-center justify-center gap-x-12 gap-y-4">
+          {signals.map((signal) => (
+            <li key={signal.text} className="flex items-center gap-2 text-ink-muted">
+              <signal.icon className="h-5 w-5 shrink-0 text-gold" aria-hidden="true" />
               <span className="text-sm font-medium">{signal.text}</span>
-            </motion.div>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </section>
   );

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { BrandLockup } from '@/components/brand/BrandLockup';
 
 const Signup = () => {
   const [name, setName] = useState('');
@@ -40,23 +41,26 @@ const Signup = () => {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <Link to="/" className="font-display text-2xl font-bold text-primary">YourInvite</Link>
-          <h1 className="font-display text-xl mt-4">Create your account</h1>
-          <p className="text-sm text-muted-foreground mt-1">Start creating beautiful wedding invitations</p>
+          <BrandLockup variant="full" to="/" />
+          <h1 className="font-display text-xl mt-6">Create your account</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            An account keeps your invitation drafts private and lets you come
+            back to them. Preview is free — there is nothing to pay yet.
+          </p>
         </div>
 
         <form onSubmit={handleSignup} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Full Name</Label>
-            <Input id="name" value={name} onChange={e => setName(e.target.value)} required placeholder="Your name" />
+            <Input id="name" autoComplete="name" value={name} onChange={e => setName(e.target.value)} required placeholder="Your name" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com" />
+            <Input id="email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" minLength={6} />
+            <Input id="password" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="••••••••" minLength={6} />
           </div>
           <Button type="submit" className="w-full rounded-xl" disabled={loading}>
             {loading ? 'Creating account...' : 'Sign up'}

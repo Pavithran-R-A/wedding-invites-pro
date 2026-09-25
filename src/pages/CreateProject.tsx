@@ -9,7 +9,6 @@ import { useToast } from '@/hooks/use-toast';
 import { LANGUAGES } from '@/lib/i18n';
 import { sanitizeSvg } from '@/lib/sanitizeSvg';
 import Header from '@/components/landing/Header';
-import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 
 interface TemplateOption {
@@ -26,6 +25,7 @@ const CreateProject = () => {
   const [language, setLanguage] = useState('en');
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  const [templatesFailed, setTemplatesFailed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -35,18 +35,18 @@ const CreateProject = () => {
       .eq('active', true)
       .then(({ data, error }) => {
         if (error) {
-          toast({ title: 'Could not load templates', variant: 'destructive' });
+          setTemplatesFailed(true);
           return;
         }
         const rows = (data ?? []) as TemplateOption[];
         setTemplates(rows);
         if (rows.length > 0) setSelectedTemplate(rows[0].id);
       });
-  }, [toast]);
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedTemplate) return;
+    if (!user) return;
     setLoading(true);
 
     const { data, error } = await supabase
@@ -74,64 +74,80 @@ const CreateProject = () => {
     <div className="min-h-screen bg-background">
       <Header />
       <main className="container px-4 md:px-6 py-8 max-w-2xl">
-        <h1 className="font-display text-2xl md:text-3xl font-bold mb-2">Create Your Invitation</h1>
+        <h1 className="font-display text-2xl md:text-3xl font-bold mb-2">Create an Invitation Draft</h1>
         <p className="text-muted-foreground mb-8">
-          Choose a template and name your project to start a free draft. You can edit and preview
-          it anytime. Payment and publishing are not available yet.
+          Give the draft a name your family will recognise, pick the main language
+          and choose a design. The draft is saved privately to your account, and
+          you can change all of it later.
         </p>
 
         <form onSubmit={handleCreate} className="space-y-8">
-          {/* Template selection */}
-          <div>
-            <Label className="text-base font-semibold mb-4 block">Choose a Template</Label>
-            {templates.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No templates are available yet.
+          <fieldset>
+            <legend className="text-base font-semibold mb-1 block">Design direction</legend>
+            <p className="text-sm text-muted-foreground mb-4">
+              These are the designs currently loaded in the preview. They are
+              starting points, not final production templates.
+            </p>
+            {templatesFailed ? (
+              <p className="text-sm text-muted-foreground rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+                The design list could not be loaded right now. You can still
+                create the draft and choose a design later.
+              </p>
+            ) : templates.length === 0 ? (
+              <p className="text-sm text-muted-foreground rounded-lg border border-border bg-muted/40 p-4">
+                No designs are loaded in this preview yet. You can still create
+                the draft and style the text later.
               </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {templates.map(tmpl => (
-                  <motion.div
+                {templates.map((tmpl) => (
+                  <label
                     key={tmpl.id}
-                    whileTap={{ scale: 0.97 }}
-                    onClick={() => setSelectedTemplate(tmpl.id)}
-                    className={`relative cursor-pointer rounded-lg border-2 p-3 transition-all ${
+                    htmlFor={`template-${tmpl.id}`}
+                    className={`relative cursor-pointer rounded-lg border-2 p-3 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 ${
                       selectedTemplate === tmpl.id
                         ? 'border-primary bg-primary/5'
                         : 'border-border hover:border-primary/30'
                     }`}
                   >
+                    <input
+                      id={`template-${tmpl.id}`}
+                      type="radio"
+                      name="template"
+                      value={tmpl.id}
+                      checked={selectedTemplate === tmpl.id}
+                      onChange={() => setSelectedTemplate(tmpl.id)}
+                      className="sr-only"
+                    />
                     {selectedTemplate === tmpl.id && (
-                      <div className="absolute top-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
-                        <Check className="w-3 h-3 text-primary-foreground" />
-                      </div>
+                      <span className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                        <Check className="w-3 h-3" aria-hidden="true" />
+                      </span>
                     )}
-                    <div
-                      className="aspect-[5/7] w-full mb-2 rounded bg-muted flex items-center justify-center overflow-hidden"
+                    <span
+                      className="flex aspect-[5/7] w-full mb-2 rounded bg-muted items-center justify-center overflow-hidden"
                       dangerouslySetInnerHTML={{ __html: sanitizeSvg(tmpl.preview_svg) }}
                     />
-                    <p className="text-xs font-medium text-center truncate">{tmpl.name}</p>
-                  </motion.div>
+                    <span className="block text-xs font-medium text-center truncate">{tmpl.name}</span>
+                  </label>
                 ))}
               </div>
             )}
-          </div>
+          </fieldset>
 
-          {/* Project title */}
           <div className="space-y-2">
-            <Label htmlFor="title">Project Title</Label>
+            <Label htmlFor="title">Invitation name</Label>
             <Input
               id="title"
               value={title}
               onChange={e => setTitle(e.target.value)}
               required
-              placeholder="e.g., Priya & Karthik's Wedding"
+              placeholder="For example: Priya and Karthik's wedding"
             />
           </div>
 
-          {/* Language */}
           <div className="space-y-2">
-            <Label htmlFor="language">Primary Language</Label>
+            <Label htmlFor="language">Main language</Label>
             <select
               id="language"
               value={language}
@@ -144,10 +160,13 @@ const CreateProject = () => {
                 </option>
               ))}
             </select>
+            <p className="text-xs text-muted-foreground">
+              This is the language the invitation is written in, chosen by you.
+            </p>
           </div>
 
-          <Button type="submit" size="lg" className="w-full rounded-xl text-base" disabled={loading || !selectedTemplate}>
-            {loading ? 'Creating...' : 'Create Draft'}
+          <Button type="submit" size="lg" className="w-full rounded-xl text-base" disabled={loading}>
+            {loading ? 'Creating...' : 'Create Invitation Draft'}
           </Button>
         </form>
       </main>

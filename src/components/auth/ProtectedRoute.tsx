@@ -6,8 +6,10 @@ export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground font-display text-xl">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-background" role="status">
+        <p className="animate-pulse text-muted-foreground font-display text-xl">
+          Checking your account…
+        </p>
       </div>
     );
   }

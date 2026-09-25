@@ -1,5 +1,6 @@
 import Header from "@/components/landing/Header";
 import Footer from "@/components/landing/Footer";
+import { PRODUCT } from "@/config/product";
 
 const PrivacyPolicy = () => {
   return (
@@ -8,7 +9,8 @@ const PrivacyPolicy = () => {
       <main className="container px-4 md:px-6 py-16 max-w-3xl mx-auto prose prose-sm">
         <h1 className="font-display text-3xl font-bold mb-4">Privacy Policy</h1>
         <div className="bg-muted border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
-          Provisional policy for an early development-stage product. This is a pre-launch build; the
+          Provisional policy for {PRODUCT.name}, an early development-stage product. This is a
+          pre-launch build; the
           features and data practices described below reflect what this build actually does today and
           will be updated as the product matures. This is not formal legal advice.
         </div>
@@ -17,7 +19,7 @@ const PrivacyPolicy = () => {
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Data We Collect</h2>
         <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
           <li>Account information you provide at sign-up: your name and email address.</li>
-          <li>Invitation drafts you create: project title, chosen language, template, and design settings.</li>
+          <li>Invitation drafts you create: the draft name, chosen language, selected design, and styling settings.</li>
           <li>An estimated guest count you choose to store as a planning note.</li>
         </ul>
 

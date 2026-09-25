@@ -1,5 +1,6 @@
 import Header from "@/components/landing/Header";
 import Footer from "@/components/landing/Footer";
+import { PRODUCT } from "@/config/product";
 
 const CookiePolicy = () => {
   return (
@@ -8,7 +9,7 @@ const CookiePolicy = () => {
       <main className="container px-4 md:px-6 py-16 max-w-3xl mx-auto prose prose-sm">
         <h1 className="font-display text-3xl font-bold mb-4">Cookie &amp; Storage Policy</h1>
         <div className="bg-muted border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
-          Provisional policy for an early development-stage product. This describes what this build
+          Provisional policy for {PRODUCT.name}, an early development-stage product. This describes what this build
           actually stores in your browser today.
         </div>
         <p className="text-muted-foreground mb-6">Last updated: September 2026</p>

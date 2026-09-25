@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { BrandLockup } from '@/components/brand/BrandLockup';
 
 const ResetPassword = () => {
   const [email, setEmail] = useState('');
@@ -52,17 +53,22 @@ const ResetPassword = () => {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <Link to="/" className="font-display text-2xl font-bold text-primary">YourInvite</Link>
-          <h1 className="font-display text-xl mt-4">
+          <BrandLockup variant="full" to="/" />
+          <h1 className="font-display text-xl mt-6">
             {isRecovery ? 'Set New Password' : 'Reset Password'}
           </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {isRecovery
+              ? 'Choose a new password for your account.'
+              : 'We email you a link to set a new password.'}
+          </p>
         </div>
 
         {isRecovery ? (
           <form onSubmit={handleUpdatePassword} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="newPassword">New Password</Label>
-              <Input id="newPassword" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" minLength={6} />
+              <Input id="newPassword" type="password" autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required placeholder="••••••••" minLength={6} />
             </div>
             <Button type="submit" className="w-full rounded-xl" disabled={loading}>
               {loading ? 'Updating...' : 'Update Password'}
@@ -72,7 +78,7 @@ const ResetPassword = () => {
           <form onSubmit={handleRequestReset} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com" />
+              <Input id="email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@example.com" />
             </div>
             <Button type="submit" className="w-full rounded-xl" disabled={loading}>
               {loading ? 'Sending...' : 'Send Reset Link'}

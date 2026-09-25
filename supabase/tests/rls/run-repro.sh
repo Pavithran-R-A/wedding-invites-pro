@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."   # -> repo root
 
 IMAGE="${PG_IMAGE:-postgres:16-alpine}"
-CTR="yourinvite-repro-$$"
+CTR="vivaahvarnam-repro-$$"
 REPAIR="stage0_protect_project_paid_state"
 
 cleanup() { docker rm -f "$CTR" >/dev/null 2>&1 || true; }

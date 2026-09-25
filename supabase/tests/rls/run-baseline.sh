@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."   # -> repo root
 
 IMAGE="${PG_IMAGE:-postgres:16-alpine}"
-CTR="yourinvite-baseline-$$"
+CTR="vivaahvarnam-baseline-$$"
 cleanup() { docker rm -f "$CTR" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 

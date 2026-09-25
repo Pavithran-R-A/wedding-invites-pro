@@ -1,48 +1,60 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600;700&family=Noto+Sans+Malayalam:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 25 100% 97%;
-    --foreground: 20 15% 15%;
+    /* ------------------------------------------------------------------
+     * VivaahVarnam identity primitives.
+     * HSL channels only; consume them through Tailwind utilities
+     * (bg-paper, text-ink-muted, border-gold …) rather than hex literals.
+     * ------------------------------------------------------------------ */
+    --paper: 25 100% 97%;        /* warm off-white page ground */
+    --surface: 33 69% 96%;       /* raised panel */
+    --surface-strong: 33 30% 92%;
+    --line: 33 25% 85%;
 
-    --card: 33 69% 96%;
-    --card-foreground: 20 15% 15%;
+    --ink: 20 15% 15%;           /* body text */
+    --ink-muted: 20 10% 42%;
 
-    --popover: 25 100% 97%;
-    --popover-foreground: 20 15% 15%;
+    --ceremonial: 349 56% 27%;   /* maroon — ceremonial accent */
+    --gold: 38 64% 49%;          /* warm gold foil accent */
+    --green: 156 56% 28%;        /* deep green */
 
-    --primary: 349 56% 27%;
-    --primary-foreground: 25 100% 97%;
+    --success: 156 45% 27%;
+    --warning: 32 78% 40%;
+    --danger: 0 72% 40%;
 
-    --secondary: 38 64% 49%;
-    --secondary-foreground: 20 15% 15%;
+    /* Script-safe stacks: Latin first, then one Noto face per supported
+     * Indic script, then a generic family. Headings inherit the same
+     * Indic fallbacks so non-Latin text is never left to a serif default. */
+    --font-body: "DM Sans", "Noto Sans Tamil", "Noto Sans Telugu",
+      "Noto Sans Kannada", "Noto Sans Malayalam", system-ui, sans-serif;
+    --font-display: "Playfair Display", "DM Sans", "Noto Sans Tamil",
+      "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Malayalam", serif;
 
-    --muted: 33 30% 92%;
-    --muted-foreground: 20 10% 45%;
-
-    --accent: 156 56% 28%;
-    --accent-foreground: 25 100% 97%;
-
-    --destructive: 0 84% 60%;
+    /* shadcn/Radix UI aliases mapped onto the identity tokens. */
+    --background: var(--paper);
+    --foreground: var(--ink);
+    --card: var(--surface);
+    --card-foreground: var(--ink);
+    --popover: var(--paper);
+    --popover-foreground: var(--ink);
+    --primary: var(--ceremonial);
+    --primary-foreground: var(--paper);
+    --secondary: var(--gold);
+    --secondary-foreground: var(--ink);
+    --muted: var(--surface-strong);
+    --muted-foreground: var(--ink-muted);
+    --accent: var(--green);
+    --accent-foreground: var(--paper);
+    --destructive: var(--danger);
     --destructive-foreground: 0 0% 100%;
-
-    --border: 33 25% 85%;
-    --input: 33 25% 85%;
-    --ring: 349 56% 27%;
+    --border: var(--line);
+    --input: var(--line);
+    --ring: var(--ceremonial);
 
     --radius: 0.625rem;
-
-    --gold: 38 64% 49%;
-    --gold-foreground: 20 15% 15%;
-    --green: 156 56% 28%;
-    --green-foreground: 25 100% 97%;
-    --maroon: 349 56% 27%;
-    --maroon-foreground: 25 100% 97%;
-    --cream: 33 69% 96%;
 
     --sidebar-background: 33 69% 96%;
     --sidebar-foreground: 20 15% 15%;
@@ -54,33 +66,28 @@
     --sidebar-ring: 349 56% 27%;
   }
 
+  /* Not reachable from the current UI (no theme switch), kept coherent by
+   * overriding the primitives so every alias follows. */
   .dark {
-    --background: 20 15% 10%;
-    --foreground: 30 30% 92%;
+    --paper: 20 15% 10%;
+    --surface: 20 15% 13%;
+    --surface-strong: 20 12% 20%;
+    --line: 20 12% 22%;
 
-    --card: 20 15% 13%;
-    --card-foreground: 30 30% 92%;
+    --ink: 30 30% 92%;
+    --ink-muted: 30 15% 65%;
 
-    --popover: 20 15% 13%;
-    --popover-foreground: 30 30% 92%;
+    --ceremonial: 42 55% 58%;
+    --gold: 42 55% 58%;
+    --green: 110 40% 45%;
 
-    --primary: 42 55% 58%;
+    --success: 110 40% 45%;
+    --warning: 38 85% 55%;
+    --danger: 0 62% 55%;
+
+    --destructive-foreground: 20 15% 10%;
     --primary-foreground: 20 15% 10%;
-
-    --secondary: 340 60% 35%;
-    --secondary-foreground: 30 30% 92%;
-
-    --muted: 20 12% 20%;
-    --muted-foreground: 30 15% 60%;
-
-    --accent: 110 40% 30%;
-    --accent-foreground: 30 30% 92%;
-
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 30 30% 92%;
-
-    --border: 20 12% 22%;
-    --input: 20 12% 22%;
+    --accent-foreground: 20 15% 10%;
     --ring: 42 55% 58%;
 
     --sidebar-background: 20 15% 10%;
@@ -99,11 +106,43 @@
     @apply border-border;
   }
 
-  body {
-    @apply bg-background text-foreground font-sans;
+  html {
+    /* Honour browser text zoom and keep anchor jumps clear of the sticky header. */
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 5rem;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    font-family: 'Playfair Display', serif;
+  body {
+    @apply bg-background text-foreground font-sans;
+    /* Elder-readable floor: 16px body copy with generous leading. */
+    font-size: 1rem;
+    line-height: 1.65;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

@@ -1,7 +1,8 @@
 import Header from "@/components/landing/Header";
 import HeroSection from "@/components/landing/HeroSection";
+import ProductStorySection from "@/components/landing/ProductStorySection";
 import HowItWorksSection from "@/components/landing/HowItWorksSection";
-import TemplateGallerySection from "@/components/landing/TemplateGallerySection";
+import DesignDirectionSection from "@/components/landing/DesignDirectionSection";
 import TrustSection from "@/components/landing/TrustSection";
 import Footer from "@/components/landing/Footer";
 import CookieConsent from "@/components/landing/CookieConsent";
@@ -13,12 +14,9 @@ const Index = () => {
       <main>
         <HeroSection />
         <TrustSection />
-        <section id="how-it-works">
-          <HowItWorksSection />
-        </section>
-        <section id="templates">
-          <TemplateGallerySection />
-        </section>
+        <ProductStorySection />
+        <HowItWorksSection />
+        <DesignDirectionSection />
       </main>
       <Footer />
       <CookieConsent />

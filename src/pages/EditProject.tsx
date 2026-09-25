@@ -61,11 +61,19 @@ const FONT_FAMILIES = [
   'Noto Sans Malayalam',
 ];
 
+const ALIGNMENTS = ['left', 'center', 'right'] as const;
+
 const templateSvgOf = (project: ProjectRow | null): string | null => {
   if (!project?.templates) return null;
   const t = Array.isArray(project.templates) ? project.templates[0] : project.templates;
   return t?.preview_svg ?? null;
 };
+
+const FieldLabel = ({ id, children }: { id: string; children: React.ReactNode }) => (
+  <p id={id} className="text-xs font-medium text-foreground">
+    {children}
+  </p>
+);
 
 const EditProject = () => {
   const { id } = useParams<{ id: string }>();
@@ -109,7 +117,7 @@ const EditProject = () => {
     if (error) {
       toast({ title: 'Could not save your design', variant: 'destructive' });
     } else {
-      toast({ title: 'Saved', description: 'Your design settings were saved.' });
+      toast({ title: 'Saved', description: 'Your styling choices were saved with this draft.' });
     }
   };
 
@@ -117,9 +125,9 @@ const EditProject = () => {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container py-16 text-center">
-          <div className="animate-pulse text-muted-foreground">Loading editor...</div>
-        </div>
+        <main className="container py-16 text-center" role="status">
+          <p className="animate-pulse text-muted-foreground">Loading design preview…</p>
+        </main>
       </div>
     );
   }
@@ -128,21 +136,20 @@ const EditProject = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Editor top bar */}
-      <div className="sticky top-0 z-40 bg-card border-b border-border px-4 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" asChild>
-            <Link to={`/project/${id}/configure`}><ArrowLeft className="w-4 h-4" /></Link>
+      <h1 className="sr-only">Design preview for {project.title}</h1>
+
+      {/* Preview top bar */}
+      <div className="sticky top-0 z-40 bg-card border-b border-border px-4 h-14 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Button variant="ghost" size="icon" asChild aria-label="Back to invitation draft">
+            <Link to={`/project/${id}/configure`}><ArrowLeft className="w-4 h-4" aria-hidden="true" /></Link>
           </Button>
-          <span className="font-display font-semibold text-sm truncate max-w-[200px]">{project.title}</span>
+          <span className="font-display font-semibold text-sm truncate">{project.title}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button variant="outline" size="sm" className="rounded-lg" onClick={handleSave} disabled={saving}>
-            <Save className="w-3.5 h-3.5 mr-1.5" />
-            {saving ? 'Saving...' : 'Save'}
-          </Button>
-          <Button size="sm" className="rounded-lg" variant="ghost" asChild>
-            <Link to={`/project/${id}/configure`}>Back to configure</Link>
+            <Save className="w-3.5 h-3.5 mr-1.5" aria-hidden="true" />
+            {saving ? 'Saving...' : 'Save Draft'}
           </Button>
         </div>
       </div>
@@ -150,8 +157,8 @@ const EditProject = () => {
       <div className="flex-1 flex flex-col md:flex-row">
         {/* Canvas area */}
         <div className="flex-1 flex items-center justify-center p-4 md:p-8 bg-muted/30 relative">
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-            <span className="text-6xl font-display font-bold text-foreground/5 rotate-[-30deg] select-none">
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10" aria-hidden="true">
+            <span className="text-4xl md:text-6xl font-display font-bold text-foreground/5 rotate-[-30deg] select-none">
               PREVIEW
             </span>
           </div>
@@ -163,7 +170,7 @@ const EditProject = () => {
             transition={{ duration: 0.3 }}
           >
             {editor.foilEnabled && (
-              <div className="absolute inset-0 bg-gradient-to-br from-secondary/10 via-transparent to-secondary/20 pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-br from-secondary/10 via-transparent to-secondary/20 pointer-events-none" aria-hidden="true" />
             )}
 
             {previewSvg ? (
@@ -171,7 +178,7 @@ const EditProject = () => {
             ) : (
               <div className="text-center space-y-4">
                 <p
-                  className="font-display text-2xl"
+                  className="font-display text-2xl break-words"
                   style={{
                     fontFamily: editor.font,
                     fontSize: `${editor.fontSize}px`,
@@ -182,21 +189,21 @@ const EditProject = () => {
                   {project.title}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Sample preview. Your styling choices are saved with this draft.
+                  Sample preview text. Your styling choices are saved with this draft.
                 </p>
               </div>
             )}
           </motion.div>
         </div>
 
-        {/* Right property panel */}
-        <div className="md:w-72 bg-card border-l border-border p-4 space-y-5 overflow-y-auto max-h-[calc(100vh-3.5rem)]">
-          <h3 className="font-display font-semibold text-sm">Text Styling</h3>
+        {/* Styling panel */}
+        <aside className="md:w-72 bg-card border-l border-border p-4 space-y-5 overflow-y-auto md:max-h-[calc(100vh-3.5rem)]">
+          <h2 className="font-display font-semibold text-sm">Invitation styling</h2>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Font Family</Label>
+            <FieldLabel id="font-label">Font</FieldLabel>
             <Select value={editor.font} onValueChange={v => setEditor(e => ({ ...e, font: v }))}>
-              <SelectTrigger className="h-9 text-xs">
+              <SelectTrigger className="h-9 text-xs" aria-labelledby="font-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -210,8 +217,9 @@ const EditProject = () => {
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Font Size</Label>
+            <Label htmlFor="font-size">Font size (px)</Label>
             <Input
+              id="font-size"
               type="number"
               min={8}
               max={120}
@@ -222,17 +230,19 @@ const EditProject = () => {
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Color</Label>
-            <div className="flex gap-1.5 flex-wrap">
+            <FieldLabel id="colour-label">Colour</FieldLabel>
+            <div className="flex gap-2 flex-wrap" role="group" aria-labelledby="colour-label">
               {PRESET_COLORS.map(c => (
                 <button
                   key={c.value}
+                  type="button"
                   onClick={() => setEditor(p => ({ ...p, color: c.value }))}
-                  className={`w-7 h-7 rounded-full border-2 transition-all ${
+                  aria-label={`Use ${c.name}`}
+                  aria-pressed={editor.color === c.value}
+                  className={`h-9 w-9 rounded-full border-2 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                     editor.color === c.value ? 'border-primary scale-110' : 'border-border'
                   }`}
                   style={{ backgroundColor: c.value }}
-                  title={c.name}
                 />
               ))}
             </div>
@@ -240,18 +250,22 @@ const EditProject = () => {
               type="color"
               value={editor.color}
               onChange={e => setEditor(p => ({ ...p, color: e.target.value }))}
-              className="h-8 w-full cursor-pointer"
+              aria-label="Custom colour"
+              className="h-9 w-full cursor-pointer"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Alignment</Label>
-            <div className="flex gap-1">
-              {(['left', 'center', 'right'] as const).map(a => (
+            <FieldLabel id="alignment-label">Alignment</FieldLabel>
+            <div className="flex gap-1" role="group" aria-labelledby="alignment-label">
+              {ALIGNMENTS.map(a => (
                 <button
                   key={a}
+                  type="button"
                   onClick={() => setEditor(p => ({ ...p, alignment: a }))}
-                  className={`flex-1 py-1.5 text-xs border rounded transition-colors capitalize ${
+                  aria-label={`Align text ${a}`}
+                  aria-pressed={editor.alignment === a}
+                  className={`flex-1 py-2 text-xs border rounded transition-colors capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
                     editor.alignment === a ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground'
                   }`}
                 >
@@ -263,28 +277,22 @@ const EditProject = () => {
 
           <Separator />
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-              editor.foilEnabled ? 'bg-secondary border-secondary' : 'border-muted-foreground/30'
-            }`}>
-              {editor.foilEnabled && (
-                <svg className="w-3 h-3 text-secondary-foreground" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M2 6l3 3 5-5" />
-                </svg>
-              )}
-            </div>
+          <label className="flex items-start gap-2 cursor-pointer">
             <input
               type="checkbox"
-              className="sr-only"
+              className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
               checked={editor.foilEnabled}
               onChange={e => setEditor(p => ({ ...p, foilEnabled: e.target.checked }))}
             />
-            <div>
-              <span className="text-xs font-medium">Foil Effect (simulated)</span>
-              <p className="text-[10px] text-muted-foreground">Preview-only overlay; not a real print finish yet.</p>
-            </div>
+            <span>
+              <span className="text-xs font-medium">Foil effect (simulated)</span>
+              <span className="block text-[11px] leading-snug text-muted-foreground">
+                A screen-only overlay so you can imagine the finish. It is not a
+                print effect and nothing prints from this preview.
+              </span>
+            </span>
           </label>
-        </div>
+        </aside>
       </div>
     </div>
   );

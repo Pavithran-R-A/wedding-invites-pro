@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../../.."   # -> repo root
 ROOT="$PWD"
 
 IMAGE="${PG_IMAGE:-postgres:16-alpine}"
-CTR="yourinvite-rls-$$"
+CTR="vivaahvarnam-rls-$$"
 
 cleanup() { docker rm -f "$CTR" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

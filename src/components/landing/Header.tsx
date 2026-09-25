@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { BrandLockup } from "@/components/brand/BrandLockup";
 import { useAuth } from "@/components/auth/AuthProvider";
+
+const landingNavItems = [
+  { label: "Design directions", href: "#design-directions" },
+  { label: "How it works", href: "#how-it-works" },
+];
 
 const Header = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -11,40 +17,43 @@ const Header = () => {
   const location = useLocation();
   const isLanding = location.pathname === "/";
 
-  const navItems = isLanding
-    ? [
-        { label: "Templates", href: "#templates" },
-        { label: "How It Works", href: "#how-it-works" },
-      ]
-    : [];
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileOpen]);
 
   return (
-    <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-lg border-b border-border/50">
-      <div className="container px-4 md:px-6 h-16 flex items-center justify-between">
-        <Link to={user ? "/dashboard" : "/"} className="font-display text-xl font-bold text-primary">
-          YourInvite
-        </Link>
+    <header className="sticky top-0 z-40 border-b border-line/60 bg-paper/85 backdrop-blur-lg">
+      <div className="container flex h-16 items-center justify-between gap-4 px-4 md:px-6">
+        <BrandLockup to={user ? "/dashboard" : "/"} className="h-full items-center" />
 
-        {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-8">
-          {navItems.map((item) => (
-            <a
-              key={item.label}
-              href={item.href}
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
+        {isLanding && (
+          <nav className="hidden md:flex items-center gap-8" aria-label="Landing page sections">
+            {landingNavItems.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                className="text-sm font-medium text-ink-muted transition-colors hover:text-ink"
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+        )}
 
         <div className="hidden md:flex items-center gap-3">
           {user ? (
             <>
               <Button variant="ghost" size="sm" asChild>
-                <Link to="/dashboard">Dashboard</Link>
+                <Link to="/dashboard">My invitations</Link>
               </Button>
-              <Button variant="outline" size="sm" onClick={signOut}>Log out</Button>
+              <Button variant="outline" size="sm" onClick={signOut}>
+                Log out
+              </Button>
             </>
           ) : (
             <>
@@ -52,57 +61,74 @@ const Header = () => {
                 <Link to="/login">Log in</Link>
               </Button>
               <Button size="sm" className="rounded-lg" asChild>
-                <Link to="/signup">Get Started</Link>
+                <Link to="/signup">Create an Invitation</Link>
               </Button>
             </>
           )}
         </div>
 
-        {/* Mobile toggle */}
         <button
-          className="md:hidden text-foreground"
-          onClick={() => setMobileOpen(!mobileOpen)}
-          aria-label="Toggle menu"
+          type="button"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-ink md:hidden"
+          onClick={() => setMobileOpen((open) => !open)}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+          aria-controls="mobile-menu"
         >
-          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
       </div>
 
-      {/* Mobile menu */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
+            id="mobile-menu"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="md:hidden border-t border-border/50 bg-background overflow-hidden"
+            className="overflow-hidden border-t border-line/60 bg-paper md:hidden"
           >
-            <div className="container px-4 py-4 flex flex-col gap-4">
-              {navItems.map((item) => (
-                <a
-                  key={item.label}
-                  href={item.href}
-                  className="text-sm font-medium text-muted-foreground hover:text-foreground py-2"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  {item.label}
-                </a>
-              ))}
+            <div className="container flex flex-col gap-4 px-4 py-4">
+              {isLanding &&
+                landingNavItems.map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    className="flex min-h-11 items-center text-sm font-medium text-ink-muted hover:text-ink"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    {item.label}
+                  </a>
+                ))}
               <div className="flex gap-3 pt-2">
                 {user ? (
                   <>
-                    <Button variant="outline" size="sm" className="flex-1" asChild>
-                      <Link to="/dashboard" onClick={() => setMobileOpen(false)}>Dashboard</Link>
+                    <Button variant="outline" className="min-h-11 flex-1" asChild>
+                      <Link to="/dashboard" onClick={() => setMobileOpen(false)}>
+                        My invitations
+                      </Link>
                     </Button>
-                    <Button size="sm" className="flex-1" onClick={() => { signOut(); setMobileOpen(false); }}>Log out</Button>
+                    <Button
+                      className="min-h-11 flex-1"
+                      onClick={() => {
+                        signOut();
+                        setMobileOpen(false);
+                      }}
+                    >
+                      Log out
+                    </Button>
                   </>
                 ) : (
                   <>
-                    <Button variant="outline" size="sm" className="flex-1" asChild>
-                      <Link to="/login" onClick={() => setMobileOpen(false)}>Log in</Link>
+                    <Button variant="outline" className="min-h-11 flex-1" asChild>
+                      <Link to="/login" onClick={() => setMobileOpen(false)}>
+                        Log in
+                      </Link>
                     </Button>
-                    <Button size="sm" className="flex-1" asChild>
-                      <Link to="/signup" onClick={() => setMobileOpen(false)}>Get Started</Link>
+                    <Button className="min-h-11 flex-1" asChild>
+                      <Link to="/signup" onClick={() => setMobileOpen(false)}>
+                        Create an Invitation
+                      </Link>
                     </Button>
                   </>
                 )}

@@ -1,5 +1,6 @@
 import Header from "@/components/landing/Header";
 import Footer from "@/components/landing/Footer";
+import { PRODUCT } from "@/config/product";
 
 const TermsOfService = () => {
   return (
@@ -10,18 +11,18 @@ const TermsOfService = () => {
         <div className="bg-muted border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
           Provisional terms for an early development-stage product. This build is provided to let you
           create and preview invitation drafts. It is not a commercial service yet and this is not
-          formal legal advice.
+          formal legal advice. The name {PRODUCT.name} is a working name and may change.
         </div>
         <p className="text-muted-foreground mb-6">Last updated: September 2026</p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Acceptance of Terms</h2>
         <p className="text-sm text-muted-foreground">
-          By using YourInvite, you agree to these terms. If you do not agree, please do not use it.
+          By using {PRODUCT.name}, you agree to these terms. If you do not agree, please do not use it.
         </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Current Scope of the Service</h2>
         <p className="text-sm text-muted-foreground">
-          Today YourInvite lets you create, style and privately save wedding invitation drafts. It
+          Today {PRODUCT.name} lets you create, style and privately save wedding invitation drafts. It
           does not yet provide paid plans, checkout, publishing, public invitation pages, guest RSVP
           collection, or print ordering. These terms deliberately avoid making promises about those
           features until they actually exist.
@@ -43,7 +44,7 @@ const TermsOfService = () => {
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Intellectual Property</h2>
         <p className="text-sm text-muted-foreground">
-          Templates, motifs and design assets made available within the platform are licensed for use
+          Design assets made available within the platform are licensed for use
           in your invitations on this platform only; you may not redistribute or resell them.
         </p>
 

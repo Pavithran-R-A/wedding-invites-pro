@@ -1,63 +1,94 @@
-import { motion } from "framer-motion";
-import { Palette, Eye, Save } from "lucide-react";
+import { Check, CircleDashed } from "lucide-react";
+import { PRODUCT } from "@/config/product";
 
-const steps = [
-  {
-    icon: Palette,
-    title: "Start a Draft",
-    description: "Pick an available template and name your invitation to create a working draft.",
-  },
-  {
-    icon: Eye,
-    title: "Preview & Style",
-    description: "Adjust text styling and see a live preview of your invitation.",
-  },
-  {
-    icon: Save,
-    title: "Save to Your Account",
-    description: "Your draft is saved privately so you can come back and keep editing.",
-  },
+const targetFlow = [
+  "Create an account and start an invitation",
+  "Choose a design direction and the languages the family will read",
+  "Enter the couple, the families inviting, and each function with its time and place",
+  "Review the invitation as a patrika-style preview, with family approval on the exact version",
+  "Publish one link, and share it with each guest household",
+  "Guests open it on their phone, see only what they are invited to, and reply",
+];
+
+const availableToday = [
+  "Account creation, sign-in and password reset",
+  "Invitation drafts saved privately to your account",
+  "Design direction and language selection when starting a draft",
+  "A planning guest count that stays on your own draft",
+  "Invitation styling preview: font, size, colour, alignment and a simulated foil overlay",
+];
+
+const plannedForV1 = [
+  "Structured wedding, family and event details",
+  "Family approval tied to a specific invitation version",
+  "Personalised guest links and household scoping",
+  "RSVP replies and an export of the guest list",
+  "Shareable link, QR code and PDF output",
+  "Payment and publishing",
 ];
 
 const HowItWorksSection = () => {
   return (
-    <section className="py-20 md:py-28 bg-muted/30">
+    <section id="how-it-works" className="py-20 md:py-28">
       <div className="container px-4 md:px-6">
-        <motion.div
-          className="text-center mb-16"
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5 }}
-        >
-          <h2 className="font-display text-3xl md:text-4xl font-bold mb-4">
-            How It Works
+        <div className="mx-auto mb-14 max-w-2xl text-center">
+          <h2 className="mb-4 font-display text-3xl font-bold text-ink md:text-4xl">
+            How {PRODUCT.name} is intended to work
           </h2>
-          <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-            Design, preview and save your invitation — sharing, RSVP and printing arrive in later stages.
+          <p className="text-lg leading-relaxed text-ink-muted">
+            The target flow below is what we are building towards. Only the
+            items in &ldquo;Available in this preview&rdquo; exist today.
           </p>
-        </motion.div>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {steps.map((step, index) => (
-            <motion.div
-              key={step.title}
-              className="relative text-center"
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
+        <ol className="mx-auto mb-14 grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {targetFlow.map((step, index) => (
+            <li
+              key={step}
+              className="rounded-xl border border-line/70 bg-surface p-5"
             >
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 text-primary mb-5">
-                <step.icon className="w-7 h-7" />
-              </div>
-              <div className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-secondary/20 text-secondary-foreground text-sm font-bold flex items-center justify-center">
+              <span className="mb-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-gold/20 text-sm font-bold text-ceremonial">
                 {index + 1}
-              </div>
-              <h3 className="font-display text-xl font-semibold mb-2">{step.title}</h3>
-              <p className="text-muted-foreground text-sm leading-relaxed">{step.description}</p>
-            </motion.div>
+              </span>
+              <p className="text-sm leading-relaxed text-ink">{step}</p>
+            </li>
           ))}
+        </ol>
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="rounded-2xl border border-success/40 bg-surface p-6 md:p-8">
+            <h3 className="mb-1 font-display text-xl font-semibold text-ink">
+              Available in this preview
+            </h3>
+            <p className="mb-5 text-sm text-ink-muted">
+              What you can actually do on this site right now.
+            </p>
+            <ul className="space-y-3">
+              {availableToday.map((item) => (
+                <li key={item} className="flex gap-3 text-sm leading-relaxed text-ink">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-line bg-paper p-6 md:p-8">
+            <h3 className="mb-1 font-display text-xl font-semibold text-ink">
+              Planned for V1
+            </h3>
+            <p className="mb-5 text-sm text-ink-muted">
+              Not built yet. No date to promise you.
+            </p>
+            <ul className="space-y-3">
+              {plannedForV1.map((item) => (
+                <li key={item} className="flex gap-3 text-sm leading-relaxed text-ink-muted">
+                  <CircleDashed className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
     </section>

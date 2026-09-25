@@ -36,10 +36,10 @@ const CookieConsent = () => {
               This site does not use advertising or analytics cookies.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Button size="sm" onClick={dismiss} className="rounded-lg">
+              <Button size="sm" onClick={dismiss} className="min-h-11 rounded-lg">
                 Got it
               </Button>
-              <Button size="sm" variant="outline" className="rounded-lg" asChild>
+              <Button size="sm" variant="outline" className="min-h-11 rounded-lg" asChild>
                 <Link to="/cookie-policy">Read cookie policy</Link>
               </Button>
             </div>
