@@ -353,6 +353,23 @@ version of the probe ignored alpha and derived backgrounds from `parentElement`,
 four false failures and would have missed real ones; it was rewritten before any conclusion was
 drawn. Final run: 92 text nodes on the landing page, **0 failures**.
 
+### Console
+
+Re-checked on the final tree (dev server, clean install) after the last commit:
+
+- `/` — **0 errors**, 2 warnings: React Router `v7_startTransition` and `v7_relativeSplatPath`
+  future-flag advisories.
+- `/login` — **0 errors**, the same 2 warnings. The autocomplete usability warning found earlier in
+  this stage is gone, confirming defect 4 stayed fixed.
+- unknown route — **1 error**: the deliberate
+  `console.error("404 Error: attempted to access non-existent route:", location.pathname)` in
+  `src/pages/NotFound.tsx`. This call exists at `origin/main` (line 8 there, line 10 here, wording
+  adjusted to drop "User"); it is a pre-existing route diagnostic, **not** a Stage 1 error.
+
+**No new console errors were introduced by Stage 1.** The 2 router advisories are framework
+forward-compatibility notices from the pre-existing v6 router configuration; silencing them means
+opting into v7 flags, which is a Stage 2+ dependency decision, not a documentation-stage change.
+
 ## Mobile QA
 
 Widths 360×740 and 390×844, `deviceScaleFactor: 3`, `isMobile`, `hasTouch` — real viewport
@@ -552,13 +569,13 @@ path was staged explicitly by name; `git add .` and `git add -A` were never used
 | `78cc704` | `chore: add scope-aware product contract verification` | 4 files, +356 / −2 |
 | | **Substantive total vs `main`** | **62 files, +3932 / −1428** |
 
-Two further commits amend this audit record alone — this commit and
-`docs: record Stage 1 commit, push and CI outcome` — adding the CI/push evidence above and the
-install-sensitivity note in the bundle review. Neither touches application code, so the 62-file
-substantive surface above is unchanged by them. The branch tip is the commit that contains this
-file — `git rev-parse HEAD` and `git ls-remote origin` were confirmed identical after the final
-push, and the exact tip SHA is stated in the Stage 1 handoff report rather than here, because a
-document cannot record its own commit hash.
+Further commits after `78cc704` amend this audit record alone — the CI and push evidence above, the
+install-sensitivity note in the bundle review, and the console result in the browser QA section.
+None of them touches application code, so the 62-file substantive surface above is unchanged by
+them. The branch tip is the commit that contains this file — `git rev-parse HEAD` and
+`git ls-remote origin` were confirmed identical after the final push, and the exact tip SHA is
+stated in the Stage 1 handoff report rather than here, because a document cannot record its own
+commit hash.
 
 Author identity was supplied per-invocation with `git -c user.name=… -c user.email=…`; no git
 config was created or modified. No history was rewritten, rebased, amended or force-pushed.
