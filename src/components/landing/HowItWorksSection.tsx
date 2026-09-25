@@ -10,12 +10,12 @@ const targetFlow = [
   "Guests open it on their phone, see only what they are invited to, and reply",
 ];
 
-const availableToday = [
-  "Account creation, sign-in and password reset",
-  "Invitation drafts saved privately to your account",
-  "Design direction and language selection when starting a draft",
-  "A planning guest count that stays on your own draft",
-  "Invitation styling preview: font, size, colour, alignment and a simulated foil overlay",
+const implementedFoundations = [
+  "Authentication screens and Supabase Auth integration",
+  "Protected account routes that redirect while you are signed out",
+  "Invitation draft creation flow, with design direction and language selection",
+  "Planning guest-count persistence code for your own draft",
+  "Styling preview and persistence code: font, size, colour, alignment and a simulated foil overlay",
 ];
 
 const plannedForV1 = [
@@ -36,8 +36,9 @@ const HowItWorksSection = () => {
             How {PRODUCT.name} is intended to work
           </h2>
           <p className="text-lg leading-relaxed text-ink-muted">
-            The target flow below is what we are building towards. Only the
-            items in &ldquo;Available in this preview&rdquo; exist today.
+            The target flow below is what we are building towards. Only the items in
+            &ldquo;Implemented foundations in this preview&rdquo; are present in the
+            codebase today.
           </p>
         </div>
 
@@ -58,19 +59,24 @@ const HowItWorksSection = () => {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="rounded-2xl border border-success/40 bg-surface p-6 md:p-8">
             <h3 className="mb-1 font-display text-xl font-semibold text-ink">
-              Available in this preview
+              Implemented foundations in this preview
             </h3>
             <p className="mb-5 text-sm text-ink-muted">
-              What you can actually do on this site right now.
+              These pieces exist in the current codebase. Account-backed
+              persistence still requires a verified Supabase environment.
             </p>
             <ul className="space-y-3">
-              {availableToday.map((item) => (
+              {implementedFoundations.map((item) => (
                 <li key={item} className="flex gap-3 text-sm leading-relaxed text-ink">
                   <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" />
                   <span>{item}</span>
                 </li>
               ))}
             </ul>
+            <p className="mt-5 border-t border-line pt-4 text-sm text-ink-muted">
+              The signed-in create, dashboard, configure and styling flows were not
+              exercised end to end against a live backend during this stage.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-line bg-paper p-6 md:p-8">

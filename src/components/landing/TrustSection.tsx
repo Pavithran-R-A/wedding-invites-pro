@@ -3,15 +3,15 @@ import { Palette, ShieldCheck, Save, Heart } from "lucide-react";
 const signals = [
   {
     icon: Palette,
-    text: "Create and preview invitation drafts",
+    text: "Draft creation and styling foundation",
   },
   {
     icon: ShieldCheck,
-    text: "Your drafts are protected by row-level security",
+    text: "Row-level security covered by an SQL test suite",
   },
   {
     icon: Save,
-    text: "Saved privately to your account",
+    text: "Designed around private, account-owned drafts",
   },
   {
     icon: Heart,

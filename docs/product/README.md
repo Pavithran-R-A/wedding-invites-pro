@@ -1,14 +1,16 @@
 # VivaahVarnam — product documentation
 
 These documents are the product contract. They exist so that a person (or an agent) opening this
-repository can tell, without reading UI code, what VivaahVarnam is *for*, what actually works
-today, and what is only a plan.
+repository can tell, without reading UI code, what VivaahVarnam is *for*, what has been verified
+working here, and what is only a plan.
 
-> **Current implementation ≠ Target V1.**
-> Everything under "Preview works today" in these docs is backed by code in this repository.
-> Everything labelled V1, later, or planned is a design intent — it is not available, not
-> purchasable, and not promised to a date. UI copy must never present the second group as a
-> capability.
+> **Verified ≠ implemented ≠ planned.**
+> Capability that was actually exercised in this build is `IMPLEMENTED` in
+> [`feature-readiness.md`](feature-readiness.md). Code that needs an external environment nobody
+> verified — a configured Supabase project, working email delivery — is `FOUNDATION`, even when the
+> source is complete. Everything labelled V1, later, or planned is a design intent — it is not
+> available, not purchasable, and not promised to a date. UI copy must never present any of the
+> weaker groups as a live capability.
 
 ## The documents, and how they relate
 

@@ -288,6 +288,8 @@ No migration, no table, no SQL and no runtime code was produced from it.
 
 Wired in as `npm run product:check` and as a CI step between typecheck and unit tests.
 Self-test: 9 rules loaded. Live scan: **121 active files, 0 violations.**
+*(Rule count is stale — 11 rules and 121 files after the repair recorded in
+[Post-independent-review truthfulness repair](#post-independent-review-truthfulness-repair).)*
 
 ## Dependency and package cleanup
 
@@ -461,6 +463,8 @@ comparison must start from `rm -rf node_modules && npm ci`, or an install artefa
 ## Test counts
 
 `npm test` → **4 files, 26 tests, all passing.**
+*(Stale — 4 files, 27 tests after the repair; see
+[Post-independent-review truthfulness repair](#post-independent-review-truthfulness-repair).)*
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -647,3 +651,189 @@ Inspected once; not re-triggered.
 - Consequence, stated plainly: **Stage 1 code has not been executed by hosted CI.** The local gate
   table above is the authoritative verification for this stage. Running the workflow against this
   tree would require merging to `main` or opening a PR, both outside this stage's boundary.
+
+## Post-independent-review truthfulness repair
+
+### What the review concluded
+
+ChatGPT independently reviewed the pushed branch at `9b946530b8b8391a015aea8920520ba89d183cd8`.
+The Stage 1 product reset was judged **substantially correct** — the product architecture, the
+documentation set, the brand surface, the checker and the security boundary all passed review — but
+the stage was **not approved for merge**, because of one scoped class of defect:
+
+> Active product copy overstates several backend-dependent capabilities as proven/current even
+> though this report explicitly says authenticated Supabase flows were not exercised against a
+> verified backend.
+
+That is a contradiction inside this stage's own deliverable. "Known limitations" item 2 above
+records that no account was created and that `/create-project`, `/project/:id/configure` and
+`/project/:id/edit` were verified only as redirects — while the landing hero, the trust strip, the
+capability panel, the README and the readiness matrix each asserted the same flows as things a user
+can do today. Stage 1's purpose is product truth, so the copy was wrong even though the code was
+not. Nothing was found in the product architecture, and no backend behaviour was disputed.
+
+The repair changed **claims, not capabilities**. No migration, schema, policy, route, component
+behaviour or dependency was added or altered; no Supabase project was connected, created or
+fabricated to make the old claims true.
+
+### The capability model now used
+
+Every affected surface distinguishes three states:
+
+| State | Meaning |
+| --- | --- |
+| **Verified here** | Exercised in this build without an external dependency this stage does not control |
+| **Implemented foundation** | Real code in the source, but its proof needs a configured environment (Supabase project, email delivery) that was never verified |
+| **Planned** | Design intent only |
+
+Implemented-but-unverified is allowed to say *implemented in the source code*, *requires a
+configured compatible Supabase environment*, *not end-to-end verified during this stage*. It is not
+allowed to say *actually works*, *right now*, or *a user can do this today*.
+
+### Active surfaces repaired
+
+| Surface | Was | Now |
+| --- | --- | --- |
+| `src/components/landing/HeroSection.tsx` | "Today you can create and preview an invitation draft." | "This preview holds the draft-creation and styling foundation while the complete invitation experience is still being built." Positioning, `Preview` chip and the `Create an Invitation Draft` CTA unchanged |
+| `src/components/landing/HowItWorksSection.tsx` | Heading "Available in this preview" captioned "What you can actually do on this site right now.", listing "Account creation, sign-in and password reset" and "Invitation drafts saved privately to your account" | Heading "Implemented foundations in this preview", captioned "These pieces exist in the current codebase. Account-backed persistence still requires a verified Supabase environment.", items re-labelled as flows and persistence *code*, plus a closing note that the signed-in flows were not exercised end to end |
+| `src/components/landing/TrustSection.tsx` | "Create and preview invitation drafts", "Your drafts are protected by row-level security", "Saved privately to your account" | "Draft creation and styling foundation", "Row-level security covered by an SQL test suite", "Designed around private, account-owned drafts" |
+| `src/components/landing/ProductStorySection.tsx` | "Tamil, Telugu, Kannada and Malayalam are first-class" | "…are treated as first-class **design requirements**", order corrected to the documented rollout (Tamil, Telugu, Malayalam, Kannada), and the closing note now adds "A full regional-language interface and reviewed ceremonial wording are not built yet." |
+| `src/components/landing/DesignDirectionSection.tsx` | Card titled **Bilingual Family Invitation** whose script sample was `தமிழ் · తెలుగు · English` — three scripts under a two-language label, described as "a parallel two-script layout" | Renamed **Multilingual Family Invitation**, description now reads "A parallel multi-script composition…". `Preview concept` badge kept on all six cards; no claim of cultural review was added |
+| `src/components/landing/Header.tsx` | CTA "Create an Invitation" (desktop and mobile menu) | "Create a Draft" in both, matching the Preview state; the hero and design-direction CTAs remain the fuller "Create an Invitation Draft" |
+| `index.html` meta description | "Today you can create and preview an invitation draft; …" | "Preview stage: the draft-creation and styling foundation is in the codebase, while publishing, sharing, RSVP and printing are planned for later releases." |
+| `src/pages/TermsOfService.tsx` | "Today VivaahVarnam lets you create, style and privately save wedding invitation drafts." | "VivaahVarnam is a preview. The current preview contains the interface and the account integration for creating and styling private invitation drafts; whether a draft saves and reappears for you depends on the service environment behind it, which has not yet been qualified for production." The banner sentence now reads "provided so you can try the invitation draft and styling interface" |
+| `src/pages/PrivacyPolicy.tsx` | Silent about third-party font requests | The no-advertising/no-analytics sentence is kept verbatim and one factual sentence added: "This preview currently loads font files from Google Fonts, so your browser makes requests to Google's font-serving domains when loading the site." |
+| `README.md` | "**Status: Preview.** … Creating and saving invitation drafts works" and a single "What actually works in this build" list | Status line now says the flows are implemented in source but not exercised end to end; the list is split into **Verified in Stage 1** and **Implemented foundations requiring a configured backend** |
+| `docs/product/README.md` | "what actually works today" and "Everything under 'Preview works today' … is backed by code" | The three-state rule: **Verified ≠ implemented ≠ planned**, with the unverified-external case named explicitly |
+| `docs/product/feature-readiness.md` | Four rows claimed `IMPLEMENTED` while their own notes admitted no live-backend verification | See below |
+
+### Feature-readiness changes
+
+`IMPLEMENTED` was kept strict rather than redefined, and its definition now reads "Works in this
+build **and was actually exercised here**". `FOUNDATION` was extended to cover the specific case
+this stage hit: source that is complete but depends on an environment nobody verified. A fifth
+reading rule forbids the contradiction outright — a row may never claim "a user can do this today"
+in the same breath as "not exercised against a live project".
+
+Rows reviewed individually, not mechanically:
+
+| Row | Before → After | Why |
+| --- | --- | --- |
+| Email sign-up, log-in, logout | `IMPLEMENTED` → split: **Sign-up and log-in screens** `IMPLEMENTED`, **Sign-up/log-in/logout against a real project** `FOUNDATION` | The screens were rendered and inspected in the browser; the round trip never was |
+| Logout control | new row, `FOUNDATION` | The header renders **Log out** only for a signed-in session, and no session existed — so the control was never even displayed |
+| Password reset | `IMPLEMENTED` → `FOUNDATION` | Needs a configured auth project plus working email delivery; neither verified |
+| Dashboard listing drafts | `IMPLEMENTED` → `FOUNDATION` | Queries the user's `projects` rows; never loaded with real data against a verified project |
+| Draft creation | `IMPLEMENTED` → `FOUNDATION` | The insert into `projects` exists in code and was never exercised against a verified project |
+| Protected routes | `IMPLEMENTED`, evidence narrowed | The redirect-while-signed-out half *was* verified, so the row stays; the authenticated pass-through is now named as unexercised instead of implied |
+| Estimated guest count, styling controls | `FOUNDATION`, notes reworded | Notes said "persists"; they now say the page *writes* the column and the write is unverified |
+| SVG sanitisation boundary | `IMPLEMENTED`, wording corrected | Said "user/template SVG"; there is no SVG upload. Now "database-provided template SVG … There is no SVG upload feature" |
+| Third-party network requests | new row, `IMPLEMENTED` | Records the single Google Fonts origin as observed behaviour, cross-referenced to the privacy policy |
+| CI pipeline → "CI pipeline definition" | `IMPLEMENTED`, renamed | Distinguishes the workflow file, which is real, from hosted execution, which remains `FOUNDATION` / `EXTERNAL CI QUOTA DEFERRAL` one row below |
+| Analytics | `LATER`, note now points at both policies | Consistency with the new Google Fonts disclosure |
+
+Capability-row totals moved from **15 `IMPLEMENTED` / 11 `FOUNDATION` / 24 `PLANNED V1` / 4 `LATER`
+/ 6 `EXCLUDED`** (60 rows) to **13 / 16 / 24 / 4 / 6** (63 rows). Nothing moved up.
+
+### Google Fonts: disclosure chosen over removal
+
+`index.html` requests `fonts.googleapis.com` and `fonts.gstatic.com` for the Latin and four Noto
+script faces the South-Indian typography foundation depends on. Two options were open: self-host the
+fonts, or disclose the requests. Self-hosting means downloading six font families into the
+repository, which adds binary assets, licensing review (SIL OFL attribution and file handling) and
+a build concern — precisely the "do not turn fonts into a new project" trap, and it would have
+introduced unreviewed binary files into a stage whose whole subject is truthful claims. **The
+narrow factual disclosure was chosen instead.** No speculation about what Google stores, no claim
+that Google Fonts is analytics, no legal conclusion. The Cookie & Storage Policy was reviewed and
+left unchanged on purpose: it says no advertising, analytics or third-party *cookies* are set,
+which remains exactly true — a font request is not a cookie, and calling it one would have created
+a new inaccuracy.
+
+### Product contract regression
+
+Two new narrowly-scoped rules, one per phrase that caused this repair, and nothing broader:
+
+- `unverified-capability-framing` — `what\s+you\s+can\s+actually\s+do\s+on\s+this\s+site`
+- `unverified-capability-list` — `what\s+actually\s+works\s+in\s+this\s+build`
+
+The word "implemented" is **not** banned, and a new test asserts that a sentence containing it
+passes. `MUST_NOT_MATCH` grew from 3 to 5 entries so the replacement copy itself
+("Implemented foundations in this preview", "These pieces exist in the current codebase") can never
+be flagged by a future rule, and those sentences were added to the self-test's benign block.
+Rules: 9 → 11. `scripts/product-contract.test.mjs`: 8 → 9 tests.
+
+### Deliberately left alone
+
+- In-app transactional copy (`CreateProject.tsx` "The draft is saved privately to your account",
+  `Login.tsx` "continue the invitation drafts saved to your account"). These sit at the point of
+  action, describe what the form attempts, and the same screens already surface insert failures and
+  an empty design catalogue honestly. Rewriting working app copy into disclaimers is not what the
+  defect called for.
+- `docs/architecture/stage-2-domain-blueprint.md` mentions of user-supplied SVG (lines ~306, ~487)
+  are forward-looking invariants for Stage 2 ("no user-supplied markup ever reaches the DOM without
+  the sanitiser"), not claims that an upload feature exists.
+- The evidence sections above, including "Landing changes", which still quotes the pre-repair
+  headings and the **Bilingual Family Invitation** card name. They describe the branch as reviewed
+  at `9b946530`, and are preserved rather than quietly updated.
+- No Publish / Share / Pay action was added anywhere.
+
+### Verification after repair
+
+Run from `rm -rf node_modules && npm ci` on the final tree, so this postdates every edit:
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| Clean install | `npm ci` | exit 0 |
+| Lint | `npm run lint` | **0 errors**, 8 warnings (same vendored `react-refresh` set) |
+| Typecheck | `npm run typecheck` | exit 0 |
+| Product contract | `npm run product:check` | 121 active files, **0 violations**; self-test 11 rules OK |
+| Unit tests | `npm test` | 4 files, **27 passed / 0 failed** |
+| Build | `npm run build` | **2178 modules** — unchanged; `index.html` 2.00/0.74 kB, CSS 67.37/11.91 kB, JS **743.49 kB / 228.94 kB** gzip |
+| Audit (prod, high+) | `npm audit --omit=dev --audit-level=high` | **exit 0** (the 2 moderates are the pre-existing `react-router` pair) |
+| Database RLS | `bash supabase/tests/rls/run.sh` | **24 passed / 0 failed — `RESULT: PASS`**, count unchanged |
+| Whitespace | `git diff --check` | exit 0 |
+
+The bundle moved **+0.98 kB raw / +0.38 kB gzip** in JS and +0.03 kB in CSS against the figures of
+record, with the module count identical at 2178. That is the added disclosure strings and one new
+`border-t` utility class — copy weight, not a dependency or graph change.
+
+### Browser recheck after repair
+
+Dev server on `http://localhost:8080`, Chrome DevTools Protocol. No logged-in flow was simulated,
+faked or claimed; nothing beyond the public and unauthenticated surfaces was visited.
+
+Desktop 1440×900 (1425px client width):
+
+- `/` — hero, trust strip, how-it-works, design directions, footer all render; revised hero,
+  foundation panel, trust items and language card confirmed present as written; `documentElement`
+  `scrollWidth` equals the viewport, **0 overflow offenders, 0 clipped elements**; the two panels
+  stay equal height (419px) with the added disclosure note; design cards 330/352px; **6
+  `Preview concept` badges**; console **0 errors**, 2 pre-existing React Router future-flag
+  advisories
+- `/login` — `h1` "Welcome back", email + password labelled with `autocomplete` values
+- `/signup` — `h1` "Create your account", three labelled fields, `Sign up` button
+- `/terms-of-service` — "VivaahVarnam is a preview…" scope paragraph renders
+- `/privacy-policy` — the Google Fonts sentence renders inside Analytics and Tracking, immediately
+  after the retained no-trackers sentence
+
+Mobile 360×740 @3x, `isMobile`, `hasTouch`:
+
+- `/` — `scrollWidth` 360 = viewport width, **0 overflow offenders, 0 clipped elements**, trust
+  items and foundation panel readable, **6 `Preview concept` badges**, and the
+  **Multilingual Family Invitation** card shows `தமிழ் · తెలుగు · English` under a name that no
+  longer contradicts it
+- mobile menu — opens (`aria-expanded` false → true, label "Open menu" → "Close menu"), contains
+  **Create a Draft**, minimum interactive height **44px**, no horizontal overflow; Escape closes it
+  and resets `aria-expanded`
+- console — **0 errors**
+- screenshot of the foundation panel at 360px confirms two-line heading, wrapped list text and the
+  bordered disclosure note with no clipping
+
+### Stage 2 boundary after repair
+
+`git diff origin/main...HEAD -- supabase/migrations/` is **empty** — no Stage 1 migration exists
+before or after this repair. No schema, table, policy, trigger, function, route, RSVP, approval,
+payment, QR, PDF or tradition-pack runtime was added. The Stage 2 blueprint remains documentation
+only. `origin/main` remains `5fa8db35b97d36c9141137b316e051eb80024`.
+
+`EXTERNAL CI QUOTA DEFERRAL` still applies: the workflow triggers on `main` only, so a normal push
+to this branch starts no hosted run, and none was forced. Local gates are the evidence.

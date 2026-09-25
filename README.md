@@ -1,7 +1,8 @@
 # VivaahVarnam — Digital Wedding Patrika
 
-**Status: Preview.** VivaahVarnam is an early, development-stage product. Creating and saving
-invitation drafts works; sharing, RSVP, publishing, payment and printing do not exist yet.
+**Status: Preview.** VivaahVarnam is an early, development-stage product. The account-backed draft
+flows are implemented in the source code but have not been exercised end to end against a verified
+Supabase environment; sharing, RSVP, publishing, payment and printing do not exist yet.
 
 **Brand status: preliminary working brand — not legally cleared.** The name may change before
 launch. Nothing in this repository should be read as a trademark claim, and no trademark search
@@ -26,18 +27,38 @@ The product priority order is deliberate:
 6. Trustworthy publication and payment
 7. Premium human services
 
-## Current functionality
+## Verified in Stage 1
 
-What actually works in this build:
+Behaviour actually exercised in this stage, without depending on an external environment we do not
+control:
 
-- Email account sign-up, log-in and password reset (Supabase Auth)
-- A protected **My invitations** dashboard listing your saved drafts
-- Creating an invitation draft: name, main language, optional design direction
-- A draft configuration page that persists an *estimated guest count* (planning only — there is no
+- Public landing, privacy, terms and cookie pages render, and describe this build honestly
+- The sign-up and log-in screens render with labelled fields and autocomplete values
+- Protected routes redirect to the sign-in screen while unauthenticated
+- The brand lockup, design tokens, script-safe font stacks and the South-Indian language list
+- The SVG sanitisation boundary and its unit tests
+- The SQL row-level-security regression harness (24 assertions, Docker `postgres:16-alpine`),
+  including the trusted-column write guards on `paid_status`
+- The product-contract checker, and the local gates: lint, typecheck, unit tests, production build
+- Public pages laid out down to a 360px viewport
+
+## Implemented foundations requiring a configured backend
+
+Real code paths that compile and ship in this build, whose end-to-end behaviour was **not**
+demonstrated against a verified Supabase environment during Stage 1:
+
+- Sign-up, log-in, logout and password reset against a Supabase Auth project — the screens render,
+  the round trip and email delivery were never exercised
+- A **My invitations** dashboard that reads the signed-in user's drafts
+- Draft creation: name, main language, optional design direction, inserted into `projects`
+- A draft configuration page that stores an *estimated guest count* (planning only — there is no
   checkout, so it affects nothing commercial)
-- A design preview where font, size, colour, alignment and a **simulated** foil overlay are saved
-  with the draft
-- Landing, privacy, terms and cookie pages written to describe this build honestly
+- A design preview that saves font, size, colour, alignment and a **simulated** foil overlay with
+  the draft
+
+No production Supabase environment was validated. Running the flows above needs a compatible
+Supabase project with this repository's migrations applied, and the Stage 1 browser QA covered only
+the public and unauthenticated surfaces. Treat them as implemented, not as proven live.
 
 What deliberately does **not** exist yet: guest lists, RSVP collection, public invitation URLs,
 QR codes, PDF/image export, publishing, payment, GST handling, print ordering, and admin tooling.
@@ -85,8 +106,8 @@ ceremonial wording produced by unreviewed generation.
 React 18 + TypeScript single-page app, built with Vite (`@vitejs/plugin-react-swc`), routed with
 React Router 6, server state through TanStack Query, UI primitives from Radix via shadcn-style
 components, styled with Tailwind CSS over HSL design tokens. Supabase provides auth, the Postgres
-database and row-level security. User-supplied SVG is sanitised with DOMPurify before it can enter
-the DOM.
+database and row-level security. Database-provided template SVG passes through the central DOMPurify
+sanitisation boundary before DOM insertion; there is no SVG upload feature.
 
 ```text
 src/App.tsx                     routes (protected project screens behind ProtectedRoute)

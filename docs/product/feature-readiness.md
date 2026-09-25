@@ -8,27 +8,31 @@ exists.
 
 | Status | Meaning |
 | --- | --- |
-| `IMPLEMENTED` | Works in this build. A user can do the thing today. |
-| `FOUNDATION` | Real code or schema exists that the feature will be built on, but the user-visible capability is incomplete or placeholder. **Not shippable as a claim.** |
+| `IMPLEMENTED` | Works in this build **and was actually exercised here**. A user can do the thing today. |
+| `FOUNDATION` | Real code or schema exists that the feature will be built on, but the user-visible capability is incomplete or placeholder. **Not shippable as a claim.** This also covers code that is complete in source yet depends on an external environment (a configured Supabase project, email delivery) that this stage never verified. |
 | `PLANNED V1` | Designed in these documents. No meaningful implementation. |
 | `LATER` | Deliberately after V1. |
 | `EXCLUDED` | We have decided not to build this. Reintroducing it needs a scope change, not a feature PR. |
 
 Verified against this repository as of the Stage 1 audit
-([`../audits/stage-1-product-reset.md`](../audits/stage-1-product-reset.md)). The app reads only two
-tables — `projects` and `templates` — despite nine tables existing in schema.
+([`../audits/stage-1-product-reset.md`](../audits/stage-1-product-reset.md)), then re-checked row by
+row after the post-review truthfulness repair. The app reads only two tables — `projects` and
+`templates` — despite nine tables existing in schema. No Supabase project was verified during this
+stage, so any capability whose proof needs one is `FOUNDATION`, not `IMPLEMENTED`.
 
 ## Accounts and shell
 
 | Capability | Status | Evidence / note |
 | --- | --- | --- |
-| Email sign-up, log-in, logout | `IMPLEMENTED` | Supabase Auth via `AuthProvider`; not exercised against a live project during this stage (see limitations) |
-| Password reset | `IMPLEMENTED` | `ResetPassword.tsx`; depends on the auth project's email delivery being configured |
-| Protected routes | `IMPLEMENTED` | `ProtectedRoute.tsx` guards dashboard/create/project routes |
+| Sign-up and log-in screens | `IMPLEMENTED` | `Signup.tsx` and `Login.tsx` render with labelled fields and autocomplete values — verified in the browser as public screens |
+| Logout control | `FOUNDATION` | The header renders **Log out** only for a signed-in session; no session existed in this stage, so the control was never displayed or exercised |
+| Sign-up, log-in and logout against a real project | `FOUNDATION` | Supabase Auth calls are wired in source. No configured Supabase project was verified in this stage, so no account was created or signed in end to end |
+| Password reset | `FOUNDATION` | `ResetPassword.tsx` exists; needs a configured auth project plus working email delivery, neither of which was verified |
+| Protected routes | `IMPLEMENTED` | `ProtectedRoute.tsx` guards dashboard/create/project routes — verified as redirects while signed out. The signed-in pass-through needs a verified backend and was not exercised |
 | Session persistence | `FOUNDATION` | Supabase client defaults; refresh behaviour unverified in this stage |
-| Dashboard listing drafts | `IMPLEMENTED` | `Dashboard.tsx` lists the signed-in user's projects |
+| Dashboard listing drafts | `FOUNDATION` | `Dashboard.tsx` queries the signed-in user's `projects` rows and renders empty/error states; never loaded with real data against a verified project |
 | Dark mode | `FOUNDATION` | `.dark` token overrides exist in `src/index.css`; there is **no user-facing theme switch** |
-| Cookie consent | `IMPLEMENTED` | `CookieConsent` + `CookiePolicy.tsx` |
+| Cookie consent | `IMPLEMENTED` | `CookieConsent` + `CookiePolicy.tsx` — public surface, verified rendering |
 | Legal pages | `IMPLEMENTED` | Terms/Privacy/Cookies — written as provisional, deliberately claiming no payment or entity |
 | 404 page | `IMPLEMENTED` | `NotFound.tsx` |
 
@@ -36,13 +40,13 @@ tables — `projects` and `templates` — despite nine tables existing in schema
 
 | Capability | Status | Evidence / note |
 | --- | --- | --- |
-| Draft creation (title + language) | `IMPLEMENTED` | Inserts into `projects`; `template_id` is nullable so a draft can be created with no design |
+| Draft creation (title + language) | `FOUNDATION` | `CreateProject.tsx` inserts into `projects` and `template_id` is nullable so a draft can start with no design. The insert was not exercised against a verified Supabase project in this stage |
 | Design direction selection | `FOUNDATION` | Landing shows six labelled *directions* (concepts, not usable templates); create page selects a real `templates` row if any exist |
 | Template catalogue | `FOUNDATION` | `templates` table read by `CreateProject.tsx`; no seeded, reviewed content — an empty catalogue is handled explicitly |
 | Structured couple/hosts/family | `PLANNED V1` | See [`structured-creator.md`](structured-creator.md) |
 | Events / functions | `PLANNED V1` | Nothing in schema or UI |
 | Venues / maps | `PLANNED V1` | Nothing in schema or UI |
-| Estimated guest count | `FOUNDATION` | Persists `guest_count` on the draft; it is a planning number, **not** a guest list, and affects no billing |
+| Estimated guest count | `FOUNDATION` | The configure page writes `guest_count` on the draft (unverified against a project); it is a planning number, **not** a guest list, and affects no billing |
 | Wording / blessings / invocations | `PLANNED V1` | No reviewed content exists |
 | South-Indian language list | `IMPLEMENTED` | `src/lib/i18n.ts` ordered by rollout priority (en, ta, te, ml, kn) with native labels; used as invitation metadata |
 | UI localisation into those languages | `PLANNED V1` | The product interface is **English only** today |
@@ -52,7 +56,7 @@ tables — `projects` and `templates` — despite nine tables existing in schema
 
 | Capability | Status | Evidence / note |
 | --- | --- | --- |
-| Font / size / colour / alignment controls | `FOUNDATION` | `EditProject.tsx` persists an `editor` object into `projects.selected_features` |
+| Font / size / colour / alignment controls | `FOUNDATION` | `EditProject.tsx` writes an `editor` object into `projects.selected_features`; the control surface renders, the write is unverified against a project |
 | Live template rendering | `FOUNDATION` | Renders a sanitised `preview_svg` if the draft's template has one; otherwise a placeholder text preview |
 | Foil effect | `FOUNDATION` | Screen-only gradient overlay, labelled "simulated" in the UI. There is no print pipeline |
 | Multi-output design consistency | `PLANNED V1` | Token system is the intended mechanism (ADR 0004) |
@@ -97,16 +101,17 @@ tables — `projects` and `templates` — despite nine tables existing in schema
 | --- | --- | --- |
 | Row-level security | `IMPLEMENTED` | Policies + 24-assertion Docker regression suite; see [`../audits/stage-0-truth-security.md`](../audits/stage-0-truth-security.md) |
 | Trusted-column write protection | `IMPLEMENTED` | `paid_status` guarded on both UPDATE and INSERT paths |
-| SVG sanitisation boundary | `IMPLEMENTED` | `src/lib/sanitizeSvg.ts` + tests; every `dangerouslySetInnerHTML` of user/template SVG goes through it |
+| SVG sanitisation boundary | `IMPLEMENTED` | `src/lib/sanitizeSvg.ts` + tests; database-provided template SVG passes through it before DOM insertion. There is no SVG upload feature |
 | Product-contract checker | `IMPLEMENTED` | `scripts/check-product-contract.mjs`, run as `npm run product:check` and in CI |
-| CI pipeline | `IMPLEMENTED` | `.github/workflows/ci.yml` — lint, typecheck, test, build, secret/env scanning, production audit |
+| CI pipeline definition | `IMPLEMENTED` | `.github/workflows/ci.yml` — lint, typecheck, test, build, secret/env scanning, production audit. The same gates all pass locally |
 | Hosted CI verification | `FOUNDATION` | Workflow is correct; runs are **deferred by private-repo runner quota** — `EXTERNAL CI QUOTA DEFERRAL` |
 | Deployment / production environment | `PLANNED V1` | No production Supabase project is connected to this repository |
 | Admin / operations console | `PLANNED V1` | None |
 | Activity / audit logging | `FOUNDATION` | `activity_logs` table exists in schema and is **not written to by the app** |
 | Account deletion / data export | `PLANNED V1` | Supabase manages auth users; there is no product-level deletion flow |
 | Error monitoring | `LATER` | Not present; console diagnostics only |
-| Analytics | `LATER` | No third-party analytics is loaded, and the cookie policy says so |
+| Analytics | `LATER` | No third-party analytics is loaded, and the privacy and cookie policies say so |
+| Third-party network requests | `IMPLEMENTED` | One: the Google Fonts stylesheet and font files requested from `index.html`. Disclosed in the privacy policy; no other third-party origin is contacted by the app |
 
 ## Reading rules
 
@@ -117,3 +122,8 @@ tables — `projects` and `templates` — despite nine tables existing in schema
 3. Moving a row from `PLANNED V1` to `IMPLEMENTED` requires: working code, a test or verified manual
    check, and an update to this matrix in the same change.
 4. If this matrix and the UI ever disagree, the UI is wrong until proven otherwise.
+5. `IMPLEMENTED` requires that the capability was **actually exercised in this build**. Code whose
+   proof depends on an external environment we have not verified — a configured Supabase project,
+   working email delivery, a live payment provider — stays `FOUNDATION` no matter how complete the
+   source looks, and the note must name the missing verification. A row may never claim "a user can
+   do this today" in the same breath as "not exercised against a live project".

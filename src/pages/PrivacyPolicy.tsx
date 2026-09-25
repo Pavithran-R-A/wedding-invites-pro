@@ -39,7 +39,8 @@ const PrivacyPolicy = () => {
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Analytics and Tracking</h2>
         <p className="text-sm text-muted-foreground">
           This build does not run advertising or analytics trackers and does not set analytics
-          cookies.
+          cookies. This preview currently loads font files from Google Fonts, so your browser makes
+          requests to Google's font-serving domains when loading the site.
         </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Data Retention and Deletion</h2>

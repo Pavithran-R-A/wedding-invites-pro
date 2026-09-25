@@ -2,9 +2,9 @@
 /**
  * Product contract checker.
  *
- * Scans ACTIVE product surfaces for retired branding, resurrected commerce copy and
- * fabricated social proof, and fails loudly so a rename slip or a re-introduced false claim
- * cannot merge quietly.
+ * Scans ACTIVE product surfaces for retired branding, resurrected commerce copy, fabricated social
+ * proof, and copy that presents unverified backend-dependent flows as live capability. It fails
+ * loudly so a rename slip or a re-introduced false claim cannot merge quietly.
  *
  *   node scripts/check-product-contract.mjs              human-readable report, exit 1 on findings
  *   node scripts/check-product-contract.mjs --json       machine-readable report
@@ -110,10 +110,28 @@ export const RULES = [
     message: "invented testimonial section reintroduced",
     fix: "there are no real couples and no real quotes; remove the section",
   },
+  {
+    id: "unverified-capability-framing",
+    pattern: /what\s+you\s+can\s+actually\s+do\s+on\s+this\s+site/gi,
+    message: "lists capabilities as proven live behaviour on this site",
+    fix: "label backend-dependent code as an implemented foundation — see docs/product/feature-readiness.md",
+  },
+  {
+    id: "unverified-capability-list",
+    pattern: /what\s+actually\s+works\s+in\s+this\s+build/gi,
+    message: "claims a verified-working list for this build",
+    fix: "split it into verified behaviour and implemented foundations — see README.md",
+  },
 ];
 
-/** Guards against a rule being written so broadly that honest planning text fails. */
-export const MUST_NOT_MATCH = ["Razorpay", "payment", "entitlement"];
+/** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
+export const MUST_NOT_MATCH = [
+  "Razorpay",
+  "payment",
+  "entitlement",
+  "Implemented foundations in this preview",
+  "These pieces exist in the current codebase",
+];
 
 export function isScannedPath(relativePath) {
   const p = posix(relativePath);
@@ -186,6 +204,8 @@ export function selfTest() {
     "retired-price-point-copy": `hero.startingAt ₹199 · No hidden fees`,
     "fabricated-social-proof": `Trusted by 1,200 couples`,
     "fabricated-testimonials": `Real stories from couples`,
+    "unverified-capability-framing": `<p>What you can actually do on this site right now.</p>`,
+    "unverified-capability-list": `What actually works in this build:`,
   };
   for (const [ruleId, text] of Object.entries(fixtures)) {
     if (!scanContent("src/fixture.tsx", text).some((v) => v.rule === ruleId)) {
@@ -199,6 +219,9 @@ export function selfTest() {
     `Trusted by practice rather than by customer counts, which we do not have.`,
     `<Button>Create Invitation Draft</Button>`,
     `Publishing, sharing, RSVP and payment are not available yet.`,
+    `Implemented foundations in this preview`,
+    `These pieces exist in the current codebase. Account-backed persistence still requires a verified Supabase environment.`,
+    `Verified in Stage 1: the public pages render and protected routes redirect.`,
   ].join("\n");
   const benignHits = scanContent("docs/architecture/example.md", benign);
   if (benignHits.length > 0) {

@@ -17,7 +17,7 @@ const principles = [
     icon: Languages,
     title: "Language-conscious",
     description:
-      "Tamil, Telugu, Kannada and Malayalam are first-class, with language always chosen by the family.",
+      "Tamil, Telugu, Malayalam and Kannada are treated as first-class design requirements, with language always chosen by the family.",
   },
   {
     icon: Smartphone,
@@ -64,7 +64,8 @@ const ProductStorySection = () => {
 
         <p className="mt-8 text-center text-sm text-ink-muted">
           These are design commitments for the product, not a claim that every
-          one is fully implemented today.
+          one is fully implemented today. A full regional-language interface and
+          reviewed ceremonial wording are not built yet.
         </p>
       </div>
     </section>

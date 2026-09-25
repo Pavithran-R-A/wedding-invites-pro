@@ -61,7 +61,7 @@ const Header = () => {
                 <Link to="/login">Log in</Link>
               </Button>
               <Button size="sm" className="rounded-lg" asChild>
-                <Link to="/signup">Create an Invitation</Link>
+                <Link to="/signup">Create a Draft</Link>
               </Button>
             </>
           )}
@@ -127,7 +127,7 @@ const Header = () => {
                     </Button>
                     <Button className="min-h-11 flex-1" asChild>
                       <Link to="/signup" onClick={() => setMobileOpen(false)}>
-                        Create an Invitation
+                        Create a Draft
                       </Link>
                     </Button>
                   </>

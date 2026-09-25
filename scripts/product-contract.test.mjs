@@ -28,6 +28,8 @@ describe("product contract checker", () => {
         `₹199`,
         `Trusted by 1000 couples`,
         `Real stories from couples`,
+        `What you can actually do on this site right now.`,
+        `What actually works in this build:`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());
@@ -45,8 +47,23 @@ describe("product contract checker", () => {
       `Publishing, sharing, RSVP and payment are not available yet.`,
       `Create Invitation Draft`,
       `Trusted by practice, not by invented customer counts.`,
+      `Implemented foundations in this preview`,
+      `These pieces exist in the current codebase. Account-backed persistence still requires a verified Supabase environment.`,
+      `Verified in Stage 1: the public pages render and protected routes redirect.`,
+      `Sign-up, log-in and logout against a real project — FOUNDATION, no configured Supabase project was verified.`,
     ].join("\n");
     expect(scanContent("docs/product/commercial-model.md", honest)).toEqual([]);
+  });
+
+  it("rejects only the verified-availability framing, not the word implemented", () => {
+    const hits = scanContent(
+      "src/components/landing/HowItWorks.tsx",
+      `The checker itself is implemented; that sentence is fine.`,
+    );
+    expect(hits).toEqual([]);
+    expect(
+      scanContent("README.md", `What actually works in this build:`).map((v) => v.rule),
+    ).toEqual(["unverified-capability-list"]);
   });
 
   it("never treats a payment-provider or commerce planning word as banned", () => {

@@ -41,8 +41,9 @@ const HeroSection = () => {
 
           <p className="mx-auto mb-10 max-w-2xl text-base leading-relaxed text-ink-muted md:text-lg">
             A South-India-first digital wedding invitation that keeps the structure,
-            dignity and family feeling of a traditional patrika. Today you can create
-            and preview an invitation draft.
+            dignity and family feeling of a traditional patrika. This preview holds the
+            draft-creation and styling foundation while the complete invitation
+            experience is still being built.
           </p>
 
           <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">

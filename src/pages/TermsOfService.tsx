@@ -9,9 +9,9 @@ const TermsOfService = () => {
       <main className="container px-4 md:px-6 py-16 max-w-3xl mx-auto prose prose-sm">
         <h1 className="font-display text-3xl font-bold mb-4">Terms of Service</h1>
         <div className="bg-muted border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
-          Provisional terms for an early development-stage product. This build is provided to let you
-          create and preview invitation drafts. It is not a commercial service yet and this is not
-          formal legal advice. The name {PRODUCT.name} is a working name and may change.
+          Provisional terms for an early development-stage product. This preview is provided so you
+          can try the invitation draft and styling interface. It is not a commercial service yet and
+          this is not formal legal advice. The name {PRODUCT.name} is a working name and may change.
         </div>
         <p className="text-muted-foreground mb-6">Last updated: September 2026</p>
 
@@ -22,10 +22,12 @@ const TermsOfService = () => {
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Current Scope of the Service</h2>
         <p className="text-sm text-muted-foreground">
-          Today {PRODUCT.name} lets you create, style and privately save wedding invitation drafts. It
-          does not yet provide paid plans, checkout, publishing, public invitation pages, guest RSVP
-          collection, or print ordering. These terms deliberately avoid making promises about those
-          features until they actually exist.
+          {PRODUCT.name} is a preview. The current preview contains the interface and the account
+          integration for creating and styling private invitation drafts; whether a draft saves and
+          reappears for you depends on the service environment behind it, which has not yet been
+          qualified for production. It does not provide paid plans, checkout, publishing, public
+          invitation pages, guest RSVP collection, or print ordering. These terms deliberately avoid
+          making promises about those features until they actually exist.
         </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Payments and Refunds</h2>

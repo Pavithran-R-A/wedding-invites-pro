@@ -34,10 +34,10 @@ const directions = [
       "Minimal ornament, larger type and more whitespace for families who prefer restraint over decoration.",
   },
   {
-    title: "Bilingual Family Invitation",
+    title: "Multilingual Family Invitation",
     script: "தமிழ் · తెలుగు · English",
     character:
-      "A parallel two-script layout so elders and younger relatives can read the same card comfortably.",
+      "A parallel multi-script composition so elders and younger relatives can each read the part of the card they are most comfortable with.",
   },
 ];
 
