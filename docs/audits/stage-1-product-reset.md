@@ -527,3 +527,68 @@ only, and says so on its first line.
 
 `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run product:check`,
 `npm run build` and the RLS suite all pass on the tree as committed, with no Stage 2 code present.
+
+## Commit and push record
+
+Three commits, on `stage1/vivaahvarnam-product-reset` only, from a clean index. Every path was
+staged explicitly by name; `git add .` and `git add -A` were never used.
+
+| Commit | Message | Surface |
+| --- | --- | --- |
+| `31cc947` | `feat: establish VivaahVarnam product identity` | 41 files, +1081 / −1389 |
+| `9054dbf` | `docs: define VivaahVarnam v1 product architecture` | 17 files, +2495 / −37 |
+| `78cc704` | `chore: add scope-aware product contract verification` | 4 files, +356 / −2 |
+| | **Branch total vs `main`** | **62 files, +3932 / −1428** |
+
+Author identity was supplied per-invocation with `git -c user.name=… -c user.email=…`; no git
+config was created or modified. No history was rewritten, rebased, amended or force-pushed.
+
+Push and remote verification:
+
+| Check | Result |
+| --- | --- |
+| `git push -u origin stage1/vivaahvarnam-product-reset` | New remote branch, normal fast-forward push, no `--force` |
+| Local `HEAD` | `78cc7045755ab0e80c946861b4c7365bfef2ad6d` |
+| Remote branch SHA via `git ls-remote` | `78cc7045755ab0e80c946861b4c7365bfef2ad6d` — match |
+| Remote branch SHA via `gh api …/branches/…` | `78cc7045755ab0e80c946861b4c7365bfef2ad6d` — match |
+| `origin/main` after the push | `5fa8db35b97d36c9141137b316e051eb80d80024` — unchanged, not merged into |
+| Tags on the repository | `0` |
+| Releases on the repository | `0` |
+| Pull request | **Not created** — not requested by this stage |
+
+The remote tree at `78cc704` was enumerated with `gh api …/git/trees/…?recursive=1` (138 blobs) and
+checked path by path. All 23 required paths are present: the product config, the brand lockup, the
+two new landing sections, the rebuilt README, all nine `docs/product/` documents, all five ADRs,
+the Stage 2 blueprint, this report, and both checker files. All six retired paths are absent:
+`.lovable/plan.md`, `bun.lockb`, `src/App.css`, `public/placeholder.svg`,
+`TemplateGallerySection.tsx`, `src/test/example.test.ts`. `pnpm-lock.yaml` and
+`pnpm-workspace.yaml` are **absent from the remote tree** — left untracked and untouched as
+instructed — and the only `.env`-shaped path in the tree is `.env.example`, which holds
+placeholders.
+
+Re-verification performed **after** the commits, against `HEAD`, not against an earlier working
+state:
+
+| Check | Result |
+| --- | --- |
+| `git diff --check origin/main..HEAD` | exit 0 — no whitespace errors in the pushed range |
+| `npm run product:check` at `HEAD` | 121 active files scanned, 0 violations |
+| `npm test` at `HEAD` | 4 files, 26 tests passed |
+
+After all commits the working tree reports only the two untracked pnpm files, exactly as it did
+before this stage began.
+
+### Actions inspection after the push
+
+Inspected once; not re-triggered.
+
+- `gh run list --branch stage1/vivaahvarnam-product-reset` returns **no runs**. This is expected
+  from the trigger filter, not a failure: `.github/workflows/ci.yml` runs on `push` to `main` and
+  on `pull_request` targeting `main`, and this stage neither merged to `main` nor opened a PR.
+- The most recent historical run on `main` (`36064058542`, predating this stage) was inspected at
+  job level: both jobs concluded `failure` with **`steps: 0`** and an empty step summary, started
+  `2026-09-24T21:51:25Z`. Zero steps means the job never received a runner, so no repository code
+  executed. Classified `EXTERNAL CI QUOTA DEFERRAL`, not a code failure.
+- Consequence, stated plainly: **Stage 1 code has not been executed by hosted CI.** The local gate
+  table above is the authoritative verification for this stage. Running the workflow against this
+  tree would require merging to `main` or opening a PR, both outside this stage's boundary.
