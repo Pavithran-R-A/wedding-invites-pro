@@ -242,28 +242,109 @@ export function parseMigrations(sources) {
 /**
  * The generated types file declares each public table as `name: { Row: { col: type } }`.
  * Nullability is irrelevant here; only the names are compared.
+ *
+ * This walks braces rather than matching a fixed indent, because the previous version
+ * matched `^ {6}name: {` and `^ {10}col:`, which only held while the generated file was
+ * being piped through prettier. Regenerating Stage 3's types straight from
+ * `supabase gen types` produced the same tables at a different indentation and without
+ * semicolons, and every table then read as "missing from the types" — a checker that
+ * goes blind when its input is reformatted is worse than no checker, because it reports
+ * with confidence. Layout is now irrelevant; only the object structure is read.
  */
 export function parseGeneratedTypes(text) {
   const tables = new Map();
-  const lines = text.split(/\r?\n/);
-  const tableLine = /^ {6}([a-z_]+): \{$/;
-  for (let i = 0; i < lines.length; i += 1) {
-    const table = tableLine.exec(lines[i]);
-    if (!table) continue;
-    if (lines[i + 1]?.trim() !== "Row: {") continue;
-    const columns = [];
-    for (let j = i + 2; j < lines.length; j += 1) {
-      const line = lines[j];
-      if (line.trim() === "};") {
-        tables.set(table[1], columns);
-        i = j;
-        break;
-      }
-      const column = /^ {10}([a-z_]+)\??:/.exec(line);
-      if (column) columns.push(column[1]);
+  for (const block of objectMembers(text, "Tables")) {
+    for (const table of block.members) {
+      const row = (findMember(table.members, "Row")?.members ?? []).map((c) => c.key);
+      if (table.key && /^[a-z_]+$/.test(table.key)) tables.set(table.key, row);
     }
   }
   return tables;
+}
+
+/**
+ * Every `key: { ... }` object at one level below each occurrence of `key:` at the top
+ * level of the file — in practice the `Tables:` block of each schema.
+ */
+function objectMembers(text, key) {
+  const out = [];
+  const pattern = new RegExp(`\\b${key}:\\s*\\{`, "g");
+  for (const match of text.matchAll(pattern)) {
+    const open = text.indexOf("{", match.index);
+    const close = matchingBrace(text, open);
+    if (close < 0) continue;
+    out.push({ members: membersOf(text, open + 1, close) });
+  }
+  return out;
+}
+
+function findMember(members, key) {
+  return members.find((m) => m.key === key);
+}
+
+/** The index of the `}` that closes the `{` at `open`, skipping quoted text. */
+function matchingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"' || ch === "`") i = skipString(text, i);
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function skipString(text, start) {
+  const quote = text[start];
+  for (let i = start + 1; i < text.length; i += 1) {
+    if (text[i] === "\\") i += 1;
+    else if (text[i] === quote) return i;
+  }
+  return text.length;
+}
+
+/**
+ * The immediate members of the object literal whose braced content runs from `start`
+ * to `end`: each member's key and the members nested one level inside its value.
+ * Anything that is not `key: {` — a leaf type, an array literal, a mapped-type
+ * placeholder — contributes a key with no members.
+ *
+ * Members are cut at `,`, `;` *or* a newline when at brace depth zero, because the
+ * generated file's separators depend on how it was printed: `supabase gen types` emits
+ * `Row: {` blocks whose columns are separated by nothing but a line break, and a
+ * one-line object with `;`. Requiring commas read the whole `Row` as a single member
+ * and reported every other column as missing.
+ */
+function membersOf(text, start, end) {
+  const members = [];
+  let depth = 0;
+  let chunkStart = start;
+  const flush = (stop) => {
+    const chunk = text.slice(chunkStart, stop);
+    const key = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:/.exec(chunk);
+    if (key) {
+      const after = chunkStart + key[0].length;
+      const open = text.indexOf("{", after);
+      const nested = open > 0 && open < stop ? (() => {
+        const close = matchingBrace(text, open);
+        return close < 0 ? [] : membersOf(text, open + 1, close);
+      })() : [];
+      members.push({ key: key[1], members: nested });
+    }
+    chunkStart = stop + 1;
+  };
+  for (let i = start; i < end; i += 1) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"' || ch === "`") { i = skipString(text, i); continue; }
+    if (ch === "{" || ch === "(" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === ")" || ch === "]") depth -= 1;
+    else if (depth === 0 && (ch === "," || ch === ";" || ch === "\n")) flush(i);
+  }
+  if (chunkStart < end) flush(end);
+  return members;
 }
 
 const CALL =
@@ -525,6 +606,83 @@ export function selfTest() {
   const goodTypes = parseGeneratedTypes(typesText);
   if ((goodTypes.get("weddings") || []).join(",") !== "id,style_settings,title,updated_at,venue_ok") {
     failures.push("types parser read Insert keys as Row keys, or missed a column");
+  }
+
+  // The same inventory as `supabase gen types` actually emits: no semicolons, one
+  // `key: { ... }` collapsed onto a line, and an empty `Tables` block for the second
+  // schema. The old line-matching reader produced zero tables from this, which is the
+  // bug the paragraph above describes; a checker that reports "every table is missing"
+  // because of formatting has to be caught by a fixture, not by an outage.
+  const generatedStyle = [
+    "export type Database = {",
+    "  api: {",
+    "    Tables: {",
+    "      [_ in never]: never",
+    "    }",
+    "    Functions: {",
+    "      resolve_public_invitation: { Args: never; Returns: Json }",
+    "      publish_invitation_version: {",
+    "        Args: {",
+    "          p_expires_at?: string",
+    "          p_wedding_id: string",
+    "        }",
+    "        Returns: Json",
+    "      }",
+    "    }",
+    "    Enums: {",
+    "      [_ in never]: never",
+    "    }",
+    "  }",
+    "  public: {",
+    "    Tables: {",
+    "      weddings: {",
+    "        Row: {",
+    "          id: string",
+    "          style_settings: Json",
+    "          title: string",
+    "          updated_at: string",
+    "          venue_ok: boolean",
+    "        }",
+    "        Insert: {",
+    "          id?: string",
+    "          not_a_row_column?: string",
+    "        }",
+    "        Update: {",
+    "          id?: string",
+    "        }",
+    "        Relationships: [",
+    "          {",
+    "            foreignKeyName: 'weddings_design_template_id_fkey'",
+    "            columns: ['design_template_id']",
+    "            referencedRelation: 'design_templates'",
+    "          }",
+    "        ]",
+    "      }",
+    "      venues: {",
+    "        Row: { id: string, wedding_id: string }",
+    "        Insert: { id?: string }",
+    "      }",
+    "    }",
+    "    Views: { [_ in never]: never }",
+    "    Enums: { app_role: ['admin', 'user', 'planner'] }",
+    "  }",
+    "}",
+  ].join("\n");
+  const regenerated = parseGeneratedTypes(generatedStyle);
+  if ((regenerated.get("weddings") || []).join(",") !== "id,style_settings,title,updated_at,venue_ok") {
+    failures.push(`brace reader missed tables in the generated layout: ${JSON.stringify([...regenerated.keys()])}`);
+  }
+  if ((regenerated.get("venues") || []).join(",") !== "id,wedding_id") {
+    failures.push("brace reader could not read a one-line Row");
+  }
+  if (regenerated.has("resolve_public_invitation") || regenerated.has("app_role")) {
+    failures.push("brace reader treated a function or an enum as a table");
+  }
+  if (JSON.stringify([...goodTypes.keys()]) !== '["weddings"]') {
+    failures.push(`old-layout fixture parsed as ${JSON.stringify([...goodTypes.keys()])}, expected only weddings`);
+  }
+  if (JSON.stringify([...regenerated.keys()]) !== '["weddings","venues"]') {
+    failures.push(`generated-layout fixture parsed as ${JSON.stringify([...regenerated.keys()])}, expected weddings and venues`);
   }
   if (checkContract({ schemaTables: tables, typeTables: goodTypes, queries: [] }).length !== 0) {
     failures.push("negative control failed: a matching schema and types file reported findings");
