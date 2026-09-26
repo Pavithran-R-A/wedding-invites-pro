@@ -17,6 +17,10 @@ dist-ssr
 .env.*
 !.env.example
 
+# Supabase CLI local-stack state (recreated by `db start`, holds local keys)
+supabase/.temp/
+supabase/.branches/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,5 +1,71 @@
-project_id = "hgvztvaoebeyjnyfarii"
+# Local-only Supabase topology for VivaahVarnam development and Stage 3 qualification.
+#
+# This file configures `supabase start` on THIS machine. It is not a deployment
+# descriptor: nothing here is applied to a hosted project, `supabase link` has never
+# been run against this repository, and no command that reads it contacts a remote.
+#
+# Why the ports are unusual: this machine already runs a complete Supabase stack for
+# an unrelated project, and it occupies the CLI defaults (api 54321, db 54322,
+# studio 54323, smtp 54324, analytics 54327). Every port below is therefore moved off
+# those defaults so that starting this stack cannot bind, reuse or reconfigure the
+# other project's containers. Services this repository does not exercise are switched
+# off rather than left running.
+#
+# project_id is a synthetic local identifier used only to name this project's own
+# containers and database. It replaces the Lovable-era hosted ref that Stage 2
+# recorded as a loaded gun (docs/audits/stage-2-domain-database.md §25 limitation 7):
+# with a hosted-looking ref in this file, a future `supabase link` / `db push` could
+# have resolved a real project by accident. It now names nothing that exists remotely.
+
+project_id = "localvivaahvarnam"
+
+[api]
+enabled = true
+port = 54400
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54401
+shadow_port = 54402
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[realtime]
+enabled = false
+
+[storage]
+enabled = false
+
+[studio]
+enabled = false
+
+[analytics]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[local_smtp]
+enabled = true
+port = 54403
+
+[auth]
+site_url = "http://localhost:8080"
+additional_redirect_urls = ["http://localhost:8080/**"]
+jwt_expiry = 3600
+enable_signup = true
+enable_refresh_token_rotation = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
 
 # The legacy `pricing-quote` Edge Function (verify_jwt=false, CORS `*`,
 # caller-supplied printer cost/markup, obsolete per-guest model) was retired
-# in Stage 0. Git history preserves it. No active function is configured here.
+# in Stage 0. Git history preserves it. No active function is configured here,
+# and `[edge_runtime]` above is disabled, so this repository ships no function
+# that a hosted deployment could start.
