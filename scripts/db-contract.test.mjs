@@ -33,9 +33,14 @@ describe("database contract checker", () => {
   });
 
   it("reads only Row keys out of the generated types", () => {
+    // The fixture carries the `Tables:` block the reader anchors on. It used to be a bare
+    // table object, which an older indent-matching parser accepted from anywhere in the
+    // file; a reader that locates tables by structure has to be shown the structure, and
+    // the `Functions:`/`Enums:` blocks that must *not* read as tables are pinned by
+    // `--self-test`.
     const tables = parseGeneratedTypes(
-      ["      weddings: {", "        Row: {", "          id: string;", "        };",
-       "        Insert: {", "          only_in_insert?: string;", "        };", "      };"].join("\n"),
+      ["    Tables: {", "      weddings: {", "        Row: {", "          id: string;", "        };",
+       "        Insert: {", "          only_in_insert?: string;", "        };", "      };", "    };"].join("\n"),
     );
     expect([...tables.get("weddings")]).toEqual(["id"]);
   });

@@ -119,6 +119,17 @@ const client = (who) => hosts[who].client;
 const api = (who) => hosts[who].client.schema('api');
 const anonApi = () => createClient(url, anonKey, { auth: { persistSession: false } }).schema('api');
 
+/** One SQL read against this project's own container, pipe-separated and row-only.
+ *  The catalogue assertions below need what the database says about its own grants, which
+ *  no HTTP route reports — PostgREST will happily answer a call whose grant arrived after
+ *  its schema cache was loaded, and `API01` is where the HTTP half is checked. */
+function sqlRows(query) {
+  const out = execFileSync('docker', ['exec', '-i', DB_CONTAINER,
+    'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-tA', '-F', '|', '-c', query],
+  { encoding: 'utf8' });
+  return out.split(/\r?\n/).filter(line => line.length > 0);
+}
+
 async function signUp(who) {
   const c = createClient(url, anonKey, { auth: { persistSession: false } });
   const { data, error } = await c.auth.signUp({ email: emailFor(who), password: PASSWORD });
@@ -286,18 +297,30 @@ describe('§6.1 what is callable over HTTP', () => {
     assert.equal(error.hint, null, `a grant hint was handed to a server key: ${error.hint}`);
   });
 
-  test('API04 an owner can call all seven, and one of them is the guest door', async () => {
+  test('API04 an owner holds EXECUTE on every host verb, and the refusal that follows is the function’s own', async () => {
+    // The grant half of API02. A caller without EXECUTE is stopped by PostgreSQL with
+    // "permission denied for function <name>" before any argument is read; an owner who
+    // names somebody else's wedding gets the function's own sentence instead. Both arrive
+    // as 42501 — the ownership check raises that SQLSTATE deliberately, so the message is
+    // the only honest discriminator, and a verb that answered with the grant sentence here
+    // would mean the owner's grant had quietly gone missing.
+    for (const [name, args] of HOST_FUNCTIONS) {
+      const { error } = await api('hostA').rpc(name, { ...args, p_wedding_id: hosts.hostB.wedding.id });
+      assert.notEqual(error, null, `${name} answered another owner's wedding`);
+      assert.doesNotMatch(error.message, /permission denied for (function|schema)/,
+        `${name} refused an owner at the grant rather than in its own logic`);
+      assert.match(error.message, /the caller may not /,
+        `${name} refused with something other than the ownership sentence: ${error.message}`);
+    }
+
+    // Positive control beside six refusals: the same role and profile, this caller's own
+    // wedding, answered with data. Without it the refusals could describe a surface that
+    // refuses everyone.
     const { data, error } = await api('hostA').rpc('preview_invitation', {
       p_wedding_id: hosts.hostA.wedding.id,
     });
-    assert.equal(error, null, `the owner could not reach the api surface at all: ${error?.message}`);
+    assert.equal(error, null, `the owner's own preview was refused: ${error?.message}`);
     assert.ok(data && typeof data === 'object');
-    // The other six are each exercised by a positive test below; this one only has to
-    // show that the profile and the grants let an owner in.
-    const names = ['create_invitation_version', 'publish_invitation_version',
-      'revoke_invitation_publication', 'rotate_invitation_token',
-      'get_invitation_publication_state', 'resolve_public_invitation'];
-    assert.equal(names.length, 6);
   });
 
   test('API05 no function in the public profile survives the rename', async () => {
@@ -798,5 +821,125 @@ describe('§6.5 taking a link down', () => {
     assert.equal(second.data.revoked, true);
     assert.equal(second.data.tokens_revoked, 1);
     assert.deepEqual((await resolveAs(tokenOf(p.data.path))).body, { available: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C/§AH — the catalogue itself
+// ---------------------------------------------------------------------------
+//
+// Everything above asks "does this door behave?". This block asks the other question, the
+// one a behaviour test cannot ask: "is the set of doors exactly the set this stage
+// intended?". A grant that arrived by `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA api`
+// would satisfy every positive and negative test above and still be a hole, because the
+// hole is a function nobody read yet. So the list below is a literal, its length is a
+// literal, and a callable that is not on it fails the run.
+//
+// Read from the database rather than from `information_schema.routines`, because the
+// columns needed — `prosecdef`, `proconfig`, `proacl` — are the ones that record the
+// SECURITY DEFINER posture and the grants, and `pg_proc` is where PostgREST's own
+// privilege check ends up.
+describe('§6.6 the callable catalogue is closed', () => {
+  /** `grantees` lists the roles this build intends to reach the function. The owner is
+   *  always allowed and is not a caller; nothing else may appear. */
+  const INTENDED = new Map([
+    ['create_invitation_version', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['get_invitation_publication_state', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['preview_invitation', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['publish_invitation_version', {
+      args: 'p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone',
+      grantees: ['authenticated'],
+    }],
+    ['resolve_public_invitation', { args: '', grantees: ['anon', 'authenticated'] }],
+    ['revoke_invitation_publication', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['rotate_invitation_token', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+  ]);
+
+  const readSurface = () => sqlRows(`
+    select p.proname,
+           pg_get_function_identity_arguments(p.oid),
+           p.prosecdef::text,
+           coalesce(array_to_string(p.proconfig, ';'), ''),
+           coalesce(array_to_string(p.proacl, ','), ''),
+           pg_get_userbyid(p.proowner)
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'api'
+    order by p.proname
+  `).map(line => {
+    const [name, args, securer, config, acl, owner] = line.split('|');
+    // `role=X/owner` — an empty role name is PUBLIC, which is the default grant this
+    // stage revokes rather than leaves in place.
+    const grantees = acl.split(',').filter(Boolean)
+      .map(entry => entry.split('=')[0])
+      .filter(role => role !== '' && role !== owner);
+    return { name, args, securer, config, grantees, owner };
+  });
+
+  test('API33 the api schema holds exactly the seven intended functions, and no eighth', () => {
+    const rows = readSurface();
+    const extra = rows.filter(row => !INTENDED.has(row.name));
+    assert.deepEqual(extra.map(row => row.name), [],
+      `unexpected callable in api: ${extra.map(r => `${r.name}(${r.args})`).join(', ')}`);
+    const missing = [...INTENDED.keys()].filter(k => !rows.some(r => r.name === k));
+    assert.deepEqual(missing, [], `intended callable missing from api: ${missing.join(', ')}`);
+    assert.equal(rows.length, INTENDED.size);
+
+    for (const row of rows) {
+      const wanted = INTENDED.get(row.name);
+      // PostgREST resolves by signature, so a changed argument type is a different door
+      // even under the same name.
+      assert.equal(row.args, wanted.args, `${row.name} has a different signature than audited`);
+      assert.equal(row.securer, 'true', `${row.name} is no longer SECURITY DEFINER`);
+      // A SECURITY DEFINER function with an inherited search_path runs as its owner in
+      // whatever schema the caller steered — the empty path is what makes the owner
+      // harmless, and every relation inside is qualified for the same reason.
+      assert.ok(row.config.includes('search_path=""'),
+        `${row.name} does not pin its search_path: '${row.config}'`);
+      assert.equal(row.owner, 'postgres', `${row.name} is owned by ${row.owner}, not the migration role`);
+      assert.deepEqual(row.grantees.slice().sort(), wanted.grantees.slice().sort(),
+        `${row.name} is granted to ${row.grantees.join(', ') || 'nobody'}`);
+      assert.ok(!row.grantees.includes('PUBLIC'), `${row.name} carries a PUBLIC grant`);
+    }
+  });
+
+  test('API34 api is functions only, and nothing else in an exposed or private schema is callable by a browser role', () => {
+    // An allow-listed API surface with a table in it is a second kind of door: PostgREST
+    // would serve it with row-level security as its only guard, and the whole publication
+    // design assumes a guest cannot read the canonical rows directly.
+    const relations = sqlRows(`
+      select c.relkind::text || coalesce(c.relname, '')
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'api' and c.relkind in ('r', 'v', 'm', 'f', 'p')
+      order by c.relname
+    `);
+    assert.deepEqual(relations, [], `api exposes relations: ${relations.join(', ')}`);
+
+    // `service_role` reaching the browser boundary would mean a key in frontend code
+    // could be swapped for a session and the refusals above would not apply. Measured:
+    // it holds no USAGE on `api` at all, which is what API03 observes from HTTP.
+    // `supabase_admin` is deliberately not in this list: it is a member of `postgres`,
+    // which owns these functions, so it inherits their privileges the way any owner does.
+    // What matters, and what is asserted, is that no *request* role can call the door.
+    const servers = sqlRows(`
+      select r.rolname from pg_roles r
+      where r.rolname in ('service_role', 'authenticator', 'supabase_auth_admin', 'supabase_functions_admin')
+        and has_function_privilege(r.rolname, 'api.resolve_public_invitation()'::regprocedure, 'EXECUTE')
+      order by r.rolname
+    `);
+    assert.deepEqual(servers, [], `server-side roles hold EXECUTE on the guest door: ${servers.join(', ')}`);
+
+    // The other half of "exactly one door": after the move to `api`, no function in
+    // `public` or `private` is executable by a browser role. A leftover in `public` would
+    // be reachable through the default profile without anybody changing a setting, and
+    // API05 only proves three particular names are gone.
+    const strays = sqlRows(`
+      select n.nspname || '.' || p.proname
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname in ('public', 'private')
+        and (has_function_privilege('anon', p.oid, 'EXECUTE')
+          or has_function_privilege('authenticated', p.oid, 'EXECUTE'))
+      order by 1
+    `);
+    assert.deepEqual(strays, [], `browser-callable functions outside api: ${strays.join(', ')}`);
   });
 });

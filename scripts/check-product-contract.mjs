@@ -146,6 +146,49 @@ export const RULES = [
     // for what the product *is* today.
     scope: ["src/", "README.md"],
   },
+  // Stage 3 put a public door in front of the canonical domain, which made three things
+  // worth enforcing mechanically rather than by review. Each is a *shape* rule about
+  // where a call may be written, so it cannot be satisfied by rewording prose, and each
+  // exempts the one module and the test directories that have to write the shape to
+  // qualify it.
+  {
+    id: "guest-door-called-with-arguments",
+    // `api.resolve_public_invitation` is argument-free so the credential can only arrive
+    // in a header. An argument list here means a query string on a GET, which is the one
+    // thing this boundary exists to avoid: URLs outlive a wedding invitation.
+    pattern: /\.rpc\(\s*['"]resolve_public_invitation['"]\s*,/g,
+    message: "passes arguments to the guest resolver, which would put a credential in a URL",
+    fix: "call `rpc('resolve_public_invitation')` with no arguments and send the credential in the x-invitation-token header",
+    scope: ["src/"],
+  },
+  {
+    id: "ad-hoc-supabase-client",
+    // The guest page must hold no session and write nothing to storage; the signed-in app
+    // must hold exactly one. A client constructed in a component is a third kind of
+    // caller, and its auth/storage defaults are nobody's audited choice.
+    pattern: /createClient\s*[(<]/g,
+    message: "constructs a Supabase client outside the integration layer",
+    fix: "read through src/integrations/supabase/ — publicInvitation.ts is the only anonymous client in the app",
+    scope: ["src/"],
+    exclude: ["src/integrations/supabase/", "src/test/"],
+  },
+  {
+    id: "canonical-table-read-outside-the-adapter",
+    pattern: /\.from\(\s*['"](?:weddings|wedding_events|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs)['"]\s*\)/g,
+    message: "queries a canonical wedding table outside the adapter",
+    fix: "add the read to src/integrations/supabase/ so its columns, errors and refusals stay in one place",
+    scope: ["src/"],
+    exclude: ["src/integrations/supabase/", "src/test/"],
+  },
+  {
+    id: "service-role-key-in-browser-code",
+    // `SERVICE_ROLE_KEY` is the key that bypasses row-level security. Its name in `src/`
+    // means it is on its way into a bundle a guest can open.
+    pattern: /SERVICE_ROLE_KEY/g,
+    message: "names the service-role key inside browser code",
+    fix: "no browser file may reference it; the local key exists only in .env.local for the test runners",
+    scope: ["src/", "index.html"],
+  },
 ];
 
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
@@ -155,6 +198,9 @@ export const MUST_NOT_MATCH = [
   "entitlement",
   "Implemented foundations in this preview",
   "These pieces exist in the current codebase",
+  "No account or app is needed to read this invitation.",
+  "This invitation is not available",
+  `const { data } = await client.schema('api').rpc('resolve_public_invitation');`,
 ];
 
 export function isScannedPath(relativePath) {
@@ -171,13 +217,16 @@ export function isScannedPath(relativePath) {
 }
 
 /** One violation per rule match in `text`, with 1-based line and column numbers. Rules
- *  that carry a `scope` are checked only against paths under one of those prefixes. */
+ *  that carry a `scope` are checked only against paths under one of those prefixes, and
+ *  a rule's own `exclude` removes a path again — which is how the one module allowed to
+ *  write a shape can stay in the repository while the same shape elsewhere is a finding. */
 export function scanContent(relativePath, text) {
   const path = posix(relativePath);
   const violations = [];
   text.split(/\r?\n/).forEach((line, index) => {
     RULES.forEach((rule) => {
       if (rule.scope && !rule.scope.some((prefix) => path.startsWith(prefix))) return;
+      if (rule.exclude && rule.exclude.some((prefix) => path.startsWith(prefix))) return;
       const re = new RegExp(rule.pattern.source, rule.pattern.flags);
       re.lastIndex = 0;
       let match = re.exec(line);
@@ -235,6 +284,10 @@ export function selfTest() {
     "unverified-capability-list": `What actually works in this build:`,
     "legacy-table-in-client-code": `supabase.from('projects').select('*')`,
     "legacy-table-as-current-terminology": `// each row of the projects table is a customer`,
+    "guest-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_public_invitation', { raw_token: token });`,
+    "ad-hoc-supabase-client": `const supabase = createClient(url, anonKey);`,
+    "canonical-table-read-outside-the-adapter": `const { data } = await supabase.from('weddings').select('*');`,
+    "service-role-key-in-browser-code": `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
   };
   for (const [ruleId, text] of Object.entries(fixtures)) {
     if (!scanContent("src/fixture.tsx", text).some((v) => v.rule === ruleId)) {
@@ -265,6 +318,26 @@ export function selfTest() {
     failures.push(
       `canonical vocabulary produced ${vocabularyHits.length} violation(s): ${[...new Set(vocabularyHits.map((v) => v.rule))].join(", ")}`,
     );
+  }
+
+  // A `scope` plus `exclude` rule is only worth having if the exempt path really is the
+  // module it names, and the identical text elsewhere is still a finding. Both halves
+  // below are the same four lines, read at two paths.
+  const boundaryShapes = [
+    `const { data } = await client.schema('api').rpc('resolve_public_invitation');`,
+    `const client = createClient<Database>(url, key, { auth: { persistSession: false } });`,
+    `const { data } = await supabase.from('weddings').select('id');`,
+  ].join("\n");
+  const sanctioned = scanContent("src/integrations/supabase/publicInvitation.ts", boundaryShapes);
+  if (sanctioned.length > 0) {
+    failures.push(
+      `the adapter's own file was flagged: ${sanctioned.map((v) => v.rule).join(", ")}`,
+    );
+  }
+  const unsanctioned = scanContent("src/pages/SomethingElse.tsx", boundaryShapes);
+  const unsanctionedRules = unsanctioned.map((v) => v.rule).sort();
+  if (unsanctionedRules.join(",") !== "ad-hoc-supabase-client,canonical-table-read-outside-the-adapter") {
+    failures.push(`a page writing the same shapes produced ${unsanctionedRules.join(", ") || "nothing"}`);
   }
 
   const benign = [

@@ -32,6 +32,10 @@ describe("product contract checker", () => {
         `What actually works in this build:`,
         `supabase.from('projects').select('*')`,
         `// the projects table holds one row per customer`,
+        `const { data } = await client.schema('api').rpc('resolve_public_invitation', { raw_token });`,
+        `const supabase = createClient(url, anonKey);`,
+        `const { data } = await supabase.from('weddings').select('*');`,
+        `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());
