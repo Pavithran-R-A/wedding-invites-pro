@@ -304,13 +304,30 @@ describe('§5.2 the draft invariant holds through the API', () => {
       'the paired draft was written twice');
   });
 
-  test('a second draft for the same wedding is refused by the index, over REST too', async () => {
-    const { error } = await client('hostA')
-      .from('invitation_drafts')
-      .insert({ wedding_id: authed.hostA.wedding.id, content: {} });
-    assert.notEqual(error, null, 'a duplicate draft was accepted');
-    assert.equal(error.code, '23505');
-    assert.match(error.message, /invitation_drafts_wedding_id_key/);
+  // Stage 3 closed the draft invariant by taking the INSERT right away entirely, so
+  // over REST this is no longer a test of the unique index — it is a test that the
+  // only way a draft row comes into existence is the trigger. `20_draft_invariant.sql`
+  // is where the index itself is proven, because that suite writes as a role that is
+  // allowed to, which is the only role for which a duplicate can even be attempted.
+  // Both inserts below carry every required column: a refusal that was really about a
+  // missing field would prove nothing about the grant.
+  test('a customer cannot insert a draft row at all, for their own wedding or anyone else’s', async () => {
+    for (const [who, wedding] of [['hostA', authed.hostA.wedding.id], ['hostB', authed.hostB.wedding.id]]) {
+      const { error } = await client(who).from('invitation_drafts')
+        .insert({ wedding_id: wedding, content: { welcome: 'written by hand' } });
+      assert.notEqual(error, null, `${who} inserted a draft row over REST`);
+      assert.equal(error.code, '42501');
+      assert.match(error.message, /permission denied for table invitation_drafts/);
+    }
+
+    // Positive control: the same two accounts can still read the draft the trigger
+    // made for them, so the refusal above is about INSERT and not about the row.
+    for (const who of ['hostA', 'hostB']) {
+      const { data, error } = await client(who).from('invitation_drafts')
+        .select('wedding_id').eq('wedding_id', authed[who].wedding.id);
+      assert.equal(error, null);
+      assert.equal(data.length, 1, `${who} lost read of its own draft, so the control failed`);
+    }
   });
 
   test('the paired draft is editable by its owner, which is the point of it existing', async () => {
@@ -378,7 +395,7 @@ describe('§5.3 cross-account isolation over the API', () => {
     });
   }
 
-  test('another account’s draft cannot be read, edited or deleted — and the owner can', async () => {
+  test('another account’s draft cannot be read or edited — and deleting drafts is over the API’s reach for everyone', async () => {
     const attacker = client('hostA');
     const victimDraftOf = 'hostB';
 
@@ -393,18 +410,33 @@ describe('§5.3 cross-account isolation over the API', () => {
     assert.equal(edit.error, null);
     assert.deepEqual(edit.data, [], 'a foreign draft was editable');
 
-    const remove = await attacker.from('invitation_drafts').delete().eq('wedding_id', authed[victimDraftOf].wedding.id).select();
-    assert.equal(remove.error, null);
-    assert.deepEqual(remove.data, [], 'a foreign draft was deletable');
+    // The foreign DELETE never reaches a policy: PostgREST asks the grant layer first
+    // and Stage 3 revoked DELETE from `authenticated` outright, so the answer is the
+    // same for the attacker as for the owner. That is the point — a draft is a
+    // lifecycle record, and dropping one is not something a browser may ask for.
+    const foreignDelete = await attacker.from('invitation_drafts').delete()
+      .eq('wedding_id', authed[victimDraftOf].wedding.id).select();
+    assert.equal(foreignDelete.error?.code, '42501', 'a foreign draft was deletable');
+    assert.match(foreignDelete.error.message, /permission denied for table invitation_drafts/);
 
-    // The draft still exists and still belongs to its owner, who can still edit it.
+    const ownDelete = await client('hostB').from('invitation_drafts').delete()
+      .eq('wedding_id', authed.hostB.wedding.id).select();
+    assert.equal(ownDelete.error?.code, '42501', 'the owner deleted its own draft over REST');
+    assert.match(ownDelete.error.message, /permission denied for table invitation_drafts/);
+
+    // Positive control, and it has to be the *owner's* write: without it the two
+    // refusals above could just mean the table is unreadable or frozen.
     const control = await client('hostB').from('invitation_drafts').select('wedding_id').eq('wedding_id', authed.hostB.wedding.id);
     assert.equal(control.error, null);
-    assert.equal(control.data.length, 1, 'the refusal above is really about a surviving row');
+    assert.equal(control.data.length, 1, 'the row the refusals above protected does not exist');
 
-    const ownDelete = await client('hostB').from('invitation_drafts').delete().eq('wedding_id', authed.hostB.wedding.id).select();
-    assert.equal(ownDelete.error, null);
-    assert.equal(ownDelete.data.length, 1, 'the owner lost the DELETE right Stage 2 granted');
+    const ownEdit = await client('hostB').from('invitation_drafts')
+      .update({ content: { welcome: 'written by its owner' } })
+      .eq('wedding_id', authed.hostB.wedding.id)
+      .select('content');
+    assert.equal(ownEdit.error, null, `the owner lost UPDATE: ${ownEdit.error?.message}`);
+    assert.equal(ownEdit.data.length, 1, 'the owner’s UPDATE changed no row');
+    assert.equal(ownEdit.data[0].content.welcome, 'written by its owner');
   });
 
   // `n` distinguishes the refused attempt from the control row wherever a column is

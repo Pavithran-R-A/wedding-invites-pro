@@ -16,9 +16,11 @@
 #   * The chain ends at schema head, which is what a customer's database actually
 #     looks like now. The Stage 2 suites therefore qualify the *current* schema, not
 #     the schema as of Stage 2's commit: a Stage 3 migration must be shown not to
-#     have loosened a Stage 2 guarantee. Stage 2's own numbers (41/75/322/75) remain
-#     the record of Stage 2 at commit a51856f, reproducible from that commit; the
-#     counts printed here are the record of this branch.
+#     have loosened a Stage 2 guarantee. Stage 2's own totals at commit a51856f were
+#     41 / 75 / 322 / 75 and remain reproducible from that commit. On this branch the
+#     same two suites print 325 and 86, because Stage 3 added assertions to them
+#     (draft-invariant INSERT/DELETE refusals and the `api` schema catalogue); every
+#     other number below is the record of this branch, measured, not recalled.
 #   * The fixture is applied *between* the published migrations and the Stage 2 chain,
 #     so the migration is tested against real-shaped history rather than an empty
 #     schema. Skipping it is the clean chain, which proves the opposite half: that the
@@ -129,6 +131,7 @@ chain() { # chain <clean|legacy>
   fi
 
   suite "draft invariant"          supabase/tests/stage3/20_draft_invariant.sql
+  suite "publication boundary"    supabase/tests/stage3/30_publication.sql
   suite "privilege + RLS attacks" supabase/tests/stage2/20_attacks.sql
   suite "catalog conformance"     supabase/tests/stage2/40_catalog.sql
   admin_sql -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null

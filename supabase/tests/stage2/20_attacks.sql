@@ -725,8 +725,13 @@ BEGIN
     'publications','guest_households','household_event_scopes','rsvp_responses',
     'approval_requests','approval_feedback','wedding_assets','entitlements'];
   owner_writable := ARRAY[
-    'wedding_people','venues','wedding_events','invitation_drafts','guest_households',
+    'wedding_people','venues','wedding_events','guest_households',
     'household_event_scopes','rsvp_responses','wedding_assets'];
+  -- `invitation_drafts` is deliberately absent from the two lists below. Stage 3 §3
+  -- revoked a browser role's INSERT and DELETE on it, so an outsider's attempt is
+  -- refused one layer *earlier* than the ownership check group 5 is about — the grant
+  -- layer, with no policy reached. That is a different claim, so it gets its own
+  -- probes (group 5b) rather than quietly joining a loop that asserts another one.
   -- One complete, otherwise-legal row per writable table, aimed at wedding A. Only
   -- the ownership check can refuse these: the columns are right, so a 42501 here is
   -- RLS speaking rather than a typo.
@@ -737,8 +742,6 @@ BEGIN
         VALUES (current_setting('probe.wedding_a')::uuid, 'Forged Hall')$t5$,
     $t5$INSERT INTO public.wedding_events (wedding_id, event_key, display_name, starts_at_local)
         VALUES (current_setting('probe.wedding_a')::uuid, 'forged', 'Forged', '2026-11-20 10:00')$t5$,
-    $t5$INSERT INTO public.invitation_drafts (wedding_id, content)
-        VALUES (current_setting('probe.wedding_a')::uuid, '{"forged": true}'::jsonb)$t5$,
     $t5$INSERT INTO public.guest_households (wedding_id, display_name)
         VALUES (current_setting('probe.wedding_a')::uuid, 'Forged family')$t5$,
     $t5$INSERT INTO public.household_event_scopes (wedding_id, household_id, event_id)
@@ -963,6 +966,61 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS 5: owner-less account read 0, deleted 0, forged 0 rows across % writable tables (grant layer + RLS)',
     array_length(owner_writable, 1);
+
+  -- ----------------------------------------------------------------- group 5b
+  -- The draft's write surface, after Stage 3 §3 closed it. Run as the wedding's OWN
+  -- owner, on purpose: an outsider's refusal is ambiguous (it could be the policy),
+  -- while the owner's refusal can only be the grant. The message is asserted as well
+  -- as the SQLSTATE because the two 42501s mean different guarantees —
+  -- 'permission denied for table' is the privilege layer, 'row-level security' is a
+  -- policy — and the claim here is specifically the first one.
+  PERFORM set_config('test.uid', s.owner_a::text, false);
+  EXECUTE 'SET ROLE authenticated';
+  v := pg_temp.st2_err($t5b$INSERT INTO public.invitation_drafts (wedding_id, content)
+        VALUES (current_setting('probe.wedding_a')::uuid, '{"forged": true}'::jsonb)$t5b$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%permission denied for table invitation_drafts%' THEN
+    EXECUTE 'RESET ROLE';
+    RAISE EXCEPTION 'FAIL 5b: the draft owner inserted a second draft, or was refused by something other than the grant layer: %', v;
+  END IF;
+  passed := passed + 1;
+
+  v := pg_temp.st2_err('DELETE FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe.wedding_a'')::uuid');
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%permission denied for table invitation_drafts%' THEN
+    EXECUTE 'RESET ROLE';
+    RAISE EXCEPTION 'FAIL 5b: the draft owner deleted its own draft, or was refused by something other than the grant layer: %', v;
+  END IF;
+  passed := passed + 1;
+  EXECUTE 'RESET ROLE';
+
+  -- ... and the row is still there, so neither refusal was a partial write.
+  n := pg_temp.st2_visible('SELECT 1 FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe.wedding_a'')::uuid');
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 5b: the refused draft writes left % rows for wedding A', n;
+  END IF;
+  passed := passed + 1;
+
+  EXECUTE 'SET ROLE anon';
+  v := pg_temp.st2_err('DELETE FROM public.invitation_drafts');
+  EXECUTE 'RESET ROLE';
+  IF v NOT LIKE '42501%' THEN
+    RAISE EXCEPTION 'FAIL 5b: anon deleted drafts: %', v;
+  END IF;
+  passed := passed + 1;
+
+  -- The mechanism, not just the outcome: no INSERT or DELETE policy survives on the
+  -- table, so there is no future grant that could silently re-open the hole without a
+  -- policy also having to be added back.
+  SELECT count(*) INTO n FROM pg_policy pol
+    JOIN pg_class c ON c.oid = pol.polrelid
+    JOIN pg_namespace k ON k.oid = c.relnamespace
+   WHERE c.relname = 'invitation_drafts' AND k.nspname = 'public'
+     AND pol.polcmd IN ('a', 'd');
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 5b: % INSERT/DELETE polic% still attached to invitation_drafts',
+      n, CASE WHEN n = 1 THEN 'y' ELSE 'ies' END;
+  END IF;
+  passed := passed + 1;
+  RAISE NOTICE 'PASS 5b: the draft is created and destroyed by the schema only — insert, delete and the policy inventory (5 assertions)';
 
   -- ----------------------------------------------------------------- group 6
   -- WITH CHECK has to bind the *new* row, not just the old one: otherwise an owner

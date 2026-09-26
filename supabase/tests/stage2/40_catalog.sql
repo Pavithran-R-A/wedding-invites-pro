@@ -128,6 +128,15 @@ DECLARE
   owner_crud_tbls text[] := ARRAY[
     'weddings','wedding_people','venues','wedding_events','invitation_drafts',
     'guest_households','household_event_scopes','rsvp_responses','wedding_assets'];
+  -- ... and the same list after Stage 3 §3 closed the draft invariant. `invitation_drafts`
+  -- leaves it: the row is created by the wedding's trigger and destroyed by its
+  -- cascade, so no browser role may insert or delete one. It keeps SELECT and UPDATE.
+  -- The two lists are both kept because they assert different things — C21 asks which
+  -- tables have a write *policy* (the draft still has one, for UPDATE) and C13 asks
+  -- which have a write *grant* per command.
+  owner_insert_tbls text[] := ARRAY[
+    'weddings','wedding_people','venues','wedding_events',
+    'guest_households','household_event_scopes','rsvp_responses','wedding_assets'];
   -- Granted to `authenticated` but written only by the server: no write policy exists,
   -- so the grant is the outer layer and RLS the inner one. profiles is the exception
   -- with an UPDATE policy and no INSERT/DELETE policy: a profile is created by the
@@ -276,15 +285,44 @@ BEGIN
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'public'
         AND has_table_privilege('authenticated', c.oid, 'SELECT')) = (SELECT array_agg(x ORDER BY x) FROM unnest(public_tbls) x));
-  PERFORM pg_temp.st2_ok('C13 authenticated''s write privileges are exactly the customer set',
+  -- Three commands, three inventories. Stage 2 wrote this as one check over
+  -- INSERT AND UPDATE AND DELETE, which could only ever describe a table a customer
+  -- owned outright — and so it was blind to the difference this stage now depends on:
+  -- `invitation_drafts` is UPDATE-able and nothing else. A single conjunctive list
+  -- cannot express "can edit but cannot create", which is exactly the shape of the
+  -- invariant, so the commands are asked separately.
+  PERFORM pg_temp.st2_ok('C13a authenticated''s INSERT privileges are exactly the customer set minus the draft',
     (SELECT array_agg(c.relname::text ORDER BY c.relname)
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'public'
-        AND has_table_privilege('authenticated', c.oid, 'INSERT')
-        AND has_table_privilege('authenticated', c.oid, 'UPDATE')
-        AND has_table_privilege('authenticated', c.oid, 'DELETE')) =
+        AND has_table_privilege('authenticated', c.oid, 'INSERT')) =
+      (SELECT array_agg(x ORDER BY x)
+         FROM unnest(owner_insert_tbls || ARRAY['profiles']) x));
+  PERFORM pg_temp.st2_ok('C13b authenticated''s UPDATE privileges are the customer set including the draft',
+    (SELECT array_agg(c.relname::text ORDER BY c.relname)
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind = 'r' AND n.nspname = 'public'
+        AND has_table_privilege('authenticated', c.oid, 'UPDATE')) =
       (SELECT array_agg(x ORDER BY x)
          FROM unnest(owner_crud_tbls || ARRAY['profiles']) x));
+  PERFORM pg_temp.st2_ok('C13c authenticated''s DELETE privileges are exactly the customer set minus the draft',
+    (SELECT array_agg(c.relname::text ORDER BY c.relname)
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind = 'r' AND n.nspname = 'public'
+        AND has_table_privilege('authenticated', c.oid, 'DELETE')) =
+      (SELECT array_agg(x ORDER BY x)
+         FROM unnest(owner_insert_tbls || ARRAY['profiles']) x));
+  -- The draft on its own, in both directions, because the three lists above would
+  -- also be satisfied by a table nobody can write at all. The trusted backend keeps
+  -- every command: repair and erasure have to remain possible.
+  PERFORM pg_temp.st2_ok('C13d the draft is readable and editable by a customer, never created or removed by one',
+    has_table_privilege('authenticated', 'public.invitation_drafts', 'SELECT')
+    AND has_table_privilege('authenticated', 'public.invitation_drafts', 'UPDATE')
+    AND NOT has_table_privilege('authenticated', 'public.invitation_drafts', 'INSERT')
+    AND NOT has_table_privilege('authenticated', 'public.invitation_drafts', 'DELETE')
+    AND NOT has_table_privilege('anon', 'public.invitation_drafts', 'SELECT, INSERT, UPDATE, DELETE')
+    AND has_table_privilege('service_role', 'public.invitation_drafts',
+                            'SELECT, INSERT, UPDATE, DELETE'));
   PERFORM pg_temp.st2_ok('C14 no API role can name a private or legacy table',
     NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                  WHERE c.relkind = 'r' AND n.nspname IN ('private','legacy')
@@ -301,18 +339,39 @@ BEGIN
   -- Two different claims, so two checks: a browser role reaches one schema, and the
   -- trusted backend reaches two. `private` for service_role is the design (it writes
   -- the audit trail and presents credentials); `legacy` for anyone is not.
-  PERFORM pg_temp.st2_set('C17 schema USAGE for the browser roles is public alone',
+  --
+  -- Stage 3 adds a third namespace to the browser roles' reach: `api`, which holds no
+  -- table and exists only so the callable boundary has a home of its own. That makes
+  -- "which schemas can a client name" a load-bearing fact rather than a detail, so
+  -- this is the check that notices a fourth one arriving.
+  PERFORM pg_temp.st2_set('C17 schema USAGE for the browser roles is public plus the RPC schema',
     (SELECT array_agg(r.rolname || ':' || n.nspname ORDER BY r.rolname, n.nspname)
        FROM (VALUES ('anon'),('authenticated')) r(rolname)
-       JOIN pg_namespace n ON n.nspname IN ('public','private','legacy')
+       JOIN pg_namespace n ON n.nspname IN ('public','api','private','legacy')
       WHERE has_schema_privilege(r.rolname, n.nspname, 'USAGE')),
-    ARRAY['anon:public','authenticated:public']);
+    ARRAY['anon:api','anon:public','authenticated:api','authenticated:public']);
   PERFORM pg_temp.st2_set('C17b schema USAGE for service_role excludes the archive',
     (SELECT array_agg(n.nspname ORDER BY n.nspname)
        FROM pg_namespace n
-      WHERE n.nspname IN ('public','private','legacy')
+      WHERE n.nspname IN ('public','api','private','legacy')
         AND has_schema_privilege('service_role', n.nspname, 'USAGE')),
     ARRAY['private','public']);
+  -- The server key deliberately cannot reach the browser boundary. It has no need to:
+  -- every operation `api` offers is a re-derivation of ownership from `auth.uid()`,
+  -- which a trusted role does not have. If this ever has to flip, the reason belongs
+  -- in the migration that flips it, not here.
+  PERFORM pg_temp.st2_ok('C17c service_role holds no USAGE on the browser RPC schema',
+    NOT has_schema_privilege('service_role', 'api', 'USAGE')
+    AND NOT has_schema_privilege('service_role', 'api', 'CREATE'));
+  -- `api` is a callable surface, not a data surface. Anything else living there would
+  -- mean the separation this schema exists to draw has been blurred.
+  PERFORM pg_temp.st2_ok('C17d the RPC schema holds functions only — no tables, views or sequences',
+    NOT EXISTS (SELECT 1 FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = 'api')
+    AND EXISTS (SELECT 1 FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'api'));
 
   -- =========================================================== 4. policies
   PERFORM pg_temp.st2_ok('C18 every policy targets authenticated alone',
@@ -383,26 +442,112 @@ BEGIN
                           coalesce(pg_get_expr(pol.polwithcheck, pol.polrelid), '')) = 0)));
 
   -- =========================================================== 5. function security
-  -- SECURITY DEFINER inventory, from the catalog (Phase 74). One is expected; a
-  -- second would have to earn its place here before it can ship.
-  PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the signup trigger',
+  -- SECURITY DEFINER inventory, from the catalog (Phase 74).
+  --
+  -- Stage 2 wrote this as "one is expected; a second would have to earn its place
+  -- here before it can ship". Stage 3 collected the seven callable boundary
+  -- functions of the published invitation, and made the signup-adjacent draft
+  -- trigger a definer so the one-draft-per-wedding invariant could be closed. Nine
+  -- names now stand here, which means the rule reads as a named inventory instead of
+  -- a prohibition — that is what "earning its place" looked like when it was finally
+  -- written down. Each name is either a function a browser role can call and cannot
+  -- otherwise do (the seven in `api`), or a function no role can call at all and only
+  -- the executor of a trigger reaches (the two in `private`). The grant set beside
+  -- each is asserted by C28a/C28b/C30 rather than asserted in a comment.
+  --
+  -- What did NOT change is the reason the check exists: a definer function is the
+  -- one shape in this schema that can act above its caller, so the list is the
+  -- audit surface, and a new name arriving here must be readable in one line.
+  PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the two trigger definers plus the Stage 3 boundary',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')) s),
-    ARRAY['private.handle_new_user']);
+    ARRAY['api.create_invitation_version',
+          'api.get_invitation_publication_state',
+          'api.preview_invitation',
+          'api.publish_invitation_version',
+          'api.resolve_public_invitation',
+          'api.revoke_invitation_publication',
+          'api.rotate_invitation_token',
+          'private.attach_draft_on_wedding_create',
+          'private.handle_new_user']);
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')
                    AND p.proconfig::text NOT LIKE '%search_path%'));
-  PERFORM pg_temp.st2_ok('C28 no SECURITY DEFINER function is executable by anon or authenticated',
-    NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                 WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')
-                   AND (has_function_privilege('anon', p.oid, 'EXECUTE')
-                     OR has_function_privilege('authenticated', p.oid, 'EXECUTE'))));
+  -- Stage 2's C28 read "no SECURITY DEFINER function is executable by anon or
+  -- authenticated", which was true only because nothing of ours was a definer at
+  -- all. Replaced by two statements that carry the same weight and survive the
+  -- change: the anonymous callable surface is exactly one function, and the full
+  -- callable set of a signed-in role is named row by row.
+  --
+  -- `auth` is excluded because the local shim defines auth.uid()/auth.role() with
+  -- the implicit PUBLIC execute that no ALTER DEFAULT PRIVILEGES can remove
+  -- (measured, Stage 2 file 1) — those two are not our surface and cannot be.
+  -- `api` is included because it is now where the callable surface lives.
+  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is exactly the resolver',
+    (SELECT array_agg(p ORDER BY p) FROM (
+       SELECT n.nspname || '.' || p.proname AS p
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname IN ('public','api','private','legacy')
+          AND has_function_privilege('anon', p.oid, 'EXECUTE')) s),
+    ARRAY['api.resolve_public_invitation']);
+  PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the resolver plus the six host operations',
+    (SELECT array_agg(p ORDER BY p) FROM (
+       SELECT n.nspname || '.' || p.proname AS p
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname IN ('public','api','private','legacy')
+          AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
+    ARRAY['api.create_invitation_version',
+          'api.get_invitation_publication_state',
+          'api.preview_invitation',
+          'api.publish_invitation_version',
+          'api.resolve_public_invitation',
+          'api.revoke_invitation_publication',
+          'api.rotate_invitation_token']);
+  -- Stage 2 asserted "no function at all lives in public", and said why in its own
+  -- comment: a function in `public` is reachable by name through the data API, so an
+  -- empty `public` meant the data API could not be asked to run anything of ours.
+  -- Stage 3 needs callable functions, and this is where the schema answers instead of
+  -- the comment: the callables went to a separate, deliberately exposed `api`
+  -- namespace, so the original assertion is restored at full strength rather than
+  -- weakened to fit. `public` is data and RLS only; `api` is behaviour only.
   PERFORM pg_temp.st2_ok('C29 no function at all lives in public',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'public'));
+  -- ... and the counterpart, since C29 alone would also be satisfied by a schema that
+  -- grew no boundary at all. The list is exact: an eighth callable would have to be
+  -- named here before it could ship.
+  PERFORM pg_temp.st2_set('C29a the callable boundary is exactly seven named RPCs',
+    (SELECT array_agg(p ORDER BY p) FROM (
+       SELECT p.proname AS p FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'api') s),
+    ARRAY['create_invitation_version',
+          'get_invitation_publication_state',
+          'preview_invitation',
+          'publish_invitation_version',
+          'resolve_public_invitation',
+          'revoke_invitation_publication',
+          'rotate_invitation_token']);
+  -- Zero arguments is not a style preference. It is the mechanism behind
+  -- "the credential never appears in a query string": with no parameter to name, a
+  -- request that puts `?p_token=` in a URL cannot be resolved to a function at all,
+  -- which `supabase/tests/api/stage3_security.test.mjs` measures from the outside.
+  PERFORM pg_temp.st2_ok('C29b the anonymous resolver takes no arguments',
+    (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'api' AND p.proname = 'resolve_public_invitation'
+        AND p.pronargs = 0) = 1);
+  -- The six host operations take exactly the arguments their signature declares and
+  -- no more: a caller supplies identifiers, never an owner id. `p_owner_user_id`
+  -- appearing anywhere in this schema would mean a request body could name a victim.
+  PERFORM pg_temp.st2_ok('C29c no callable takes a user or role identity as an argument',
+    NOT EXISTS (SELECT 1 FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                  JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
+                 WHERE n.nspname IN ('api','private','public')
+                   AND a.argname ~* 'user_id|owner|role|uid'));
   PERFORM pg_temp.st2_ok('C30 anon and authenticated cannot execute anything in private',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'private'
@@ -447,24 +592,37 @@ BEGIN
       'public.wedding_events.set_updated_at=touch_updated_at',
       'public.wedding_people.set_updated_at=touch_updated_at',
       'public.weddings.set_updated_at=touch_updated_at',
-      -- Stage 3 §3: the wedding/draft pairing invariant, installed as an INVOKER
-      -- trigger so the draft row is written under the wedding owner's own policies.
-      -- It is in this inventory because this assertion is the alarm for a trigger
-      -- arriving or disappearing without being qualified.
+      -- Stage 3 §3: the wedding/draft pairing invariant. Installed by file
+      -- 20260926120000 as an INVOKER trigger authorised by the owner's own INSERT
+      -- policy, and made SECURITY DEFINER by file 20260926140000 when that policy was
+      -- dropped — because the alternative to defining it was leaving the invariant
+      -- open to an owner delete. It is in this inventory because this assertion is the
+      -- alarm for a trigger arriving or disappearing without being qualified.
       'public.weddings.weddings_have_draft=attach_draft_on_wedding_create']);
   -- The guards are INVOKER by design (they must report the role that issued the
-  -- statement), so a DEFINER trigger function would mean the guard had a privilege
-  -- of its own to use. This is about triggers on the *canonical* tables: the one
-  -- SECURITY DEFINER function this schema has, private.handle_new_user, is a trigger on
-  -- auth.users and must be definer to write a profile for a joining user — C26 pins it
-  -- by name, so widening this check to auth.users would only make it false.
-  PERFORM pg_temp.st2_ok('C32 no canonical table carries a SECURITY DEFINER trigger',
+  -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
+  -- use. That is the property this check carried in Stage 2, when the whole schema had
+  -- one definer and no canonical table any. Stage 3 added a second definer, and it is
+  -- a trigger on a canonical table, so the blanket form of the claim became false —
+  -- the honest repair is to name the exception and keep the rule:
+  --   * every `reject_client_*` / `touch_updated_at` guard is INVOKER (C32b), and
+  --   * exactly one canonical table carries a definer trigger, and it is this one (C32).
+  PERFORM pg_temp.st2_set('C32 the only SECURITY DEFINER trigger on a canonical table is the draft pairing',
+    (SELECT array_agg(x ORDER BY x) FROM (
+       SELECT n.nspname || '.' || c.relname || '.' || t.tgname AS x
+         FROM pg_trigger t
+         JOIN pg_proc p ON p.oid = t.tgfoid
+         JOIN pg_class c ON c.oid = t.tgrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE NOT t.tgisinternal AND p.prosecdef
+          AND n.nspname IN ('public','private')) s),
+    ARRAY['public.weddings.weddings_have_draft']);
+  PERFORM pg_temp.st2_ok('C32b no write guard or timestamp trigger is SECURITY DEFINER',
     NOT EXISTS (SELECT 1 FROM pg_trigger t
                   JOIN pg_proc p ON p.oid = t.tgfoid
-                  JOIN pg_class c ON c.oid = t.tgrelid
-                  JOIN pg_namespace n ON n.oid = c.relnamespace
                  WHERE NOT t.tgisinternal AND p.prosecdef
-                   AND n.nspname IN ('public','private')));
+                   AND p.proname IN ('reject_client_write','reject_client_delete',
+                                     'touch_updated_at')));
   -- Phase 47: "no client-writable trusted field". The grant list (C13/C22) says which
   -- tables a client may write; this says every table that must not be client-written
   -- also has a trigger refusing it, so a future GRANT cannot be the only line of
@@ -768,14 +926,16 @@ BEGIN
       'access_tokens'));
   -- ================================================== 12. defaults, proven not described
   -- Phase 48. The claim is about objects that do not exist yet, so the only honest way
-  -- to test it is to make one. This block creates a table, a sequence and two
+  -- to test it is to make one. This block creates a table, a sequence and three
   -- functions, asks what each role can actually do with them, and drops them again in
-  -- the same breath. 40_catalog.sql is otherwise read-only and is run by run.sh inside
-  -- a transaction it rolls back, so a probe can never become schema.
+  -- the same breath. run.sh applies each file with `psql --single-transaction`, which
+  -- *commits* when the file succeeds rather than rolling it back, so the objects have
+  -- to be dropped here and C70 asserts that they were.
   EXECUTE 'CREATE TABLE public.st2_probe_dp (id integer)';
   EXECUTE 'CREATE SEQUENCE public.st2_probe_seq_dp';
   EXECUTE 'CREATE FUNCTION public.st2_probe_fn_dp() RETURNS integer LANGUAGE sql AS $body$ SELECT 1 $body$';
   EXECUTE 'CREATE FUNCTION private.st2_probe_fn_dp() RETURNS integer LANGUAGE sql AS $body$ SELECT 1 $body$';
+  EXECUTE 'CREATE FUNCTION api.st2_probe_fn_dp() RETURNS integer LANGUAGE sql AS $body$ SELECT 1 $body$';
   -- The rule this project follows instead of default privileges for functions (see the
   -- measured note in migration 20260925120000): revoke on the object.
   EXECUTE 'REVOKE ALL ON FUNCTION private.st2_probe_fn_dp() FROM PUBLIC, anon, authenticated';
@@ -803,13 +963,29 @@ BEGIN
   -- The limitation, kept on the record as a passing check. Postgres layers PUBLIC's
   -- implicit EXECUTE on top of any stored default ACL, so ALTER DEFAULT PRIVILEGES
   -- cannot make a *future* public function non-executable (measured; see the note in
-  -- migration 20260925120000). This project's answer is C29 — nothing of ours lives in
-  -- public — plus the per-object revoke. If a future Postgres changes this, delete this
-  -- check and the sentence above it; do not flip it, or it stops describing anything.
+  -- migration 20260925120000). Stage 2's answer was to keep `public` empty of
+  -- functions. Stage 3 needed callable functions and did not want to reopen `public`,
+  -- so it moved the callables to `api` — which changes what protects them, not how
+  -- much they need protecting: a schema a client has USAGE on is a schema whose
+  -- un-revoked functions that client can run, as this probe is about to show. The
+  -- defence is therefore the per-object revoke plus three exact inventories — C29a
+  -- lists every function in `api`, C28a every one `anon` may execute, C28b every one
+  -- a signed-in caller may execute. A future forgotten revoke shows up as C28a
+  -- reporting two names. If a future Postgres changes the default-ACL behaviour,
+  -- delete this check and the sentence above it; do not flip it, or it stops
+  -- describing anything.
   PERFORM pg_temp.st2_ok('C63 (limitation, not a goal) default privileges cannot revoke PUBLIC EXECUTE',
     pg_temp.st2_state('SELECT public.st2_probe_fn_dp()', 'anon') = '00000'
     AND has_function_privilege('anon', 'public.st2_probe_fn_dp()', 'EXECUTE'));
+  -- The same limitation restated for the schema Stage 3 actually added, because the
+  -- tempting wrong reading of `api` is "a private namespace a client happens to be
+  -- allowed into", which a forgotten revoke would turn into a callable surface with no
+  -- inventory noticing. USAGE is what makes C28a load-bearing.
+  PERFORM pg_temp.st2_ok('C63b a forgotten revoke in api is reachable, which is why C28a exists',
+    has_schema_privilege('anon', 'api', 'USAGE')
+    AND pg_temp.st2_state('SELECT api.st2_probe_fn_dp()', 'anon') = '00000');
 
+  EXECUTE 'DROP FUNCTION api.st2_probe_fn_dp()';
   EXECUTE 'DROP FUNCTION private.st2_probe_fn_dp()';
   EXECUTE 'DROP FUNCTION public.st2_probe_fn_dp()';
   EXECUTE 'DROP SEQUENCE public.st2_probe_seq_dp';
@@ -851,8 +1027,16 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM pg_class WHERE relname LIKE 'st2_probe_%')
     AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname LIKE 'st2_probe_%'));
 
-  IF (current_setting('st2.passed'))::int < 70 THEN
-    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 70',
+  -- Measured on this branch: 86. The file ran 76 at Stage 2's head commit, and Stage 3
+  -- added ten by splitting two claims that could no longer be made whole — C13 became
+  -- C13a-d (one per command, plus the draft itself) and C28 became C28a/C28b (the
+  -- anonymous surface, the signed-in surface) — plus C17c/C17d for the `api` schema,
+  -- C29a/C29c for the callable inventory and its argument shape, C32b for the guard
+  -- privilege that C32's blanket form can no longer state, and C63b for the limitation
+  -- the new schema inherits. Re-measure and say so whenever a check is added or
+  -- removed: a floor nobody re-measures stops meaning anything.
+  IF (current_setting('st2.passed'))::int < 86 THEN
+    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 86',
       (current_setting('st2.passed'))::int;
   END IF;
 END $CATALOG$;

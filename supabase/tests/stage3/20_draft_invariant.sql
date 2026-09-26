@@ -8,9 +8,14 @@
 --   3. another account cannot create or replace it;
 --   4. a failed creation cannot leave an invalid partial state;
 --   5. migration-created historical weddings remain valid.
--- Plus the residual the mechanism genuinely does not cover, asserted rather than
--- glossed: `owners_manage_own_draft` gives the owner DELETE, so a deliberate owner
--- delete leaves the wedding with no draft, and the editing path has to recover.
+-- Plus the two things that only a measurement can say:
+--   * no operation a browser may perform can leave a wedding undrafted. An earlier
+--     version of this file asserted the opposite as an accepted residual, because
+--     `owners_manage_own_draft` granted the owner DELETE; migration
+--     20260926140000 took that grant and policy away, and group G is the proof from
+--     the row's own owner, so no isolation argument can explain the refusal;
+--   * the wedding cascade that the dropped grant was feared to break still works,
+--     measured in group G2 rather than argued in a comment.
 --
 -- Fault injection for (4) is a temporary BEFORE INSERT guard on `invitation_drafts`
 -- that refuses the write. It is dropped in the same file that creates it, and the
@@ -20,11 +25,13 @@
 --
 -- Refusals are told apart the way Stage 2 taught, because "it errored" proves
 -- nothing on its own:
---   42501 + "permission denied"     the grant layer refused it
---   42501 + "row-level security"    a policy refused it
---   0 rows affected                 RLS hid the row from the caller
---   23505 / 23503                   the unique index / the foreign key refused it
+--   42501 + "permission denied for table"  the grant layer refused it
+--   42501 + "row-level security"           a policy refused it
+--   0 rows affected                        RLS hid the row from the caller
+--   23505 / 23503                          the unique index / the foreign key refused it
 -- A probe that reports 'no-error' is a failed test, never an unreported pass.
+-- Which of the first two applies is itself a result, not a detail: a statement about
+-- what a role may not do is worth more when it is refused before any row is looked at.
 --
 -- Scope note, stated rather than implied: this proves the *database* guarantee for
 -- every create path, which is the repair Stage 2 asked for. The application's
@@ -199,20 +206,17 @@ BEGIN
   -- ---------------------------------------------------------------- group B
   -- (2) a duplicate cannot exist, and the barrier is the index rather than the
   -- policy: what a caller is refused, the owner of the database is refused too.
-  EXECUTE 'SET ROLE authenticated';
-  PERFORM set_config('test.uid', s.owner_c::text, false);
-  v := pg_temp.st3_err($b$INSERT INTO public.invitation_drafts (wedding_id, content)
-        VALUES (current_setting('probe3.wedding_c')::uuid, '{"second": true}'::jsonb)$b$);
-  EXECUTE 'RESET ROLE';
-  IF v NOT LIKE '23505%' OR v NOT LIKE '%invitation_drafts_wedding_id_key%' THEN
-    RAISE EXCEPTION 'FAIL B: a second draft for one wedding was not refused by the unique index: %', v;
-  END IF;
-  PERFORM pg_temp.st3_add(1);
-
+  --
+  -- The browser-role half changed when file 20260926140000 revoked INSERT on the
+  -- draft table, and the difference is worth naming precisely: a customer's duplicate
+  -- attempt is now refused one layer before the index, so this probe cannot claim the
+  -- index refused *it*. The index claim is therefore made against a role that can
+  -- reach the index at all, and the customer-side statement is a separate one about
+  -- where the refusal comes from.
   v := pg_temp.st3_err($b$INSERT INTO public.invitation_drafts (wedding_id, content)
         VALUES (current_setting('probe3.wedding_c')::uuid, '{}'::jsonb)$b$);
-  IF v NOT LIKE '23505%' THEN
-    RAISE EXCEPTION 'FAIL B: the maintenance role could write a second draft (%). The duplicate barrier must not depend on RLS', v;
+  IF v NOT LIKE '23505%' OR v NOT LIKE '%invitation_drafts_wedding_id_key%' THEN
+    RAISE EXCEPTION 'FAIL B: a second draft for one wedding was not refused by the unique index: %', v;
   END IF;
   PERFORM pg_temp.st3_add(1);
 
@@ -222,6 +226,17 @@ BEGIN
         VALUES ('00000000-0000-0000-0000-000000000000'::uuid, '{}'::jsonb)$b$);
   IF v NOT LIKE '23503%' THEN
     RAISE EXCEPTION 'FAIL B: a draft for a wedding that does not exist was accepted: %', v;
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+
+  -- Even the trusted backend, which bypasses RLS by design, cannot get a second row
+  -- in. Said differently: the duplicate barrier does not depend on a policy.
+  EXECUTE 'SET ROLE service_role';
+  v := pg_temp.st3_err($b$INSERT INTO public.invitation_drafts (wedding_id, content)
+        VALUES (current_setting('probe3.wedding_c')::uuid, '{"via-service-role": true}'::jsonb)$b$);
+  EXECUTE 'RESET ROLE';
+  IF v NOT LIKE '23505%' THEN
+    RAISE EXCEPTION 'FAIL B: service_role could write a second draft: %', v;
   END IF;
   PERFORM pg_temp.st3_add(1);
 
@@ -241,13 +256,21 @@ BEGIN
 
   -- ---------------------------------------------------------------- group C
   -- (3) another account cannot create, replace, delete or even read it.
+  --
+  -- Where each refusal comes from is part of the result. Create and delete are now
+  -- refused by the *grant*, before any row is looked at — so the interesting property
+  -- of these two probes is that they do not even reach a policy, which is what makes
+  -- them independent of a future policy mistake on the draft table. Replace and read
+  -- are still RLS answers, and are asserted as such, because UPDATE and SELECT remain
+  -- granted and the ownership policy is the only thing between another account and
+  -- this row.
   EXECUTE 'SET ROLE authenticated';
   PERFORM set_config('test.uid', s.owner_d::text, false);
   v := pg_temp.st3_err($c$INSERT INTO public.invitation_drafts (wedding_id, content)
         VALUES (current_setting('probe3.wedding_c')::uuid, '{"forged": true}'::jsonb)$c$);
-  IF v NOT LIKE '42501%' OR v NOT LIKE '%row-level security%' THEN
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%permission denied for table invitation_drafts%' THEN
     EXECUTE 'RESET ROLE';
-    RAISE EXCEPTION 'FAIL C: another account could attach a draft to a wedding it does not own, or was refused by something other than a policy: %', v;
+    RAISE EXCEPTION 'FAIL C: another account could attach a draft to a wedding it does not own, or was refused by something other than the grant layer: %', v;
   END IF;
   PERFORM pg_temp.st3_add(1);
 
@@ -260,10 +283,21 @@ BEGIN
   END IF;
   PERFORM pg_temp.st3_add(1);
 
-  n := pg_temp.st3_changed('DELETE FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_c'')::uuid');
-  IF n <> 0 THEN
+  -- ... and the UPDATE the policy does allow still cannot move the row to a wedding
+  -- the caller does not own: WITH CHECK has to bind the new row, not just the old one.
+  v := pg_temp.st3_err($c$UPDATE public.invitation_drafts
+        SET wedding_id = current_setting('probe3.wedding_c')::uuid
+        WHERE wedding_id = current_setting('probe3.wedding_d')::uuid$c$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%row-level security%' THEN
     EXECUTE 'RESET ROLE';
-    RAISE EXCEPTION 'FAIL C: another account deleted a draft it does not own (% rows)', n;
+    RAISE EXCEPTION 'FAIL C: a draft was re-parented onto another account''s wedding, or the refusal did not come from WITH CHECK: %', v;
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+
+  v := pg_temp.st3_err('DELETE FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_c'')::uuid');
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%permission denied for table invitation_drafts%' THEN
+    EXECUTE 'RESET ROLE';
+    RAISE EXCEPTION 'FAIL C: another account deleted (or was refused by the wrong layer for) a draft it does not own: %', v;
   END IF;
   EXECUTE 'RESET ROLE';
   n := pg_temp.st3_real(
@@ -291,7 +325,7 @@ BEGIN
   END IF;
   EXECUTE 'RESET ROLE';
   PERFORM pg_temp.st3_add(1);
-  RAISE NOTICE 'PASS C: create, replace, delete, read and the anonymous path are all closed to other accounts (6)';
+  RAISE NOTICE 'PASS C: create, replace, re-parent, delete, read and the anonymous path are all closed to other accounts (7)';
 END $S3A$;
 
 -- The injected failure, at file level: DDL around a probe must not be tangled in the
@@ -411,9 +445,24 @@ BEGIN
   END IF;
   PERFORM pg_temp.st3_add(1);
 
+  -- The invariant as the domain states it, measured across the whole database rather
+  -- than across this file's rows: after every create, attack, injected failure and
+  -- cascade above, there is no wedding anywhere in the schema without exactly one
+  -- draft. This is the assertion the residual used to contradict, so it is the one
+  -- that records the hole closing.
+  SELECT count(*) INTO n FROM public.weddings w
+   WHERE (SELECT count(*) FROM public.invitation_drafts d
+           WHERE d.wedding_id = w.id) <> 1;
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL F: % weddings do not carry exactly one draft', n;
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+
   -- The Stage 3 function follows the project rule for functions: not executable by
   -- an API role, and not even by the trusted backend, because a trigger is the only
-  -- supported way to reach it (Stage 2 measured both halves of C68/C69).
+  -- supported way to reach it (Stage 2 measured both halves of C68/C69). This matters
+  -- more now than it did when the function was SECURITY INVOKER: a definer that a
+  -- caller could name would be a way to insert a draft out of band.
   IF has_function_privilege('anon', 'private.attach_draft_on_wedding_create()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'private.attach_draft_on_wedding_create()', 'EXECUTE') THEN
     RAISE EXCEPTION 'FAIL F: a browser role can execute the invariant function directly';
@@ -422,6 +471,29 @@ BEGIN
 
   IF has_function_privilege('service_role', 'private.attach_draft_on_wedding_create()', 'EXECUTE') THEN
     RAISE EXCEPTION 'FAIL F: even the trusted backend can call the invariant function out of band';
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+
+  -- The privilege this invariant now runs on, checked rather than described: it is a
+  -- definer, it pins its search path, and the trigger that reaches it is enabled.
+  -- Each half is a separate failure mode — an unpinned definer is a hijack, a
+  -- disabled trigger is a silently absent guarantee.
+  SELECT count(*) INTO n FROM pg_proc p
+    JOIN pg_namespace k ON k.oid = p.pronamespace
+   WHERE k.nspname = 'private' AND p.proname = 'attach_draft_on_wedding_create'
+     AND p.prosecdef AND p.proconfig::text LIKE '%search_path%';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL F: the invariant function is not a search-path-pinned SECURITY DEFINER (% matches)', n;
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+
+  SELECT count(*) INTO n FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace k ON k.oid = c.relnamespace
+   WHERE k.nspname = 'public' AND c.relname = 'weddings'
+     AND t.tgname = 'weddings_have_draft' AND NOT t.tgisinternal AND t.tgenabled = 'O';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL F: the pairing trigger is not enabled on public.weddings (% matches)', n;
   END IF;
   PERFORM pg_temp.st3_add(1);
 
@@ -465,42 +537,88 @@ BEGIN
   END IF;
 
   -- ---------------------------------------------------------------- group G
-  -- The residual, measured instead of assumed: the owner's DELETE right really does
-  -- leave a wedding undrafted, and the recovery path really does restore exactly one.
+  -- The residual that file 20260926120000 disclosed, and file 20260926140000 closed.
+  -- The earlier file said a deliberate owner delete could leave a wedding undrafted,
+  -- because `owners_manage_own_draft` granted DELETE; the repair was to take both the
+  -- grant and the policy away, which is what these probes measure from the customer's
+  -- side. Run as the row's OWN owner, so no isolation argument can explain a refusal.
   EXECUTE 'SET ROLE authenticated';
   PERFORM set_config('test.uid', s.owner_c::text, false);
-  n := pg_temp.st3_changed('DELETE FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_c'')::uuid');
-  IF n <> 1 THEN
+  v := pg_temp.st3_err('DELETE FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_c'')::uuid');
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%permission denied for table invitation_drafts%' THEN
     EXECUTE 'RESET ROLE';
-    RAISE EXCEPTION 'FAIL G: the owner could not delete its own draft (rows=%). Stage 2 granted this right, so refusing it would be a behaviour change', n;
+    RAISE EXCEPTION 'FAIL G: the owner deleted its own draft, or was refused by something other than the grant: %', v;
   END IF;
   PERFORM pg_temp.st3_add(1);
 
+  v := pg_temp.st3_err($g$INSERT INTO public.invitation_drafts (wedding_id, content)
+        VALUES (current_setting('probe3.wedding_c')::uuid, '{"recovered": true}'::jsonb)$g$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%permission denied for table invitation_drafts%' THEN
+    EXECUTE 'RESET ROLE';
+    RAISE EXCEPTION 'FAIL G: the owner inserted a draft for itself, so the invariant is not the only author of that row: %', v;
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+
+  -- The refused pair changed nothing: the draft is still there, still single, and
+  -- still the owner's to edit. Without this, "the browser cannot destroy it" would
+  -- only be a claim about error messages.
   n := pg_temp.st3_visible(
     'SELECT 1 FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_c'')::uuid');
-  IF n <> 0 THEN
-    EXECUTE 'RESET ROLE';
-    RAISE EXCEPTION 'FAIL G: the deleted draft is still visible to its owner';
-  END IF;
-  PERFORM pg_temp.st3_add(1);
-
-  -- The editor's recovery: one statement, as the owner, restores the pair.
-  n := pg_temp.st3_changed($g$INSERT INTO public.invitation_drafts (wedding_id, content)
-        VALUES (current_setting('probe3.wedding_c')::uuid, '{"recovered": true}'::jsonb)$g$);
   IF n <> 1 THEN
     EXECUTE 'RESET ROLE';
-    RAISE EXCEPTION 'FAIL G: the owner could not recover its draft (rows=%)', n;
+    RAISE EXCEPTION 'FAIL G: the refused write attempts left % drafts visible to the owner, expected 1', n;
   END IF;
   PERFORM pg_temp.st3_add(1);
 
-  v := pg_temp.st3_err($g$INSERT INTO public.invitation_drafts (wedding_id)
-        VALUES (current_setting('probe3.wedding_c')::uuid)$g$);
+  n := pg_temp.st3_changed($g$UPDATE public.invitation_drafts
+        SET content = '{"heading": "still editable"}'::jsonb
+        WHERE wedding_id = current_setting('probe3.wedding_c')::uuid$g$);
   EXECUTE 'RESET ROLE';
-  IF v NOT LIKE '23505%' THEN
-    RAISE EXCEPTION 'FAIL G: after a delete-and-recover, a second draft was not refused: %', v;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL G: closing the create/destroy surface also closed the editing surface (rows=%)', n;
   END IF;
   PERFORM pg_temp.st3_add(1);
-  RAISE NOTICE 'PASS G: the DELETE right, the recovery path, and the duplicate wall after it (4)';
+  RAISE NOTICE 'PASS G: no allowed browser operation can leave a wedding undrafted, and editing still works (4)';
+
+  -- --------------------------------------------------------- group G2 (the cascade)
+  -- The claim file 20260926140000 says it *corrected*, measured rather than trusted.
+  -- The earlier file justified leaving DELETE in place by arguing that refusing it
+  -- would break the wedding-level cascade; Stage 2's own group 11 had already shown a
+  -- cascade deletes as the child table's owner, so the cascade never needed the
+  -- customer''s privilege. This is that fact re-derived against the schema as it is
+  -- now: the acting role holds no DELETE on `invitation_drafts` at all, and deleting
+  -- its wedding still takes the draft with it.
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', s.owner_d::text, false);
+  n := pg_temp.st3_changed('DELETE FROM public.weddings WHERE id = current_setting(''probe3.wedding_d'')::uuid');
+  IF n <> 1 THEN
+    EXECUTE 'RESET ROLE';
+    RAISE EXCEPTION 'FAIL G2: an owner could not delete its own wedding once the draft lost its client DELETE grant (rows=%)', n;
+  END IF;
+  EXECUTE 'RESET ROLE';
+  n := pg_temp.st3_real(
+    'SELECT 1 FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_d'')::uuid');
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL G2: the wedding went and its draft survived (% rows) — the cascade does depend on a client privilege', n;
+  END IF;
+  n := pg_temp.st3_real('SELECT 1 FROM public.weddings WHERE id = current_setting(''probe3.wedding_d'')::uuid');
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL G2: the wedding survived its own delete';
+  END IF;
+  PERFORM pg_temp.st3_add(3);
+  RAISE NOTICE 'PASS G2: revoking the draft''s client DELETE did not break the wedding cascade — the overstatement is corrected and proved';
+
+  -- A trusted role can still retire a draft on its own, which is what keeps this a
+  -- statement about browser operations rather than about immutability: support repair
+  -- and the erasure order in the runbook have to remain possible.
+  EXECUTE 'SET ROLE service_role';
+  n := pg_temp.st3_changed('DELETE FROM public.invitation_drafts WHERE wedding_id = current_setting(''probe3.wedding_svc'')::uuid');
+  EXECUTE 'RESET ROLE';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL G2: the trusted backend could not retire a draft directly (rows=%)', n;
+  END IF;
+  PERFORM pg_temp.st3_add(1);
+  RAISE NOTICE 'PASS G2b: a trusted role may still delete a draft, so the invariant is about callers, not about the row being frozen (1)';
 END $S3E$;
 
 -- --------------------------------------------------------------------- cleanup
@@ -550,8 +668,11 @@ DO $S3FLOOR$
 DECLARE passed integer;
 BEGIN
   passed := coalesce(nullif(current_setting('st3.passed', true), ''), '0')::int;
-  IF passed < 38 THEN
-    RAISE EXCEPTION 'FAIL: only % assertions ran — the expected floor is 38, so a probe set went empty', passed;
+  -- A(8) B(4) C(7) D(5) E(2) F(7) G(4) G2(3+1) Z(5) = 46 in the clean chain; the
+  -- legacy chain adds 3 more from group F's historical block. The floor is the clean
+  -- number, so a suite that quietly stopped running a group is visible.
+  IF passed < 46 THEN
+    RAISE EXCEPTION 'FAIL: only % assertions ran — the expected floor is 46, so a probe set went empty', passed;
   END IF;
 END $S3FLOOR$;
 

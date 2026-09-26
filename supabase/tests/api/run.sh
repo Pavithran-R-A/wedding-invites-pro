@@ -132,10 +132,17 @@ TABLES=$(psql_q "select count(*) from pg_tables where schemaname = 'public'")
 echo "  ..  public schema: $TABLES tables, $POLICIES policies"
 
 # --- 4. the suite -------------------------------------------------------------------
-# The glob is expanded by the shell: Node resolves a bare directory argument as a
-# module on this platform and reports MODULE_NOT_FOUND.
-echo "==> node --test supabase/tests/api/*.test.mjs"
-node --test supabase/tests/api/*.test.mjs
+# One `node --test` per file, in sequence. `node --test <glob>` runs each file in its
+# own process *concurrently*, and these files share a database: one counts rows before
+# and after to prove it leaked nothing, and a parallel run would move those counts
+# underneath it. The environment names the container the publication suite uses for
+# the one thing no HTTP route can do — clear `private.access_tokens`, whose absence
+# from the exposed schemas is the point of the boundary.
+export STAGE3_DB_CONTAINER="$DB_CTR"
+for f in $(ls supabase/tests/api/*.test.mjs | sort); do
+  echo "==> node --test $f"
+  node --test "$f"
+done
 
 # --- 5. the run must not leave anything behind --------------------------------------
 # Synthetic accounts are removed by the suite through the Auth admin API, and every row
