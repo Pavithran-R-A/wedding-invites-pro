@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "product:check": "node scripts/check-product-contract.mjs"
+    "product:check": "node scripts/check-product-contract.mjs",
+    "dbtypes:check": "node scripts/check-db-contract.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

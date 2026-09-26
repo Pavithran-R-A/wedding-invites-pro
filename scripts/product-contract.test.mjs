@@ -30,9 +30,33 @@ describe("product contract checker", () => {
         `Real stories from couples`,
         `What you can actually do on this site right now.`,
         `What actually works in this build:`,
+        `supabase.from('projects').select('*')`,
+        `// the projects table holds one row per customer`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());
+  });
+
+  it("keeps the scaffold-vocabulary rule out of historical documents", () => {
+    const sentence = `The projects table was archived into the legacy schema in Stage 2.`;
+    expect(scanContent("docs/architecture/domain-model.md", sentence)).toEqual([]);
+    expect(
+      scanContent("src/pages/Dashboard.tsx", sentence).map((v) => v.rule),
+    ).toEqual(["legacy-table-as-current-terminology"]);
+  });
+
+  it("does not mistake a canonical name for a retired one", () => {
+    expect(
+      scanContent(
+        "src/integrations/supabase/weddings.ts",
+        [
+          `supabase.from('weddings').select('id')`,
+          `supabase.from('design_templates').select('preview_svg')`,
+          `// the design_templates rows are reviewed before they are offered`,
+          `SELECT count(*) FROM legacy.projects;`,
+        ].join("\n"),
+      ),
+    ).toEqual([]);
   });
 
   it("reports the exact position of each hit", () => {

@@ -37,6 +37,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Database contract
+        run: npm run dbtypes:check
+
       - name: Product contract
         run: npm run product:check
 

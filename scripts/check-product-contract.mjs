@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Product contract checker.
  *
@@ -7,6 +6,10 @@
  * loudly so a rename slip or a re-introduced false claim cannot merge quietly.
  *
  *   node scripts/check-product-contract.mjs              human-readable report, exit 1 on findings
+ *
+ * Run with `node <path>` (see the npm scripts), which is why there is no `#!` line: the test
+ * runner's module transform prepends code above the source, and a shebang that is no longer
+ * line 1 is a syntax error at load time.
  *   node scripts/check-product-contract.mjs --json       machine-readable report
  *   node scripts/check-product-contract.mjs --self-test  verify the rules themselves, no repo scan
  *
@@ -122,6 +125,27 @@ export const RULES = [
     message: "claims a verified-working list for this build",
     fix: "split it into verified behaviour and implemented foundations — see README.md",
   },
+  // Stage 2 archived the scaffold tables (`projects`, `templates`, `guests`, `orders`,
+  // `payments`, `printers`) into the `legacy` schema. Nothing that runs in front of a
+  // customer may treat them as the live domain again.
+  {
+    id: "legacy-table-in-client-code",
+    pattern: /\.from\(\s*['"](?:projects|templates|guests|orders|payments|printers)['"]\s*\)/g,
+    message: "queries an archived scaffold table as if it were the live schema",
+    fix: "read the canonical domain through src/integrations/supabase/weddings.ts",
+  },
+  {
+    id: "legacy-table-as-current-terminology",
+    // `(^|[^A-Za-z0-9_])` stands in for a lookbehind: `design_templates table` must not
+    // read as a retired name, and the transform this file is parsed with rejects lookbehind.
+    pattern: /(?:^|[^A-Za-z0-9_])(?:projects|templates)\s+(?:table|tables|row|rows|schema)\b/gi,
+    message: "names a retired scaffold table as current terminology in product code or copy",
+    fix: "say wedding / design; keep scaffold names inside docs/audits/ and migration history",
+    // Historical documents, ADRs and the Stage 2 blueprint describe the scaffold on
+    // purpose — that record must survive. Only live code and the front-page copy speak
+    // for what the product *is* today.
+    scope: ["src/", "README.md"],
+  },
 ];
 
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
@@ -146,18 +170,21 @@ export function isScannedPath(relativePath) {
   return SCANNED_EXTENSIONS.has(base.slice(dot).toLowerCase());
 }
 
-/** One violation per rule match in `text`, with 1-based line and column numbers. */
+/** One violation per rule match in `text`, with 1-based line and column numbers. Rules
+ *  that carry a `scope` are checked only against paths under one of those prefixes. */
 export function scanContent(relativePath, text) {
+  const path = posix(relativePath);
   const violations = [];
   text.split(/\r?\n/).forEach((line, index) => {
     RULES.forEach((rule) => {
+      if (rule.scope && !rule.scope.some((prefix) => path.startsWith(prefix))) return;
       const re = new RegExp(rule.pattern.source, rule.pattern.flags);
       re.lastIndex = 0;
       let match = re.exec(line);
       while (match !== null) {
         violations.push({
           rule: rule.id,
-          path: posix(relativePath),
+          path,
           line: index + 1,
           column: match.index + 1,
           matched: match[0],
@@ -206,11 +233,38 @@ export function selfTest() {
     "fabricated-testimonials": `Real stories from couples`,
     "unverified-capability-framing": `<p>What you can actually do on this site right now.</p>`,
     "unverified-capability-list": `What actually works in this build:`,
+    "legacy-table-in-client-code": `supabase.from('projects').select('*')`,
+    "legacy-table-as-current-terminology": `// each row of the projects table is a customer`,
   };
   for (const [ruleId, text] of Object.entries(fixtures)) {
     if (!scanContent("src/fixture.tsx", text).some((v) => v.rule === ruleId)) {
       failures.push(`rule ${ruleId} did not fire on its fixture`);
     }
+  }
+
+  // The scoped rule must stay a rule about *live* surfaces: the same sentence in a
+  // historical document is the record Stage 2 deliberately kept.
+  const scaffoldInDocs = scanContent(
+    "docs/audits/stage-2-domain-database.md",
+    "The projects table was archived into the legacy schema.",
+  );
+  if (scaffoldInDocs.length > 0) {
+    failures.push("scoped rule fired on a historical document; docs/** must stay writable as evidence");
+  }
+
+  // Canonical vocabulary that merely *contains* a retired name must not be mistaken
+  // for one — a false positive here would push people to reword correct code.
+  const canonicalVocabulary = [
+    `supabase.from('weddings').select('id')`,
+    `supabase.from('design_templates').select('preview_svg')`,
+    `// the design_templates catalogue rows are reviewed before publishing`,
+    `SELECT count(*) FROM legacy.projects;`,
+  ].join("\n");
+  const vocabularyHits = scanContent("src/integrations/supabase/weddings.ts", canonicalVocabulary);
+  if (vocabularyHits.length > 0) {
+    failures.push(
+      `canonical vocabulary produced ${vocabularyHits.length} violation(s): ${[...new Set(vocabularyHits.map((v) => v.rule))].join(", ")}`,
+    );
   }
 
   const benign = [
@@ -222,6 +276,8 @@ export function selfTest() {
     `Implemented foundations in this preview`,
     `These pieces exist in the current codebase. Account-backed persistence still requires a verified Supabase environment.`,
     `Verified in Stage 1: the public pages render and protected routes redirect.`,
+    `// the archived projects table is read only during migration`,
+    `The design_templates rows are reviewed by an admin before publishing.`,
   ].join("\n");
   const benignHits = scanContent("docs/architecture/example.md", benign);
   if (benignHits.length > 0) {
