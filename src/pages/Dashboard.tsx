@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { listWeddings, type WeddingSummary } from '@/integrations/supabase/weddings';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,14 +9,6 @@ import { Plus, FileText, Users } from 'lucide-react';
 import { LANGUAGES } from '@/lib/i18n';
 import Header from '@/components/landing/Header';
 
-interface ProjectRow {
-  id: string;
-  title: string;
-  language: string | null;
-  created_at: string;
-  guest_count: number | null;
-}
-
 const languageLabel = (code: string | null) => {
   const match = LANGUAGES.find((lang) => lang.code === code);
   return match ? `${match.nativeLabel} (${match.label})` : 'Language not chosen';
@@ -24,29 +16,25 @@ const languageLabel = (code: string | null) => {
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [weddings, setWeddings] = useState<WeddingSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!user) return;
-    const fetchProjects = async () => {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('id, title, language, created_at, guest_count')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (error) {
+    const fetchWeddings = async () => {
+      const result = await listWeddings(user.id);
+      if (result.error) {
         setLoadError(true);
       } else {
-        setProjects((data ?? []) as ProjectRow[]);
+        setWeddings(result.data);
       }
       setLoading(false);
     };
-    fetchProjects();
+    fetchWeddings();
   }, [user]);
 
-  const totalGuests = projects.reduce((sum, p) => sum + (p.guest_count ?? 0), 0);
+  const totalGuests = weddings.reduce((sum, w) => sum + w.estimatedGuestCount, 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -72,7 +60,7 @@ const Dashboard = () => {
           <Card>
             <CardContent className="pt-6 text-center">
               <FileText className="w-6 h-6 mx-auto mb-2 text-primary" aria-hidden="true" />
-              <p className="text-2xl font-bold">{projects.length}</p>
+              <p className="text-2xl font-bold">{weddings.length}</p>
               <p className="text-xs text-muted-foreground">Invitation drafts</p>
             </CardContent>
           </Card>
@@ -101,7 +89,7 @@ const Dashboard = () => {
               <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />
             ))}
           </div>
-        ) : projects.length === 0 ? (
+        ) : weddings.length === 0 ? (
           <Card className="text-center py-16">
             <CardContent>
               <p className="text-muted-foreground mb-2">
@@ -121,21 +109,21 @@ const Dashboard = () => {
           </Card>
         ) : (
           <ul className="space-y-3">
-            {projects.map(project => (
-              <li key={project.id}>
+            {weddings.map(wedding => (
+              <li key={wedding.id}>
                 <Link
-                  to={`/project/${project.id}/configure`}
+                  to={`/project/${wedding.id}/configure`}
                   className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                   <Card className="hover:border-primary/30 transition-colors">
                     <CardContent className="flex items-center justify-between gap-4 py-4">
                       <div className="min-w-0">
-                        <h2 className="font-medium truncate">{project.title}</h2>
+                        <h2 className="font-medium truncate">{wedding.title}</h2>
                         <p className="text-sm text-muted-foreground">
-                          {new Date(project.created_at).toLocaleDateString('en-IN')}
+                          {new Date(wedding.createdAt).toLocaleDateString('en-IN')}
                           {' · '}
-                          {languageLabel(project.language)}
-                          {project.guest_count ? ` · ~${project.guest_count} guests` : ''}
+                          {languageLabel(wedding.primaryLanguage)}
+                          {wedding.estimatedGuestCount ? ` · ~${wedding.estimatedGuestCount} guests` : ''}
                         </p>
                       </div>
                       <Badge variant="secondary" className="shrink-0">Draft</Badge>

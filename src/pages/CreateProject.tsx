@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  createWedding,
+  listDesignOptions,
+  type DesignOption,
+} from '@/integrations/supabase/weddings';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,12 +15,6 @@ import { sanitizeSvg } from '@/lib/sanitizeSvg';
 import Header from '@/components/landing/Header';
 import { Check } from 'lucide-react';
 
-interface TemplateOption {
-  id: string;
-  name: string;
-  preview_svg: string | null;
-}
-
 const CreateProject = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -24,24 +22,19 @@ const CreateProject = () => {
   const [title, setTitle] = useState('');
   const [language, setLanguage] = useState('en');
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
-  const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  const [templates, setTemplates] = useState<DesignOption[]>([]);
   const [templatesFailed, setTemplatesFailed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase
-      .from('templates')
-      .select('id, name, preview_svg')
-      .eq('active', true)
-      .then(({ data, error }) => {
-        if (error) {
-          setTemplatesFailed(true);
-          return;
-        }
-        const rows = (data ?? []) as TemplateOption[];
-        setTemplates(rows);
-        if (rows.length > 0) setSelectedTemplate(rows[0].id);
-      });
+    listDesignOptions().then(result => {
+      if (result.error) {
+        setTemplatesFailed(true);
+        return;
+      }
+      setTemplates(result.data);
+      if (result.data.length > 0) setSelectedTemplate(result.data[0].id);
+    });
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -49,25 +42,20 @@ const CreateProject = () => {
     if (!user) return;
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from('projects')
-      .insert({
-        user_id: user.id,
-        title,
-        language,
-        template_id: selectedTemplate,
-      })
-      .select()
-      .single();
+    const result = await createWedding(user.id, {
+      title,
+      primaryLanguage: language,
+      designTemplateId: selectedTemplate,
+    });
 
     setLoading(false);
 
-    if (error) {
+    if (result.error || !result.data) {
       toast({ title: 'Could not create your draft', variant: 'destructive' });
       return;
     }
     toast({ title: 'Draft created', description: 'Continue configuring your invitation.' });
-    navigate(`/project/${data.id}/configure`);
+    navigate(`/project/${result.data.id}/configure`);
   };
 
   return (
@@ -126,9 +114,9 @@ const CreateProject = () => {
                     )}
                     <span
                       className="flex aspect-[5/7] w-full mb-2 rounded bg-muted items-center justify-center overflow-hidden"
-                      dangerouslySetInnerHTML={{ __html: sanitizeSvg(tmpl.preview_svg) }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeSvg(tmpl.previewSvg) }}
                     />
-                    <span className="block text-xs font-medium text-center truncate">{tmpl.name}</span>
+                    <span className="block text-xs font-medium text-center truncate">{tmpl.displayName}</span>
                   </label>
                 ))}
               </div>

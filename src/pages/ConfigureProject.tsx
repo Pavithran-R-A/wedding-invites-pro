@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  getWedding,
+  updatePlanningDetails,
+  type WeddingSummary,
+} from '@/integrations/supabase/weddings';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,39 +17,31 @@ const ConfigureProject = () => {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [project, setProject] = useState<{ id: string; title: string; guest_count: number | null } | null>(null);
+  const [wedding, setWedding] = useState<WeddingSummary | null>(null);
   const [guestCount, setGuestCount] = useState(50);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!id || !user) return;
-    supabase
-      .from('projects')
-      .select('id, title, guest_count')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) {
-          setLoadError(true);
-          return;
-        }
-        setProject(data);
-        if (typeof data.guest_count === 'number') setGuestCount(data.guest_count);
-      });
+    getWedding(user.id, id).then(result => {
+      if (result.error || !result.data) {
+        setLoadError(true);
+        return;
+      }
+      setWedding(result.data);
+      setGuestCount(result.data.estimatedGuestCount);
+    });
   }, [id, user]);
 
   const handleSave = async () => {
-    if (!id) return;
+    if (!id || !user) return;
     setSaving(true);
-    const { error } = await supabase
-      .from('projects')
-      .update({ guest_count: guestCount })
-      .eq('id', id)
-      .eq('user_id', user?.id);
+    const result = await updatePlanningDetails(user.id, id, {
+      estimatedGuestCount: guestCount,
+    });
     setSaving(false);
-    if (error) {
+    if (result.error) {
       toast({ title: 'Could not save changes', variant: 'destructive' });
     } else {
       toast({ title: 'Saved', description: 'Your draft has been updated.' });
@@ -69,7 +65,7 @@ const ConfigureProject = () => {
     );
   }
 
-  if (!project) {
+  if (!wedding) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -87,7 +83,7 @@ const ConfigureProject = () => {
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Invitation draft
         </p>
-        <h1 className="font-display text-2xl md:text-3xl font-bold mb-1 mt-1">{project.title}</h1>
+        <h1 className="font-display text-2xl md:text-3xl font-bold mb-1 mt-1">{wedding.title}</h1>
         <p className="text-muted-foreground mb-8">
           This is a private draft. Only you can see it, and nothing here reaches guests yet.
         </p>

@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
-import type { Json } from '@/integrations/supabase/types';
+import {
+  getWeddingDesign,
+  updateStyleSettings,
+  type WeddingDesign,
+} from '@/integrations/supabase/weddings';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,13 +29,6 @@ interface EditorState {
   color: string;
   alignment: 'left' | 'center' | 'right';
   foilEnabled: boolean;
-}
-
-interface ProjectRow {
-  id: string;
-  title: string;
-  selected_features: Record<string, unknown> | null;
-  templates: { preview_svg: string | null } | { preview_svg: string | null }[] | null;
 }
 
 const DEFAULT_EDITOR: EditorState = {
@@ -63,11 +59,27 @@ const FONT_FAMILIES = [
 
 const ALIGNMENTS = ['left', 'center', 'right'] as const;
 
-const templateSvgOf = (project: ProjectRow | null): string | null => {
-  if (!project?.templates) return null;
-  const t = Array.isArray(project.templates) ? project.templates[0] : project.templates;
-  return t?.preview_svg ?? null;
-};
+const isAlignment = (value: unknown): value is EditorState['alignment'] =>
+  value === 'left' || value === 'center' || value === 'right';
+
+const oneOf = (value: unknown, choices: readonly string[], fallback: string) =>
+  typeof value === 'string' && choices.includes(value) ? value : fallback;
+
+const matching = (value: unknown, pattern: RegExp, fallback: string) =>
+  typeof value === 'string' && pattern.test(value) ? value : fallback;
+
+// `style_settings` is a jsonb column: the shape is ours by convention, not by
+// constraint, and a migrated row can hold anything its old editor wrote. Each setting
+// therefore falls back to the default the UI would have offered, rather than reaching
+// the canvas unvalidated — an unusable saved value should degrade the preview, not
+// break it.
+const editorFrom = (settings: Record<string, unknown>): EditorState => ({
+  font: oneOf(settings.font, FONT_FAMILIES, DEFAULT_EDITOR.font),
+  fontSize: matching(settings.fontSize, /^\d{1,3}$/, DEFAULT_EDITOR.fontSize),
+  color: matching(settings.color, /^#[0-9a-fA-F]{6}$/, DEFAULT_EDITOR.color),
+  alignment: isAlignment(settings.alignment) ? settings.alignment : DEFAULT_EDITOR.alignment,
+  foilEnabled: typeof settings.foilEnabled === 'boolean' ? settings.foilEnabled : false,
+});
 
 const FieldLabel = ({ id, children }: { id: string; children: React.ReactNode }) => (
   <p id={id} className="text-xs font-medium text-foreground">
@@ -79,40 +91,23 @@ const EditProject = () => {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [project, setProject] = useState<ProjectRow | null>(null);
+  const [design, setDesign] = useState<WeddingDesign | null>(null);
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<EditorState>(DEFAULT_EDITOR);
 
   useEffect(() => {
     if (!id || !user) return;
-    supabase
-      .from('projects')
-      .select('id, title, selected_features, templates(preview_svg)')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const row = data as unknown as ProjectRow;
-        setProject(row);
-        const saved = (row.selected_features as { editor?: Partial<EditorState> } | null)?.editor;
-        if (saved) setEditor({ ...DEFAULT_EDITOR, ...saved });
-      });
+    getWeddingDesign(user.id, id).then(result => {
+      if (result.error || !result.data) return;
+      setDesign(result.data);
+      setEditor(editorFrom(result.data.styleSettings));
+    });
   }, [id, user]);
 
   const handleSave = async () => {
     if (!id || !user) return;
     setSaving(true);
-    const { error } = await supabase
-      .from('projects')
-      .update({
-        selected_features: {
-          ...((project?.selected_features as Record<string, unknown>) || {}),
-          editor,
-        } as unknown as Json,
-      })
-      .eq('id', id)
-      .eq('user_id', user.id);
+    const { error } = await updateStyleSettings(user.id, id, { ...editor });
     setSaving(false);
     if (error) {
       toast({ title: 'Could not save your design', variant: 'destructive' });
@@ -121,7 +116,7 @@ const EditProject = () => {
     }
   };
 
-  if (!project) {
+  if (!design) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -132,11 +127,11 @@ const EditProject = () => {
     );
   }
 
-  const previewSvg = sanitizeSvg(templateSvgOf(project));
+  const previewSvg = sanitizeSvg(design.previewSvg);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <h1 className="sr-only">Design preview for {project.title}</h1>
+      <h1 className="sr-only">Design preview for {design.title}</h1>
 
       {/* Preview top bar */}
       <div className="sticky top-0 z-40 bg-card border-b border-border px-4 h-14 flex items-center justify-between gap-3">
@@ -144,7 +139,7 @@ const EditProject = () => {
           <Button variant="ghost" size="icon" asChild aria-label="Back to invitation draft">
             <Link to={`/project/${id}/configure`}><ArrowLeft className="w-4 h-4" aria-hidden="true" /></Link>
           </Button>
-          <span className="font-display font-semibold text-sm truncate">{project.title}</span>
+          <span className="font-display font-semibold text-sm truncate">{design.title}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button variant="outline" size="sm" className="rounded-lg" onClick={handleSave} disabled={saving}>
@@ -186,7 +181,7 @@ const EditProject = () => {
                     textAlign: editor.alignment,
                   }}
                 >
-                  {project.title}
+                  {design.title}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Sample preview text. Your styling choices are saved with this draft.
