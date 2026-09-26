@@ -22,7 +22,14 @@ project_id = "localvivaahvarnam"
 [api]
 enabled = true
 port = 54400
-schemas = ["public"]
+# PostgREST's own section is also called `api`, so spell out the difference: the two
+# entries below are *database schemas*. `public` holds the RLS-governed tables and no
+# functions; `api` holds the browser-callable RPCs Stage 3 adds and no tables. The
+# order is load-bearing — the first schema is the default profile, so a request that
+# names no profile still reaches the table schema and never the RPC surface by
+# accident. A schema absent from this list is unreachable over REST no matter what it
+# is granted, which is what `private` relies on.
+schemas = ["public", "api"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 

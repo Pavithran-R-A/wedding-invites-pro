@@ -47,6 +47,19 @@ $$;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
+-- The `extensions` schema Supabase ships, with the one extension a migration
+-- actually calls. Stage 3's token minting and lookup run
+-- `extensions.gen_random_bytes` / `extensions.digest`, and a plpgsql body resolves
+-- those names at first execution, so without this line the whole Stage 2 chain
+-- still applies cleanly and the Stage 3 suite then dies on a missing schema —
+-- which would read like a code failure and is a fixture gap. The local Supabase
+-- image has this already, which is exactly why the shim has to say it out loud.
+-- ---------------------------------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
 -- Default privileges so tables the migrations create (owned by postgres) are
 -- reachable by the API roles; RLS — not table grants — is the gate under test.
 -- ---------------------------------------------------------------------------
