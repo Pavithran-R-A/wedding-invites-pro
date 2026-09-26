@@ -26,13 +26,15 @@ apply() { docker exec -i -e PGCLIENTENCODING=UTF8 "$CTR" psql -U postgres -v ON_
 
 apply supabase/tests/rls/00_bootstrap.sql
 
-MIGRATIONS=$(ls supabase/migrations/*.sql | sort)
+# Stage 2 files are always excluded: this probe compares the published schema with and
+# without the Stage 0 repair, and Stage 2 archives public.projects from under it.
+MIGRATIONS=$(ls supabase/migrations/*.sql | grep -v '_stage2_' | sort)
 if [ "${REPAIRED:-0}" != "1" ]; then
   # Default: exclude the repair migration so the schema matches what is published.
   MIGRATIONS=$(echo "$MIGRATIONS" | grep -v "$REPAIR")
   echo "==> Schema: PUBLISHED Stage 0 (repair migration excluded)"
 else
-  echo "==> Schema: REPAIRED (all migrations applied)"
+  echo "==> Schema: REPAIRED (all Stage 0/1 migrations applied)"
 fi
 for m in $MIGRATIONS; do apply "$m"; done
 

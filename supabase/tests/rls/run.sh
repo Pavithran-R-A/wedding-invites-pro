@@ -30,8 +30,14 @@ apply() {  # apply <file>
 # 1) Supabase auth/role shim
 apply supabase/tests/rls/00_bootstrap.sql
 
-# 2) Existing schema migrations, in timestamp order
-for m in $(ls supabase/migrations/*.sql | sort); do
+# 2) Existing schema migrations, in timestamp order.
+#
+# The Stage 2 files are excluded on purpose. This suite qualifies the *published*
+# (Stage 0/1) schema, and it asserts against `public.projects` — a table Stage 2
+# archives into `legacy`, after which those assertions would be measuring a schema
+# that no longer has the shape they describe. Stage 2 has its own runner:
+# `supabase/tests/stage2/run.sh`.
+for m in $(ls supabase/migrations/*.sql | grep -v '_stage2_' | sort); do
   apply "$m"
 done
 

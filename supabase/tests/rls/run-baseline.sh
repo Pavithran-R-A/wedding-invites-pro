@@ -18,8 +18,10 @@ done
 apply() { docker exec -i -e PGCLIENTENCODING=UTF8 "$CTR" psql -U postgres -v ON_ERROR_STOP=1 --single-transaction -q < "$1"; }
 
 apply supabase/tests/rls/00_bootstrap.sql
-# Deliberately EXCLUDE every Stage 0 migration to show the original schema.
-for m in $(ls supabase/migrations/*.sql | grep -v 'stage0_' | sort); do
+# Deliberately EXCLUDE every Stage 0 migration to show the original schema, and every
+# Stage 2 one: Stage 2 archives public.projects, which this baseline depends on
+# existing in public.
+for m in $(ls supabase/migrations/*.sql | grep -v -e 'stage0_' -e '_stage2_' | sort); do
   apply "$m"
 done
 
