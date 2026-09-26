@@ -32,10 +32,17 @@ that cut across them, and **feature readiness** as the audit of all of it agains
 ## Related engineering documents
 
 - [`../architecture/decisions/`](../architecture/decisions/) — the five standing ADRs
-- [`../architecture/stage-2-domain-blueprint.md`](../architecture/stage-2-domain-blueprint.md) —
-  documentation-only domain design for Stage 2 (no schema, no migrations)
+- [`../architecture/stage-2-domain-blueprint.md`](../architecture/stage-2-domain-blueprint.md) — the
+  pre-implementation Stage 2 design argument, kept as a decision record; its
+  "Stage 2 outcome" section states what was built, deferred and refused
+- [`../architecture/domain-model.md`](../architecture/domain-model.md) — the canonical domain **as
+  it now exists**: zones, tables, ownership, deletion policy, and what the web tier is allowed to read
+- [`../architecture/stage-2-migration-plan.md`](../architecture/stage-2-migration-plan.md) — how the
+  scaffold era becomes canonical tables, where every old row goes, and the options rejected
 - [`../audits/stage-0-truth-security.md`](../audits/stage-0-truth-security.md) — the verified
   security and truthfulness baseline
+- [`../audits/stage-2-domain-database.md`](../audits/stage-2-domain-database.md) — what was actually
+  executed to qualify the above, including the limits of what was *not* executed
 
 ## Vocabulary
 

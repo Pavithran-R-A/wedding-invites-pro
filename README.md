@@ -42,27 +42,51 @@ control:
 - The product-contract checker, and the local gates: lint, typecheck, unit tests, production build
 - Public pages laid out down to a 360px viewport
 
+## Verified in Stage 2
+
+The database layer, exercised against throwaway local Postgres containers only:
+
+- The canonical domain is created by nine forward migrations — no published migration was edited —
+  and both chains apply cleanly on `postgres:16-alpine` (PostgreSQL 16.15) and on the Supabase local
+  image (`supabase/postgres:17.6.1.171`, PostgreSQL 17.6)
+- 41 assertions that a fresh chain invents nothing (right tables, all empty, no fabricated account,
+  profile or role row) and 75 that the legacy chain carries what it should without inventing an
+  entitlement from a historical paid claim
+- 322 privilege / row-level-security attacks, run against both chains, starting at the grant layer so
+  an unreachable permissive policy cannot be scored as safety, and 75 assertions that the live
+  catalogue matches the documented table, foreign-key, CHECK, trigger and grant inventory
+- The retirement of the scaffold into `legacy`, closed to every API role including `service_role`,
+  with the rows intact
+- The data adapter the screens now use, and the database-contract checker, under unit tests
+- The public and unauthenticated screens again in a browser afterwards: `/`, sign-in, sign-up, the
+  three policy pages, and the protected-route redirect
+
 ## Implemented foundations requiring a configured backend
 
 Real code paths that compile and ship in this build, whose end-to-end behaviour was **not**
-demonstrated against a verified Supabase environment during Stage 1:
+demonstrated against a verified Supabase environment during Stage 1 or Stage 2:
 
 - Sign-up, log-in, logout and password reset against a Supabase Auth project — the screens render,
   the round trip and email delivery were never exercised
 - A **My invitations** dashboard that reads the signed-in user's drafts
-- Draft creation: name, main language, optional design direction, inserted into `projects`
+- Draft creation: name, main language, optional design direction, inserted into `public.weddings`
+  through the data adapter
 - A draft configuration page that stores an *estimated guest count* (planning only — there is no
   checkout, so it affects nothing commercial)
 - A design preview that saves font, size, colour, alignment and a **simulated** foil overlay with
   the draft
 
 No production Supabase environment was validated. Running the flows above needs a compatible
-Supabase project with this repository's migrations applied, and the Stage 1 browser QA covered only
-the public and unauthenticated surfaces. Treat them as implemented, not as proven live.
+Supabase project with this repository's migrations applied, and the Stage 1 and Stage 2 browser QA
+covered only the public and unauthenticated surfaces. Treat them as implemented, not as proven live.
+The same limit applies to the database: its privileges and policies were measured through `psql` with
+`SET ROLE`, which is the layer PostgREST sits on, not PostgREST's own filtering.
 
-What deliberately does **not** exist yet: guest lists, RSVP collection, public invitation URLs,
-QR codes, PDF/image export, publishing, payment, GST handling, print ordering, and admin tooling.
-Where the UI mentions these, it labels them *Planned for V1*.
+What deliberately does **not** exist yet is a **product surface** for guest lists, RSVP collection,
+public invitation URLs, QR codes, PDF/image export, publishing, payment, GST handling, print
+ordering, and admin tooling. Stage 2 gives several of them tables and rules; no screen or link reads
+those tables yet, and a schema is not a feature. Where the UI mentions them, it labels them
+*Planned for V1*.
 
 ## Target V1
 

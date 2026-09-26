@@ -1,15 +1,25 @@
 # Stage 2 domain blueprint
 
-> **THIS IS DOCUMENTATION ONLY.**
+> **Status: decided. This document is now a decision record as well as a proposal.**
+> Everything from `## 1. weddings` down is the pre-implementation argument, kept verbatim so the
+> reasoning behind the choices stays readable. What Stage 2 built, refused and deferred is recorded
+> once, at the end, in [§ Stage 2 outcome](#stage-2-outcome). The schema as it exists today is
+> described in [`domain-model.md`](domain-model.md); the migration's mechanics in
+> [`stage-2-migration-plan.md`](stage-2-migration-plan.md); the executed evidence in
+> [`../audits/stage-2-domain-database.md`](../audits/stage-2-domain-database.md).
+
+> **THIS WAS DOCUMENTATION ONLY WHEN IT WAS WRITTEN.**
 > No migrations, no generated types, no database code, no edge functions and no schema changes were
-> produced for this document, and none of it is approved work. It exists so Stage 2 can start from a
-> argued position instead of a blank page. Every entity below is a *proposal under challenge*, not a
-> decision.
+> produced for this document, and none of it was approved work at the time. It existed so Stage 2
+> could start from an argued position instead of a blank page. Every entity below was a *proposal
+> under challenge*, not a decision.
 >
-> Current persisted reality in this repository: `profiles`, `projects`, `templates`, `guests`,
-> `orders`, `payments`, `printers`, `activity_logs`, `user_roles`. The application reads and writes
-> **only** `projects` and `templates`. Everything else is original-scaffold surface that later stages
-> must either claim deliberately or delete.
+> Persisted reality **before Stage 2** — `projects`, `templates`, `guests`, `orders`, `payments`,
+> `printers`, `activity_logs` from the original scaffold, plus the two account tables `profiles` and
+> `user_roles`. The application read and wrote **only** `projects` and `templates`. Everything else
+> was scaffold surface that later stages had to either claim deliberately or delete; Stage 2 claimed
+> `profiles` and `user_roles` unchanged, rebuilt the rest of that list as new canonical tables, and
+> archived the other six. See the outcome section.
 >
 > Binding inputs: [`../architecture/decisions/0001-patrika-first.md`](decisions/0001-patrika-first.md)
 > · [0002](decisions/0002-structured-creator.md) · [0003](decisions/0003-data-driven-tradition-packs.md) ·
@@ -648,3 +658,115 @@ Stages 3 and 9 own the actual pipelines. This section exists so that stage does 
 6. Which invariants above are enforced by constraint, by policy+trigger, by server code, and which are
    knowingly deferred — recorded as a table in the Stage 2 audit, with attack tests for every trusted
    column.
+
+---
+
+# Stage 2 outcome
+
+Recorded after implementation and qualification. Nothing above this line was edited except the two
+status notes at the top. Assertion counts below are the numbers the suites printed when they were
+last run; [`../audits/stage-2-domain-database.md`](../audits/stage-2-domain-database.md) carries the
+run context, and `supabase/tests/stage2/run.sh both` reproduces them.
+
+## The six opening questions, answered
+
+1. **`projects` → `weddings`: rename or fresh aggregate?** **Fresh aggregate, with the scaffold
+   archived.** The blueprint's own necessity challenge ("if we do not need fields beyond
+   title/language/guest_count, the honest answer is *alter `projects` into `weddings`*") was
+   overtaken: the canonical `weddings` needed an owner column whose default could not be forged, a
+   status vocabulary, a design link with referential meaning, and a style column with a type
+   constraint — and `projects` carried `paid_status` whose whole history is a false-authority problem
+   Stage 0 had already repaired twice. Altering that table in place would have kept the compromised
+   column as the thing under edit. Instead `weddings` is new, ids are **preserved** from
+   `projects.id` (M01, M06), and `projects` moved to the `legacy` schema unreadable by every API role.
+   The cost of that choice is real and is stated in §Reversibility below.
+2. **Where does the editable draft body live, and what is a version snapshot?** One
+   `invitation_drafts` row per wedding with a jsonb `content` body (never a second copy of the
+   document, per the blueprint's caution), and `invitation_versions.snapshot` as the frozen resolved
+   document. Enforced shape: `UNIQUE (wedding_id)` on drafts, no UPDATE or DELETE policy plus a guard
+   trigger on versions, and `supersedes_version_id` for lineage.
+3. **Do people / venues / recipients start as JSON?** People and venues became **tables**
+   (`wedding_people`, `venues`) because both are referenced by rows (`wedding_events.venue_id`,
+   approval and RSVP flows) and both grow per wedding. **Recipients did not become anything**: the
+   household is the V1 unit, and a per-recipient row would promise personalisation the renderer does
+   not exist to deliver. The promotion criterion is written down in
+   [`domain-model.md`](domain-model.md) §8 rather than left as a code comment.
+4. **Delete or claim the unused scaffold tables?** Claimed unchanged: `profiles`, `user_roles`.
+   Superseded by new canonical tables and then archived: `projects`, `templates`, `guests`, `orders`,
+   `payments`, `printers`, `activity_logs`. Nothing was dropped, because the money and activity rows
+   are evidence about claims already made to real people; deleting them would have been the same
+   erasure the deletion guards in `1204`/`1208` exist to prevent.
+5. **The publication/token route contract?** **Deliberately not decided here**, because Stage 2 does
+   not render. What was fixed is the storage half: `private.access_tokens` holds a SHA-256 digest in a
+   `UNIQUE` column with `id` as primary key (so rotation replaces a value without replacing a row),
+   plus `token_kind`, `wedding_id`, `publication_id`, `household_id`, `expiry_policy`, `expires_at`,
+   `revoked_at`. No route, no minting code, no guest flow.
+6. **Which invariants are enforced by what?** The table below, which is the same classification the
+   blueprint asked for.
+
+## Invariant disposition
+
+| Invariant | Stage 2 state | Mechanism, and the executed check |
+| --- | --- | --- |
+| I-01 one owning account | **enforced** | `weddings.owner_user_id` NOT NULL, no client-supplied default path; every scoped table NOT NULL `wedding_id` (C49); two-way owner isolation, group 4 (56 assertions across 13 tables) |
+| I-02 an event cannot resolve across weddings | **enforced** | `UNIQUE (wedding_id, id)` pins plus composite FKs; group 12 rejects 12 cross-wedding references |
+| I-03 a shared venue grants nothing | **enforced by construction** | venues are per-wedding rows; there is no global venue table to join through, so address equality carries no relationship |
+| I-04 catalogue is platform-owned, no identity inferred | **enforced** | no write policy on `design_templates`/`tradition_packs` (C22) + guard triggers (groups 7, 8); identity-vocabulary scans C43/C44 and `scripts/domain-contract.test.mjs` |
+| I-05 language and tradition are chosen, never derived | **enforced for the migration** | M11–M15: an unmapped language persists as NULL ("unknown"), no pack is inferred from a language or a template name; nothing in code sets `tradition_pack_id` at all yet |
+| I-06 a publication names an immutable version | **enforced** | `publications.version_id` FK pinned to the wedding; no publication can name a draft (there is no draft column) |
+| I-07 a version is immutable | **enforced** | no client write policy + `no_client_write_invitation_versions`; group 7 (the owner's own rewrite refused), group 8 (still refused with privilege and permissive policy granted), group 11b (a frozen version pins its wedding even for a trusted role) |
+| I-08 editing after approval cannot mutate an approved version | **half enforced, by design** | mutation is impossible (I-07); *creating* the successor is the action no code performs yet, so the invariant currently has no actor. It is Stage 3's first obligation, not a Stage 2 gap to paper over |
+| I-09 republishing is explicit and logged | **not enforced yet** | `publications` is append-only with `revoked_at`, so the state machine is representable; `private.audit_events` has **no writer in product code**, so "logged" is not true. No publish path exists at all |
+| I-10 a superseded version stays readable until revoked | **representable, untested** | lineage + status columns exist; there is no link to resolve, so nothing can be observed. Stage 3 owns it |
+| I-11 an approval names a version | **enforced** | composite FK `(wedding_id, version_id)`; group 12 rejects a request pinned to another wedding's version, and group 7 rejects the owner answering for their own reviewer |
+| I-12 a successor invalidates pending approvals | **constrained, not performed** | `status IN (…,'invalidated')` with `CHECK (invalidated_at IS NULL OR status = 'invalidated')`; the marking action needs the version-minting path from I-08 |
+| I-13 a reviewer sees no guest list | **not applicable yet** | there is no reviewer identity: no login, no token, no policy that could grant a reviewer anything. `reviewer_display_name`/`reviewer_contact_text` are labels on a server-authored row |
+| I-14 decisions are append-only and attributed | **enforced, more strictly than asked** | `approval_feedback` has no client write policy *at all*, so the host cannot write a decision either; delete refused by group 11c |
+| I-15 a recipient link cannot expose the guest list | **enforced by absence** | `anon` holds no privilege on any canonical table (group 1, C11) and no household read path exists. The render-time guarantee is Stage 3's |
+| I-16 a scope cannot widen across weddings | **enforced** | `household_event_scopes` composite FKs, group 12 |
+| I-17 an RSVP answers only a scoped pair | **enforced at the relational layer** | FK to the scope's full PK — an out-of-scope answer is unrepresentable, not merely disallowed; the token-scoped half is Stage 8 |
+| I-18 guest data is host-visible, guest-invisible, deletable on request | **two-thirds** | visibility enforced (no guest read path exists); the deletion-on-request flow is Stage 13 and needs the retention decision that Stage 2 refused to invent |
+| I-19 one household sees only its own salutation | **not applicable yet** | no per-recipient row exists by decision (§3 above), and no read path exists for any household |
+| I-20 payment state is not client-settable on INSERT or UPDATE | **enforced, and the column is gone** | no monetary or billing column exists in `public` at all (C41); `entitlements` refuses client INSERT, UPDATE and DELETE (group 7, 19 probes) and its trigger refuses even a privilege-granted write (group 8). Stage 0's INSERT-path bypass is the reason both paths are attacked here |
+| I-21 activation follows verified provider confirmation | **enforced by construction** | nothing can write `entitlements` from an API role, and no trusted path in this build ever sets a row `active`; `source` is restricted to `service`/`admin_manual` |
+| I-22 publishing requires an entitlement, checked server-side | **not enforced yet** | there is no publish path to gate, and no gate was faked in advance. Stage 10 owns it |
+| I-23 amounts, currency and package identity server-side; provider ids unique | **deferred deliberately** | no order or payment table exists in the canonical domain — the blueprint assumed one, and Stage 2 refused to introduce a money shape before a real provider. `package_code` is a code, never an amount; the replay case is covered only by `one_active_entitlement_per_wedding_package`, which is not a provider-event idempotency guarantee |
+| I-24 refunds reduce entitlement on the same path | **representable, unwired** | `status`/`revoked_at` with `CHECK ((status = 'active') = (revoked_at IS NULL))`; no caller |
+| I-25 destructive actions recorded with a non-forgeable actor | **partial** | non-forgeable attribution exists where the row is server-authored (`invitation_versions.created_by`, `private.access_tokens.created_by_role`, both unwritable by clients); the durable trail table exists with an `actor_user_id` and **no writer**. Recorded as the largest honest gap in this stage |
+| I-26 deleting a wedding revokes tokens and archives guest data | **diverges from the blueprint, on purpose** | the blueprint said deletion should cascade to everything guest-facing. Measured behaviour: an owner may delete a wedding that is still only theirs (group 11 working data), but a recorded entitlement, a frozen version or a publication **refuses** the delete (11a, 11b, 11c) and existing credentials outlive the attempt (11e). Money-adjacent and evidence-bearing history does not vanish with the aggregate. The retention rule is Stage 13's |
+| I-27 nothing un-sanitised reaches the DOM | **enforced, client-side** | `src/lib/sanitizeSvg.ts` + its tests; database-provided design artwork passes through it before insertion. There is no upload path and no server renderer yet, so there is no second boundary to hold |
+| I-28 every trusted column has an attack test; counts move deliberately | **enforced** | group 7 + group 8 cover every server-authored table; totals are printed per run (322 security assertions per chain) and recorded in the audit |
+
+## What the blueprint got wrong, in its own words
+
+Three places where reality disagreed with the proposal, kept visible because they are the useful part
+of a decision record:
+
+* **`recipients` (§10) was premature.** The blueprint's own table-vs-JSON rule rejected it as soon as
+  the renderer was admitted not to exist. The household is the unit that V1's semantics support.
+* **`orders` / `payments` (§17) were not promoted.** The blueprint treated a canonical order table as
+  obviously needed. With no provider, no price and no checkout, a money table would have been a shape
+  invented in the dark that later stages would have to migrate twice.
+* **"Deletion cascades to everything guest-facing" (§1) was the wrong default.** It is the one
+  invariant the executed suite overturned by measurement: a cascade deletes as the child table's
+  owner, so a guard trigger named for the client can never see it. History that must survive a
+  wedding now refuses the delete through referential integrity instead. See
+  [`stage-2-migration-plan.md`](stage-2-migration-plan.md) §7.1 for the experiment.
+
+## Reversibility
+
+The migration is forward-only and no down migration exists. What that costs:
+
+* **Reversible in principle:** the two retained tables (`profiles`, `user_roles`) were not reshaped;
+  privilege and policy state is declarative and can be re-applied.
+* **Not reversible without a restore:** rows were **moved** into `legacy`, not copied, so a rollback
+  to the pre-Stage-2 schema needs the archived rows moved back, and any canonical row created after
+  the move has no legacy counterpart to return to.
+* **Actively hostile to rollback:** the deletion pins added in `1204`/`1208` mean an operator who
+  wants to unwind a wedding's history must delete child rows in a specific order. That friction is
+  the point; it is also something to know before an incident, not during one.
+* `legacy` holds the scaffold's data with no reader anywhere in the product, so it is a growing
+  archive whose disposal is undecided. Stage 13 owns that decision.
+
+Do not read the above as "rollback is available". It is not, automatically. A restore from backup is
+the rollback plan.
