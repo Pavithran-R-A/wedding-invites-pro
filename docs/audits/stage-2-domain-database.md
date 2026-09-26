@@ -475,10 +475,15 @@ gate exists to catch.
 accepts an existing cluster via `STAGE2_LOCAL=1`, and applies
 `supabase/tests/rls/00_bootstrap.sql`. That bootstrap reproduces *only* the pieces the migrations
 depend on: the three API roles, an `auth.users` table, `auth.uid()`/`auth.role()` reading session GUCs
-instead of JWT claims, and default grants. It therefore proves the schema, the grants, the policies and
-the migration. **It does not prove PostgREST or Supabase Auth behaviour, because neither was
-running.** The runner prints that boundary on stdout at the end of every successful run, so it cannot
-be quoted out of context.
+instead of JWT claims, and default grants. One of those defaults is load-bearing and worth naming: the
+bootstrap runs `ALTER DEFAULT PRIVILEGES … GRANT ALL ON TABLES TO anon, authenticated, service_role`,
+deliberately permissive so that RLS rather than grants is what the Stage 0 suite gates on. So the
+`REVOKE` block in `20260925120000_stage2_privilege_baseline.sql` removes privileges the roles actually
+held, and group 1 of the attack suite then measures `anon` down to zero table privileges from that
+starting point. A revoke that never had to undo anything would be a much weaker claim, and this one is
+not that. It therefore proves the schema, the grants, the policies and the migration. **It does not
+prove PostgREST or Supabase Auth behaviour, because neither was running.** The runner prints that
+boundary on stdout at the end of every successful run, so it cannot be quoted out of context.
 
 **What additionally ran on a real Supabase-managed Postgres** (this was attempted at the reviewer's
 request, and it succeeded):
