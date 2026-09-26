@@ -42,7 +42,7 @@ attempt even if a future grant mistake let it through.
 | `wedding_people` | Couple, hosts and family members as ordered rows, because ordered attribution is a query, not a paragraph. | `wedding_id` FK `CASCADE`; `role_key`/`role_label`, `group_key`/`group_label` are free labels | owner |
 | `venues` | A place that more than one event can share, with coordinates as `numeric`. | `UNIQUE (wedding_id, id)` so an event can be pinned to *this wedding's* venue | owner |
 | `wedding_events` | The functions themselves: order, enable/disable, local wall-clock times, timezone, optional venue. | `UNIQUE (wedding_id, id)`; `(wedding_id, venue_id) → venues(wedding_id, id)`; no CHECK on `event_key` (see §7) | owner |
-| `invitation_drafts` | The editable content of a wedding, separated from the aggregate so content and metadata have different change rates. | `UNIQUE (wedding_id)` — exactly one draft per wedding | owner |
+| `invitation_drafts` | The editable content of a wedding, separated from the aggregate so content and metadata have different change rates. | `UNIQUE (wedding_id)` — at most one draft per wedding, and `weddings_have_draft` makes the wedding's own `INSERT` write that row in the same statement, so a product-created wedding is never without one. An owner who deletes its draft (a right `owners_manage_own_draft` grants) leaves the wedding undrafted and the editor re-creates it on the next save. | owner; created by the invoker-side trigger, edited by the owner |
 | `wedding_assets` | Registry of uploaded/presented artwork; the object key, never the bytes. | `UNIQUE (object_key)`; `size_bytes`/`mime_type` bounded | owner; no upload path exists yet |
 
 ### Trust-bearing rows (customer-visible, customer-immutable)

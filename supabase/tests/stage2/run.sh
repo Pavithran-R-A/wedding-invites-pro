@@ -9,9 +9,16 @@
 #
 # Why two chains, and why the order below is fixed:
 #
-#   bootstrap -> published migrations -> [fixture] -> Stage 2 chain -> outcome suite
-#             -> attack suite -> catalog suite
+#   bootstrap -> published migrations -> [fixture] -> Stage 2 chain -> Stage 3 chain
+#             -> outcome suite -> Stage 3 draft-invariant suite -> attack suite
+#             -> catalog suite
 #
+#   * The chain ends at schema head, which is what a customer's database actually
+#     looks like now. The Stage 2 suites therefore qualify the *current* schema, not
+#     the schema as of Stage 2's commit: a Stage 3 migration must be shown not to
+#     have loosened a Stage 2 guarantee. Stage 2's own numbers (41/75/322/75) remain
+#     the record of Stage 2 at commit a51856f, reproducible from that commit; the
+#     counts printed here are the record of this branch.
 #   * The fixture is applied *between* the published migrations and the Stage 2 chain,
 #     so the migration is tested against real-shaped history rather than an empty
 #     schema. Skipping it is the clean chain, which proves the opposite half: that the
@@ -93,7 +100,7 @@ chain() { # chain <clean|legacy>
   run_sql supabase/tests/rls/00_bootstrap.sql
 
   local m
-  for m in $(ls supabase/migrations/*.sql | grep -v _stage2_ | sort); do
+  for m in $(ls supabase/migrations/*.sql | grep -vE '_stage[0-9]+_' | sort); do
     run_sql "$m"
   done
 
@@ -102,7 +109,16 @@ chain() { # chain <clean|legacy>
     run_sql supabase/tests/stage2/10_seed_legacy.sql
   fi
 
+  # Stage files are applied in their own order, then the next stage's, because that is
+  # the only order that matches a real deployment: the legacy migration writes its
+  # drafts before the Stage 3 draft trigger exists, and the trigger then governs every
+  # wedding created from here on. A single flat glob would put the trigger ahead of the
+  # migration it is supposed to follow and fail on a duplicate-key error that no real
+  # database can reach.
   for m in $(ls supabase/migrations/*.sql | grep _stage2_ | sort); do
+    run_sql "$m"
+  done
+  for m in $(ls supabase/migrations/*.sql | grep _stage3_ | sort); do
     run_sql "$m"
   done
 
@@ -112,6 +128,7 @@ chain() { # chain <clean|legacy>
     suite "migration outcome (nothing invented)" supabase/tests/stage2/30_migration_empty.sql
   fi
 
+  suite "draft invariant"          supabase/tests/stage3/20_draft_invariant.sql
   suite "privilege + RLS attacks" supabase/tests/stage2/20_attacks.sql
   suite "catalog conformance"     supabase/tests/stage2/40_catalog.sql
   admin_sql -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null

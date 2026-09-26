@@ -446,7 +446,12 @@ BEGIN
       'public.wedding_assets.set_updated_at=touch_updated_at',
       'public.wedding_events.set_updated_at=touch_updated_at',
       'public.wedding_people.set_updated_at=touch_updated_at',
-      'public.weddings.set_updated_at=touch_updated_at']);
+      'public.weddings.set_updated_at=touch_updated_at',
+      -- Stage 3 §3: the wedding/draft pairing invariant, installed as an INVOKER
+      -- trigger so the draft row is written under the wedding owner's own policies.
+      -- It is in this inventory because this assertion is the alarm for a trigger
+      -- arriving or disappearing without being qualified.
+      'public.weddings.weddings_have_draft=attach_draft_on_wedding_create']);
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER trigger function would mean the guard had a privilege
   -- of its own to use. This is about triggers on the *canonical* tables: the one

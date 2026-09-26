@@ -32,12 +32,14 @@ apply supabase/tests/rls/00_bootstrap.sql
 
 # 2) Existing schema migrations, in timestamp order.
 #
-# The Stage 2 files are excluded on purpose. This suite qualifies the *published*
-# (Stage 0/1) schema, and it asserts against `public.projects` — a table Stage 2
-# archives into `legacy`, after which those assertions would be measuring a schema
-# that no longer has the shape they describe. Stage 2 has its own runner:
-# `supabase/tests/stage2/run.sh`.
-for m in $(ls supabase/migrations/*.sql | grep -v '_stage2_' | sort); do
+# The Stage 2 and Stage 3 files are excluded on purpose. This suite qualifies the
+# *published* (Stage 0/1) schema, and it asserts against `public.projects` — a table
+# Stage 2 archives into `legacy`, after which those assertions would be measuring a
+# schema that no longer has the shape they describe. The list is a whitelist-by-
+# exclusion, so a later stage must be added here when it lands; leaving it out would
+# apply a migration whose tables this chain never creates. Stage 2 has its own
+# runner, which is also the current schema-head chain: `supabase/tests/stage2/run.sh`.
+for m in $(ls supabase/migrations/*.sql | grep -vE '_stage(2|3)_' | sort); do
   apply "$m"
 done
 

@@ -75,14 +75,14 @@ SELECT
   gen_random_uuid() AS person_a,       gen_random_uuid() AS venue_a,
   gen_random_uuid() AS venue_b,        gen_random_uuid() AS event_a1,
   gen_random_uuid() AS event_a2,       gen_random_uuid() AS event_a3,
-  gen_random_uuid() AS event_b1,       gen_random_uuid() AS draft_a,
-  gen_random_uuid() AS version_a1,     gen_random_uuid() AS version_b1,
+  gen_random_uuid() AS event_b1,       gen_random_uuid() AS version_a1,
+  gen_random_uuid() AS version_b1,
   gen_random_uuid() AS publication_a1, gen_random_uuid() AS publication_b1,
   gen_random_uuid() AS household_a,    gen_random_uuid() AS household_b,
   gen_random_uuid() AS rsvp_a,         gen_random_uuid() AS request_a,
   gen_random_uuid() AS feedback_a,     gen_random_uuid() AS asset_a,
   gen_random_uuid() AS entitlement_a,  gen_random_uuid() AS token_a,
-  gen_random_uuid() AS person_b,       gen_random_uuid() AS draft_b,
+  gen_random_uuid() AS person_b,
   gen_random_uuid() AS rsvp_b,         gen_random_uuid() AS request_b,
   gen_random_uuid() AS feedback_b,     gen_random_uuid() AS asset_b,
   gen_random_uuid() AS entitlement_b;
@@ -151,8 +151,21 @@ UNION ALL
 SELECT s.event_b1, s.wedding_b, 'muhurtham', 'Muhurtham', '2026-12-01 08:00'::timestamp, NULL,
        'Asia/Kolkata', s.venue_b, 1 FROM seed s;
 
-INSERT INTO public.invitation_drafts (id, wedding_id, content)
-SELECT s.draft_a, s.wedding_a, '{"heading": "Asha weds Bala"}'::jsonb FROM seed s;
+-- A draft is no longer a row the caller mints: since the Stage 3 invariant, an INSERT
+-- into weddings brings exactly one draft with it. So the seed edits the row the wedding
+-- created rather than inserting its own id. The one-row assertion is the point — a
+-- zero-row UPDATE would pass silently, which is exactly how a missing trigger would
+-- hide. The content under attack is unchanged.
+DO $seed_draft$
+DECLARE n bigint;
+BEGIN
+  UPDATE public.invitation_drafts d SET content = '{"heading": "Asha weds Bala"}'::jsonb
+    FROM seed s WHERE d.wedding_id = s.wedding_a;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'SEED: wedding A arrived with % drafts, expected exactly 1', n;
+  END IF;
+END $seed_draft$;
 
 INSERT INTO public.invitation_versions (id, wedding_id, version_number, snapshot,
                                         tradition_pack_id, design_template_id, created_by)
@@ -208,8 +221,16 @@ SELECT s.entitlement_a, s.wedding_a, 'print-plus', 'active', 'service',
 INSERT INTO public.wedding_people (id, wedding_id, display_name, role_key, role_label, group_key, display_order)
 SELECT s.person_b, s.wedding_b, 'Latha', 'sister', 'Sister', 'family', 1 FROM seed s;
 
-INSERT INTO public.invitation_drafts (id, wedding_id, content)
-SELECT s.draft_b, s.wedding_b, '{"heading": "Bala weds Divya"}'::jsonb FROM seed s;
+DO $seed_draft_b$
+DECLARE n bigint;
+BEGIN
+  UPDATE public.invitation_drafts d SET content = '{"heading": "Bala weds Divya"}'::jsonb
+    FROM seed s WHERE d.wedding_id = s.wedding_b;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'SEED: wedding B arrived with % drafts, expected exactly 1', n;
+  END IF;
+END $seed_draft_b$;
 
 INSERT INTO public.household_event_scopes (wedding_id, household_id, event_id)
 SELECT s.wedding_b, s.household_b, s.event_b1 FROM seed s;
@@ -1179,9 +1200,12 @@ BEGIN
   n := pg_temp.st2_changed($t10$INSERT INTO public.wedding_assets (wedding_id, asset_kind, label, object_key)
       VALUES (current_setting('probe.fresh')::uuid, 'photo', 'Hall', 'weddings/fresh/photo.jpg')$t10$);
   IF n <> 1 THEN RAISE EXCEPTION 'FAIL 10: owner could not register an asset (rows=%)', n; END IF;
-  n := pg_temp.st2_changed($t10$INSERT INTO public.invitation_drafts (wedding_id, content)
-      VALUES (current_setting('probe.fresh')::uuid, '{"heading": "fresh"}'::jsonb)$t10$);
-  IF n <> 1 THEN RAISE EXCEPTION 'FAIL 10: owner could not open a draft (rows=%)', n; END IF;
+  -- The draft a customer edits is the one that came with the wedding (Stage 3), so this
+  -- step writes the content rather than the row. Same strength as before: it proves the
+  -- owner holds writable authority over `invitation_drafts` for its own wedding.
+  n := pg_temp.st2_changed($t10$UPDATE public.invitation_drafts SET content = '{"heading": "fresh"}'::jsonb
+      WHERE wedding_id = current_setting('probe.fresh')::uuid$t10$);
+  IF n <> 1 THEN RAISE EXCEPTION 'FAIL 10: owner could not edit the draft its wedding arrived with (rows=%)', n; END IF;
   n := pg_temp.st2_changed($t10$UPDATE public.weddings SET estimated_guest_count = 80
       WHERE id = current_setting('probe.fresh')::uuid$t10$);
   IF n <> 1 THEN RAISE EXCEPTION 'FAIL 10: owner could not edit its wedding (rows=%)', n; END IF;
