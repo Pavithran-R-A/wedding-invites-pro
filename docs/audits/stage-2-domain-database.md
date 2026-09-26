@@ -22,6 +22,12 @@ Re-measure: `git merge-base origin/main HEAD` (must still contain that SHA) and,
 `stage2/domain-database-redesign`, pushed as its own branch. Not merged into `main`. No tag, no
 release, no deployment.
 
+One commit per concern sits on `e93912d` — the nine migrations, the test suites and the Stage 0 runner
+exclusions, the app data layer, the gates and CI wiring, the domain and product documentation, and
+corrections found by reviewing this stage's own output. No count is quoted here, because adding this
+paragraph would falsify it; `git log --oneline origin/main..origin/stage2/domain-database-redesign`
+prints the truth. `git ls-remote --tags origin` must still print nothing.
+
 ## 3. Migration strategy considered
 
 | Option | What it meant | Why it was not chosen |
@@ -542,11 +548,15 @@ left the machine for a *different* destination: one `fonts.googleapis.com` style
 The install gate (`npm ci`) ran at 04:13 IST on 2026-09-26, against the `package.json` and
 `package-lock.json` as committed. Every gate below was then re-run **after the last edit of this
 stage** — the last edits files the checkers read (`README.md`, `docs/product/README.md`,
-`stage-2-migration-plan.md` §7.2; `npm run product:check` walks prose, so a documentation edit is a
+`stage-2-migration-plan` §7.2; `npm run product:check` walks prose, so a documentation edit is a
 gate-invalidating edit rather than a safe one), and both Postgres chains were re-run after the last
 edit to `supabase/`. That pass reproduced the earlier figures exactly. It is **not** the last word:
-the gates were run a third time after an interference the numbers themselves exposed, described under
-the table, and that final pass reproduced every figure below unchanged. Exact numbers, not summaries:
+the gates were run again after an interference the numbers themselves exposed, described under the
+table, and once more from a clean `rm -rf node_modules && npm ci` state after the last commit that
+touches a file any gate reads — `33b853b` at 08:42:44 IST, install finished 08:44:22, build 08:45:11,
+both Postgres chains by 08:46:15. All three passes printed the identical numbers below, and the build
+printed the identical content hash. The only edits after that pass are in this file, which no gate
+reads, for the reason given below. Exact numbers, not summaries:
 
 | Gate | Command | Result |
 | --- | --- | --- |
