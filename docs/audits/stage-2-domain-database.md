@@ -447,10 +447,11 @@ that claim needs data this stage refuses to fabricate.
   the four pages against a hand-written Supabase double — including "an empty result is not an error",
   "a database message is never repeated to the caller", and "a wedding built on a retired design still
   opens".
-* `package.json`: `typecheck`, `product:check`, `dbtypes:check`. `.github/workflows/ci.yml`: a
-  `Database contract` step between `Typecheck` and `Product contract`. No CI job was weakened or
-  removed, and no Postgres service was added to CI (that would need a runner this repository's quota
-  cannot pay for right now).
+* `package.json`: one script added, `dbtypes:check`. `typecheck` and `product:check` already existed
+  (Stage 0 and Stage 1 respectively) and are listed here only to say they were not disturbed.
+  `.github/workflows/ci.yml`: a `Database contract` step between `Typecheck` and `Product contract`.
+  No CI job was weakened or removed, and no Postgres service was added to CI (that would need a runner
+  this repository's quota cannot pay for right now), which is why both suites stay local.
 
 ## 22. Types generation / sync method
 
