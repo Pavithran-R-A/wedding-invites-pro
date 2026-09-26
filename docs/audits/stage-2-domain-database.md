@@ -534,18 +534,18 @@ left the machine for a *different* destination: one `fonts.googleapis.com` style
 
 ## 24. Dependency / build gates
 
-The install gate (`rm -rf node_modules && npm ci`) ran at 04:13 IST on 2026-09-26, which postdates
-the last change to `package.json` and `package-lock.json`, so every npm gate below ran against a
-from-scratch `node_modules`. Every gate in the table was then **re-run in one pass after the final
-edit of this stage** — that last edit was to prose in `stage-2-migration-plan.md` §7.2, and
-`npm run product:check` reads prose, so a documentation edit is a gate-invalidating edit rather than
-a safe one. The numbers in the table are from that post-final-edit pass; they were identical to the
-pass it replaced, which is the point of re-running rather than of running once. Exact numbers, not
-summaries:
+The install gate (`npm ci`) ran at 04:13 IST on 2026-09-26, against the `package.json` and
+`package-lock.json` as committed. Every gate below was then re-run **after the last edit of this
+stage** — the last edits files the checkers read (`README.md`, `docs/product/README.md`,
+`stage-2-migration-plan.md` §7.2; `npm run product:check` walks prose, so a documentation edit is a
+gate-invalidating edit rather than a safe one), and both Postgres chains were re-run after the last
+edit to `supabase/`. That pass reproduced the earlier figures exactly. It is **not** the last word:
+the gates were run a third time after an interference the numbers themselves exposed, described under
+the table, and that final pass reproduced every figure below unchanged. Exact numbers, not summaries:
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Clean install | `rm -rf node_modules && npm ci` | exit 0, `added 506 packages`; `package-lock.json` is the lockfile of record; `pnpm-lock.yaml`/`pnpm-workspace.yaml` were left untouched and are **not** part of this branch's diff. npm reported 2 install scripts it does not allow (`@swc/core`, `esbuild`) — an environment policy, not a repo change, and every gate below still passed |
+| Clean install | `npm ci` (npm replaces `node_modules` outright; run again at 08:36 after the interference below) | exit 0, `added 506 packages, and audited 507 packages in 21s`; `package-lock.json` is the lockfile of record; `pnpm-lock.yaml`/`pnpm-workspace.yaml` were left untouched and are **not** part of this branch's diff. npm reported 2 install scripts it does not allow (`@swc/core`, `esbuild`) — an environment policy, not a repo change, and every gate below still passed |
 | Lint | `npm run lint` | exit 0 — **8 problems, 0 errors, 8 warnings**, all `react-refresh/only-export-components` on pre-existing component modules |
 | Types | `npm run typecheck` | exit 0, clean; no `any`, no `as unknown as` added anywhere in the Stage 2 diff |
 | Product contract | `npm run product:check` | exit 0 — `126 active file(s) scanned, 0 violation(s)` |
@@ -556,6 +556,32 @@ summaries:
 | Stage 0 regression | `bash supabase/tests/rls/run.sh` | exit 0 — `STAGE0 RLS TESTS PASSED (24)` |
 | Stage 2 qualification | `bash supabase/tests/stage2/run.sh both` | exit 0 — clean `41 + 322 + 75`; legacy `75 + 322 + 75` |
 | Diff hygiene | `git diff --check` | exit 0 — no whitespace errors. One non-finding was printed: `LF will be replaced by CRLF` on `src/integrations/supabase/types.ts`, caused by `core.autocrlf=true` in this machine's **system** Git config (verified: local and global are unset). Git was not reconfigured; the committed blob stays LF |
+
+### An install interference, caught by a number that moved
+
+At 08:31 — between two of the passes above — something outside this stage ran a **pnpm** install
+inside the working copy. `node_modules/.pnpm/` and `node_modules/.modules.yaml` appeared with 08:31
+timestamps, top-level entries became pnpm symlinks, and the next build reported **2187 modules
+transformed, 820.83 kB (gzip 249.64 kB)** instead of `2179 / 745.65 kB`. No repository change caused
+it: no tracked file was modified, `package.json` and `package-lock.json` were untouched, and the
+branch diff was still the same five commits.
+
+Recorded rather than quietly re-run because it is the kind of thing a green gate hides. Two things
+follow from it. The first is procedural and is the reason it was caught at all: a bundle that grows
+75 kB with zero source change is either a real regression or a broken premise about the environment,
+and the only way to tell is to refuse to explain it and go measure. The second is a fact about this
+machine that no gate here can adjudicate: the pnpm tree resolves **8 more modules** than the npm tree
+for the same `package.json`. This repository's lockfile of record is `package-lock.json` and npm is
+the canonical installer, so the build figure above is the npm one — and a bundle size is not a
+repository fact independent of which installer last ran.
+
+Repair: `npm ci` at 08:36 restored the npm layout, and the rebuild printed
+`dist/assets/index-jFD4BHRu.js 745.65 kB │ gzip: 229.50 kB` — the **same content hash** as the earlier
+pass. Two independent builds of the same tree agreeing byte-for-byte is also the evidence that the
+build is deterministic, which the size alone could not have shown. Every gate in the table was then
+re-run against the restored tree, with the results above. `pnpm-lock.yaml` and `pnpm-workspace.yaml`
+were not deleted, edited, staged or committed; they remain untracked, exactly as Stage 1 left them.
+No pnpm command was issued by this stage, in this direction or in reverse.
 
 The paragraph above is not self-invalidating, and it is worth naming why: `check-product-contract.mjs`
 walks `docs/` but excludes `docs/audits/` and `scripts/` by prefix (its own `EXCLUDED_PREFIXES`), so
