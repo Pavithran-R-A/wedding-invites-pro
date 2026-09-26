@@ -85,7 +85,9 @@ const ConfigureProject = () => {
         </p>
         <h1 className="font-display text-2xl md:text-3xl font-bold mb-1 mt-1">{wedding.title}</h1>
         <p className="text-muted-foreground mb-8">
-          This is a private draft. Only you can see it, and nothing here reaches guests yet.
+          This page is private to you. What a guest receives comes from a version you
+          publish, not from what is written here — so editing these details cannot change an
+          invitation someone is already holding.
         </p>
 
         <section aria-labelledby="planning-heading" className="mb-6">
@@ -119,10 +121,11 @@ const ConfigureProject = () => {
           <Card>
             <CardContent className="py-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
-                Adjust the typeface, size, colour and alignment of the preview text.
+                Write the invitation, choose its styling, and publish it as a link you can
+                share with guests.
               </p>
               <Button className="rounded-xl shrink-0" asChild>
-                <Link to={`/project/${id}/edit`}>Open Design Preview</Link>
+                <Link to={`/project/${id}/edit`}>Open Invitation Editor</Link>
               </Button>
             </CardContent>
           </Card>
@@ -148,7 +151,7 @@ const ConfigureProject = () => {
             <li>Couple, family, function and venue details</li>
             <li>Family approval of a specific version</li>
             <li>Guest lists, personalised links and RSVP replies</li>
-            <li>Sharing, QR code, PDF, payment and publishing</li>
+            <li>QR code, PDF, payment and printing options</li>
           </ul>
           <p className="text-xs text-muted-foreground mt-2">
             These are directions for the product, not capabilities of this build.

@@ -23,11 +23,12 @@ const TermsOfService = () => {
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Current Scope of the Service</h2>
         <p className="text-sm text-muted-foreground">
           {PRODUCT.name} is a preview. The current preview contains the interface and the account
-          integration for creating and styling private invitation drafts; whether a draft saves and
-          reappears for you depends on the service environment behind it, which has not yet been
-          qualified for production. It does not provide paid plans, checkout, publishing, public
-          invitation pages, guest RSVP collection, or print ordering. These terms deliberately avoid
-          making promises about those features until they actually exist.
+          integration for creating and styling private invitation drafts, and for publishing a
+          chosen version of a draft as a link a guest can open without an account; whether a draft
+          saves and reappears for you depends on the service environment behind it, which has not
+          yet been qualified for production. It does not provide paid plans, checkout, guest RSVP
+          collection, personalised per-guest links, or print ordering. These terms deliberately
+          avoid making promises about those features until they actually exist.
         </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Payments and Refunds</h2>

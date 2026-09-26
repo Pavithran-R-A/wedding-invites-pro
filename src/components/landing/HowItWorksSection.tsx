@@ -16,6 +16,9 @@ const implementedFoundations = [
   "Invitation draft creation flow, with design direction and language selection",
   "Planning guest-count persistence code for your own draft",
   "Styling preview and persistence code: font, size, colour, alignment and a simulated foil overlay",
+  "The wording a guest reads, written and saved in four passages",
+  "Freezing a draft as an immutable version, and publishing a chosen version as one link",
+  "A public invitation page guests open without an account, and taking a link back down",
 ];
 
 const plannedForV1 = [
@@ -23,8 +26,8 @@ const plannedForV1 = [
   "Family approval tied to a specific invitation version",
   "Personalised guest links and household scoping",
   "RSVP replies and an export of the guest list",
-  "Shareable link, QR code and PDF output",
-  "Payment and publishing",
+  "QR code and PDF output for printing",
+  "Payment and checkout",
 ];
 
 const HowItWorksSection = () => {

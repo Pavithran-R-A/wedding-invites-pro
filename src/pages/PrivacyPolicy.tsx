@@ -20,6 +20,7 @@ const PrivacyPolicy = () => {
         <ul className="space-y-1 text-sm text-muted-foreground list-disc pl-5">
           <li>Account information you provide at sign-up: your name and email address.</li>
           <li>Invitation drafts you create: the draft name, chosen language, selected design, and styling settings.</li>
+          <li>The wording you write for an invitation, the versions you choose to freeze, and the record of a link you publish.</li>
           <li>An estimated guest count you choose to store as a planning note.</li>
         </ul>
 
@@ -50,10 +51,31 @@ const PrivacyPolicy = () => {
           deletion-request channel will be provided in a later release.
         </p>
 
+        <h2 className="font-display text-xl font-semibold mt-8 mb-3">What a published invitation shares</h2>
+        <p className="text-sm text-muted-foreground">
+          Freezing a version and publishing it creates a public web address. Anyone who has that
+          address can open the invitation without an account: its name, the wording you wrote, the
+          names and ceremonies it contains, and the styling you chose. The address itself is the
+          only access control — it is unguessable, but it is not a password, so anyone you forward
+          it to can read the invitation and pass it on.
+        </p>
+        <p className="text-sm text-muted-foreground mt-2">
+          A guest who opens it is shown a page and nothing else: no sign of your account, your
+          email address, or any internal identifier of the wedding, the version or the link. The
+          link is stored as a one-way digest, so the address cannot be recovered from the stored
+          record. Taking a link down stops new visitors immediately, and a retired address cannot
+          be reactivated.
+        </p>
+        <p className="text-sm text-muted-foreground mt-2">
+          This build does not record who opened a published invitation: there is no analytics, no
+          visit counter and no tracking of guests who follow a link.
+        </p>
+
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Access Control</h2>
         <p className="text-sm text-muted-foreground">
           Your project and guest data is isolated per account using Supabase row-level security, so
-          other signed-in users cannot read or modify it.
+          other signed-in users cannot read or modify it. A link you publish is the one deliberate
+          exception, described above.
         </p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Contact</h2>

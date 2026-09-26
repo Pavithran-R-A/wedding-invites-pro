@@ -44,7 +44,7 @@ const Dashboard = () => {
           <div>
             <h1 className="font-display text-2xl md:text-3xl font-bold">My Invitations</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Drafts you have started. Nothing here is shared with guests yet.
+              Drafts you have started. Each one becomes a link only when you publish a version of it.
             </p>
           </div>
           <Button asChild className="rounded-xl">
@@ -97,7 +97,7 @@ const Dashboard = () => {
               </p>
               <p className="text-sm text-muted-foreground mb-6">
                 A draft starts with a name, a language and a design. Everything
-                stays private to your account until the product can publish it.
+                stays private to your account until you publish a version of it.
               </p>
               <Button asChild className="rounded-xl">
                 <Link to="/create-project">

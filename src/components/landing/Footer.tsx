@@ -75,7 +75,7 @@ const Footer = () => {
             feature set and brand name are still provisional.
           </p>
           <p className="text-sm text-paper/60">
-            Sharing, RSVP, publishing and payment are not available yet.
+            RSVP, personalised guest links, payment and printing are not part of this build.
           </p>
         </div>
       </div>

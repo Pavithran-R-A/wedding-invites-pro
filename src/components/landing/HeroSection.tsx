@@ -68,8 +68,8 @@ const HeroSection = () => {
           </div>
 
           <p className="mt-8 text-sm text-ink-muted">
-            Drafts are free while {PRODUCT.name} is in preview. Sharing, RSVP,
-            publishing and payment are not available yet.
+            Drafts are free while {PRODUCT.name} is in preview. RSVP, personalised
+            guest links, payment and printing are not part of this build.
           </p>
         </div>
       </div>
