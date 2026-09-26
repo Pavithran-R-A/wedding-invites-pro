@@ -11,15 +11,21 @@
 > of is [`stage-2-domain-blueprint.md`](stage-2-domain-blueprint.md), whose "Stage 2 outcome" section
 > lists what was built, deferred and refused.
 
-## 1. The three zones
+## 1. The four zones
 
-Measured after Stage 2, base tables only:
+Counts below are base tables, read from the catalogue at this branch's schema head (after the Stage 2
+forward migrations and Stage 3's publication boundary):
 
 | Schema | Tables | Reachable by `anon` | Reachable by `authenticated` | Reachable by `service_role` | Purpose |
 | --- | --- | --- | --- | --- | --- |
-| `public` | 18 | no `USAGE`-granted table: zero table privileges | SELECT on all 18; INSERT/UPDATE/DELETE on the 10 customer-owned tables | full privileges | the canonical domain, plus the platform catalogue and the retained account tables |
+| `public` | 18 | no `USAGE`-granted table: zero table privileges | SELECT on all 18; INSERT/UPDATE/DELETE on the customer-owned tables (the draft lost its INSERT/DELETE in Stage 3 §3) | full privileges | the canonical domain, plus the platform catalogue and the retained account tables |
+| `api` | 0 | `USAGE`, and `EXECUTE` on exactly one function: the guest resolver | `USAGE`, and `EXECUTE` on the six host verbs | none — no `USAGE`, no `EXECUTE` | the callable surface: functions only, no table, no view, no sequence |
 | `private` | 2 | no `USAGE` | no `USAGE` | `USAGE` + privileges on both | server-only history and credentials |
 | `legacy` | 8 | no `USAGE` | no `USAGE` | **no `USAGE`** | archived scaffold: rows kept, no live reader |
+
+`api` is the one zone PostgREST was given alongside `public`, which makes it the only way a browser can
+ask the database to *do* something. What lives there, who may call each function and why the set is
+closed is [`public-invitation-security.md`](public-invitation-security.md).
 
 The archive being closed even to `service_role` is deliberate: an API process has no reason to read
 retired commerce scaffolding, and "only a maintenance session can look" is a rule one can test
@@ -42,7 +48,7 @@ attempt even if a future grant mistake let it through.
 | `wedding_people` | Couple, hosts and family members as ordered rows, because ordered attribution is a query, not a paragraph. | `wedding_id` FK `CASCADE`; `role_key`/`role_label`, `group_key`/`group_label` are free labels | owner |
 | `venues` | A place that more than one event can share, with coordinates as `numeric`. | `UNIQUE (wedding_id, id)` so an event can be pinned to *this wedding's* venue | owner |
 | `wedding_events` | The functions themselves: order, enable/disable, local wall-clock times, timezone, optional venue. | `UNIQUE (wedding_id, id)`; `(wedding_id, venue_id) → venues(wedding_id, id)`; no CHECK on `event_key` (see §7) | owner |
-| `invitation_drafts` | The editable content of a wedding, separated from the aggregate so content and metadata have different change rates. | `UNIQUE (wedding_id)` — at most one draft per wedding, and `weddings_have_draft` makes the wedding's own `INSERT` write that row in the same statement, so a product-created wedding is never without one. An owner who deletes its draft (a right `owners_manage_own_draft` grants) leaves the wedding undrafted and the editor re-creates it on the next save. | owner; created by the invoker-side trigger, edited by the owner |
+| `invitation_drafts` | The editable content of a wedding, separated from the aggregate so content and metadata have different change rates. | `UNIQUE (wedding_id)`, and `weddings_have_draft` makes the wedding's own `INSERT` write that row in the same statement. The invariant is now total for every operation a customer can perform: `anon`/`authenticated` hold neither `INSERT` nor `DELETE` on this table (Stage 3 closed what the first trigger left open), so no browser write can create a second draft, remove one, or leave a wedding undrafted. Deleting the wedding still cascades to the draft — one aggregate. | owner SELECT + UPDATE; created and destroyed by the database |
 | `wedding_assets` | Registry of uploaded/presented artwork; the object key, never the bytes. | `UNIQUE (object_key)`; `size_bytes`/`mime_type` bounded | owner; no upload path exists yet |
 
 ### Trust-bearing rows (customer-visible, customer-immutable)
@@ -144,13 +150,20 @@ may rename lives in a `jsonb` object with an explicit schema version beside it.
 
 `20_attacks.sql` group 3 and `40_catalog.sql` C30/C61/C62/C67 show a browser role cannot `USAGE` the
 schema, cannot name either table, cannot execute the guard functions directly, and cannot read a
-digest. The stage created the *storage* for unauthenticated guest links; nothing mints one, because
-no renderer exists to send a guest to (see §8).
+digest. Stage 3 closed the gap Stage 2 left open here: credentials are now minted, looked up and
+revoked, but only through `api` functions — `publish_invitation_version` mints (or re-parents) a
+credential, `resolve_public_invitation` reads one by its digest, and no client holds a write privilege
+on `private.access_tokens` at any layer. The raw string exists in one HTTP response and no column
+anywhere can return it.
 
-Trusted helpers live beside them: `private.handle_new_user` (the only `SECURITY DEFINER` function in
-the database, `search_path` pinned, not executable by a client role — C26/C27/C28), plus
-`private.reject_client_write`, `private.reject_client_delete` and `private.touch_updated_at`, all
-`SECURITY INVOKER` so they cannot be pointed at a row by someone else's privileges.
+Trusted helpers live beside them: `private.handle_new_user` and
+`private.attach_draft_on_wedding_create` — the two `SECURITY DEFINER` trigger functions, both
+`search_path`-pinned, both revoked from every API role (C26/C27/C28; the draft trigger had to change
+privilege when its caller lost the right to insert the row) — plus `private.reject_client_write`,
+`private.reject_client_delete` and `private.touch_updated_at`, all `SECURITY INVOKER` so they cannot
+be pointed at a row by someone else's privileges. The seven `api` functions are the third and only
+other definer population, and their inventory is asserted, not described: see
+[`public-invitation-security.md`](public-invitation-security.md) §2.
 
 ## 6. What was archived, and what happened to it
 
@@ -207,11 +220,11 @@ that do exist are archived ones. No price, no GST, no package amount was invente
 
 ## 8. Deferred, on purpose
 
-| Concept | Status in Stage 2 | What would promote it |
+| Concept | Status at this branch's head (schema: Stage 2 + Stage 3) | What would promote it |
 | --- | --- | --- |
 | Recipients / individual guests inside a household | **no table, no JSON column** | a per-recipient credential, or an RSVP that records one named person |
 | Pack × template compatibility | no join table | the first real pack pairing that needs one (Stage 4) |
-| Token minting, guest links, `/i/:token` | storage only, nothing generates a token | Stage 3's renderer |
+| Guest links | Stage 3 built the whole read path: mint, resolve, rotate, revoke, and a `/i/:token` route | what is still deferred is a guest *doing* anything — RSVP, approvals, a reply of any kind |
 | Family approval UX | schema only | Stage 7 |
 | Event / venue / family editors | schema only | Stage 5 |
 | Uploads and Storage policies | registry table only, no Storage integration | Stage 6 |
@@ -239,10 +252,10 @@ number written here would be invented.
 | RSVP answers | `public.rsvp_responses.answers` | **high** — attendance and party size reveal who will be somewhere, and free-form answers may contain dietary, mobility or health information the product never asked for and must not treat as structured data | the owning user (manual entry today); the guest submission path is Stage 8 |
 | Frozen documents | `public.invitation_versions.snapshot` | high — this is the record of what was *said* to guests; immutability is what makes it usable as evidence | the owning user, read-only |
 | Approval comments | `public.approval_feedback.message` | **high — a named third party (a family reviewer) writing opinions about a family's decisions.** Append-only, author recorded by label rather than by account link, and there is no reviewer login yet | the owning user; reviewer-facing view is Stage 7 |
-| Public invitation surface | `public.publications` (state only — no renderer yet) | the moment a version becomes reachable by strangers, its sensitivity *decreases by design*: what is published is what the host chose to disclose | no public read path exists in this stage |
+| Public invitation surface | `public.publications` + the 11-field DTO | the moment a version becomes reachable by strangers, its sensitivity *decreases by design*: what is published is what the host chose to disclose, and the DTO is what makes that choice enumerable | `api.resolve_public_invitation` only, for one active unexpired credential; no identifier crosses |
 | Entitlement / paid state | `public.entitlements` | high commercially, and **never** client-writable; a wrong answer here is a charge or a denial of service | the owning user may read their own rights; only a trusted path writes them |
 | Financial history | `legacy.payments`, `legacy.orders` (archived) | high — real historical money claims that were **not** reinterpreted; archived and unreachable to every API role | a maintenance session only |
-| Credentials | `private.access_tokens.token_hash` | **highest — and by construction a leak is not a credential leak**: only a digest is stored, and no browser role can read the table or even name its schema | no product code path reads it yet |
+| Credentials | `private.access_tokens.token_hash` | **highest — and by construction a leak is not a credential leak**: only a digest is stored, and no browser role can read the table or even name its schema | minted by `api.publish_invitation_version`/`api.rotate_invitation_token`, hashed and compared inside `private.invitation_for_token`; no product code path reads the table |
 | Audit trail | `private.audit_events` | high — it describes actions, including destructive ones, whose subjects may no longer exist | server roles only |
 | Platform content | `tradition_packs`, `design_templates` | low personal sensitivity, high **reputational** sensitivity: an unreviewed pack or template becoming customer-visible is a cultural claim made by the platform | signed-in users see `draft` and `approved` rows only, and cannot write any |
 
@@ -312,8 +325,9 @@ migration plan, and is executed in `20_attacks.sql` groups 11a–11e.
 
 ## 12. What this domain does not do yet
 
-There is no public invitation route, no guest or RSVP or approval screen, no event/venue/family
-editor, no upload path, no payment provider, no price, no admin console and no deployed schema.
+A guest can now be given a link and nothing else: there is no guest, RSVP or approval *screen*, no
+event/venue/family editor (Stage 3's editor writes prose and styling only, so the E2E's ceremonies were
+seeded), no upload path, no payment provider, no price, no admin console and no deployed schema.
 `npm run product:check` and the readiness matrix
 ([`../product/feature-readiness.md`](../product/feature-readiness.md)) are the mechanisms that keep
 this document from being read as a feature list.

@@ -1,8 +1,12 @@
 # VivaahVarnam — Digital Wedding Patrika
 
-**Status: Preview.** VivaahVarnam is an early, development-stage product. The account-backed draft
-flows are implemented in the source code but have not been exercised end to end against a verified
-Supabase environment; sharing, RSVP, publishing, payment and printing do not exist yet.
+**Status: Preview.** VivaahVarnam is an early, development-stage product. One loop is complete and was
+exercised end to end — a host signs up, creates a wedding, edits the invitation's words and styling,
+freezes an immutable version, publishes it as a single link, and a visitor with no account opens that
+link on a phone — **against a real local Supabase stack** (Kong, PostgREST, GoTrue, PostgreSQL 17.6)
+driven from a browser. Nothing is deployed and no hosted project was used, so no claim here is that a
+customer can do this on a live site today. Guest lists, RSVP collection, payment and printing do not
+exist yet.
 
 **Brand status: preliminary working brand — not legally cleared.** The name may change before
 launch. Nothing in this repository should be read as a trademark claim, and no trademark search
@@ -76,17 +80,21 @@ demonstrated against a verified Supabase environment during Stage 1 or Stage 2:
 - A design preview that saves font, size, colour, alignment and a **simulated** foil overlay with
   the draft
 
-No production Supabase environment was validated. Running the flows above needs a compatible
-Supabase project with this repository's migrations applied, and the Stage 1 and Stage 2 browser QA
-covered only the public and unauthenticated surfaces. Treat them as implemented, not as proven live.
-The same limit applies to the database: its privileges and policies were measured through `psql` with
-`SET ROLE`, which is the layer PostgREST sits on, not PostgREST's own filtering.
+No **production** Supabase environment was validated: a deployed project, its gateway configuration
+and its transport security are all still unproven here. What Stage 3 did close is the layer Stages 1
+and 2 could only reason about: their browser QA covered the public and unauthenticated surfaces, and
+their database was measured through `psql` with `SET ROLE` — the layer PostgREST sits on, not
+PostgREST's own filtering. Stage 3 runs the same schema on the platform images and drives it over
+HTTP with real JWTs, so grants, policies, triggers, the token boundary and error shapes are observed
+through Kong and PostgREST rather than inferred. See
+[`docs/audits/stage-3-public-invitation.md`](docs/audits/stage-3-public-invitation.md) §4–§6 for what
+that did and did not buy.
 
 What deliberately does **not** exist yet is a **product surface** for guest lists, RSVP collection,
-public invitation URLs, QR codes, PDF/image export, publishing, payment, GST handling, print
-ordering, and admin tooling. Stage 2 gives several of them tables and rules; no screen or link reads
-those tables yet, and a schema is not a feature. Where the UI mentions them, it labels them
-*Planned for V1*.
+QR codes, PDF/image export, payment, GST handling, print ordering, and admin tooling — and no screen
+yet lets a host add a ceremony, a venue or a family member, which is why the audit's richer fixtures
+were seeded. Stage 2 gives several of those capabilities tables and rules; a schema is not a feature.
+Where the UI mentions them, it labels them *Planned for V1*.
 
 ## Target V1
 
@@ -225,6 +233,36 @@ harness — do not edit the assertion count to make the run green.
 - `bash supabase/tests/rls/run-repro.sh` reproduces the paid-state INSERT bypass against the
   published schema; `REPAIRED=1 bash supabase/tests/rls/run-repro.sh` re-checks it with the repair
   migration applied. The probe is informational — read its notices, it never fails the script.
+
+`bash supabase/tests/stage2/run.sh both` qualifies the whole schema on **two throwaway chains** — the
+published migrations alone, and the migrations plus a synthetic legacy history — then runs the outcome,
+draft-invariant, publication-boundary, attack and catalogue suites on each. It is named for the stage
+that wrote it and now carries Stage 3's files too.
+
+## API testing against the local stack
+
+The suites above play database roles inside psql; they cannot prove what PostgREST, a JWT or a browser
+will do. These do, and they need this repository's own Supabase stack running:
+
+```bash
+npx supabase db reset --local --no-seed   # applies supabase/migrations from zero
+npx supabase start                        # kong 54400, db 54401, mailpit UI 54403
+bash supabase/tests/api/run.sh
+```
+
+`run.sh` reads `.env.local` (gitignored) and **refuses to run at all** unless `SUPABASE_LOCAL_URL` is a
+loopback host *and* its port matches the `[api]` port in this repository's `supabase/config.toml` — a
+mistaken pointer at someone else's stack fails both gates. It issues real sign-ups, real tokens and one
+tampered JWT, and asserts what comes back through HTTP. Two files, two concerns:
+`stage3_security.test.mjs` (isolation, the anonymous surface, what a customer may never do) and
+`stage3_publication.test.mjs` (the `api` surface, versions, credentials, the guest door, rotation and
+revocation). `--local` is always explicit: `supabase link`, `db push`, `db pull` and
+`db reset --linked` are not part of this project's workflow and are never run.
+
+See [`docs/architecture/public-invitation-security.md`](docs/architecture/public-invitation-security.md)
+for the boundary those tests hold, and
+[`docs/architecture/render-contract.md`](docs/architecture/render-contract.md) for what an invitation
+document promises once it gets to the screen.
 
 ## GitHub CI note
 
