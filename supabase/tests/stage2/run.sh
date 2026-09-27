@@ -18,8 +18,9 @@
 #     the schema as of Stage 2's commit: a Stage 3 migration must be shown not to
 #     have loosened a Stage 2 guarantee. Stage 2's own totals at commit a51856f were
 #     41 / 75 / 322 / 75 and remain reproducible from that commit. On this branch the
-#     same two suites print 325 and 86, because Stage 3 added assertions to them
-#     (draft-invariant INSERT/DELETE refusals and the `api` schema catalogue); every
+#     same two suites print 325 and 94, because Stage 3 and its closure repair added
+#     assertions to them (draft-invariant INSERT/DELETE refusals, the `api` schema
+#     catalogue, and the `internal_api` half of the boundary); every
 #     other number below is the record of this branch, measured, not recalled.
 #   * The fixture is applied *between* the published migrations and the Stage 2 chain,
 #     so the migration is tested against real-shaped history rather than an empty

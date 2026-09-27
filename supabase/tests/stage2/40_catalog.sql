@@ -344,16 +344,25 @@ BEGIN
   -- table and exists only so the callable boundary has a home of its own. That makes
   -- "which schemas can a client name" a load-bearing fact rather than a detail, so
   -- this is the check that notices a fourth one arriving.
-  PERFORM pg_temp.st2_set('C17 schema USAGE for the browser roles is public plus the RPC schema',
+  --
+  -- The closure repair's `internal_api` is the fourth, and it arrives *with* a reason
+  -- written down rather than after one: nested execution from a SECURITY INVOKER wrapper
+  -- is permission-checked as the invoking role, so a client that may call the wrapper
+  -- must be able to name the implementation (C26f pins the mirror exactly). Being
+  -- nameable in SQL is not being reachable over HTTP — `internal_api` is absent from the
+  -- schemas PostgREST serves, which `stage3_security.test.mjs` measures from the outside
+  -- rather than trusting this file to know.
+  PERFORM pg_temp.st2_set('C17 schema USAGE for the browser roles is public plus the two RPC schemas',
     (SELECT array_agg(r.rolname || ':' || n.nspname ORDER BY r.rolname, n.nspname)
        FROM (VALUES ('anon'),('authenticated')) r(rolname)
-       JOIN pg_namespace n ON n.nspname IN ('public','api','private','legacy')
+       JOIN pg_namespace n ON n.nspname IN ('public','api','private','legacy','internal_api')
       WHERE has_schema_privilege(r.rolname, n.nspname, 'USAGE')),
-    ARRAY['anon:api','anon:public','authenticated:api','authenticated:public']);
+    ARRAY['anon:api','anon:internal_api','anon:public',
+          'authenticated:api','authenticated:internal_api','authenticated:public']);
   PERFORM pg_temp.st2_set('C17b schema USAGE for service_role excludes the archive',
     (SELECT array_agg(n.nspname ORDER BY n.nspname)
        FROM pg_namespace n
-      WHERE n.nspname IN ('public','api','private','legacy')
+      WHERE n.nspname IN ('public','api','private','legacy','internal_api')
         AND has_schema_privilege('service_role', n.nspname, 'USAGE')),
     ARRAY['private','public']);
   -- The server key deliberately cannot reach the browser boundary. It has no need to:
@@ -372,6 +381,30 @@ BEGIN
     AND EXISTS (SELECT 1 FROM pg_proc p
                   JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'api'));
+  -- Same rule for the schema that holds the privileged bodies, stated separately because
+  -- the reason is sharper: an `internal_api` that grew a table would be a table in a
+  -- schema with no RLS, no exposed profile and no policy review — the worst of both.
+  PERFORM pg_temp.st2_ok('C17d2 the privileged schema holds functions only, and no policy is defined in it',
+    NOT EXISTS (SELECT 1 FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = 'internal_api')
+    AND NOT EXISTS (SELECT 1 FROM pg_policy pol
+                      JOIN pg_class c ON c.oid = pol.polrelid
+                      JOIN pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = 'internal_api')
+    AND EXISTS (SELECT 1 FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'internal_api'));
+  -- The privileged half of C17c. `service_role` is the role a trusted backend uses to
+  -- write these tables directly, so handing it a browser's RPC bodies would be a second,
+  -- weaker way of doing what it already does exactly. `anon` may not CREATE in the
+  -- schema either, which is the difference between "usable for nested execution" and
+  -- "somebody can add to it".
+  PERFORM pg_temp.st2_ok('C17e no role may add to or take the privileged schema as a server key',
+    NOT has_schema_privilege('service_role', 'internal_api', 'USAGE')
+    AND NOT has_schema_privilege('service_role', 'internal_api', 'CREATE')
+    AND NOT has_schema_privilege('anon', 'internal_api', 'CREATE')
+    AND NOT has_schema_privilege('authenticated', 'internal_api', 'CREATE'));
 
   -- =========================================================== 4. policies
   PERFORM pg_temp.st2_ok('C18 every policy targets authenticated alone',
@@ -448,34 +481,115 @@ BEGIN
   -- here before it can ship". Stage 3 collected the seven callable boundary
   -- functions of the published invitation, and made the signup-adjacent draft
   -- trigger a definer so the one-draft-per-wedding invariant could be closed. Nine
-  -- names now stand here, which means the rule reads as a named inventory instead of
-  -- a prohibition — that is what "earning its place" looked like when it was finally
-  -- written down. Each name is either a function a browser role can call and cannot
-  -- otherwise do (the seven in `api`), or a function no role can call at all and only
-  -- the executor of a trigger reaches (the two in `private`). The grant set beside
-  -- each is asserted by C28a/C28b/C30 rather than asserted in a comment.
+  -- names still stand here — the closure repair moved seven of them between schemas
+  -- rather than adding an eighth, which is the point of the change — but *which* nine
+  -- is now the interesting fact: after independent review the privileged bodies left
+  -- the exposed `api` schema, whose wrappers are SECURITY INVOKER one-liners, and the
+  -- definers live in `internal_api`, which PostgREST does not serve. Each name here is
+  -- either a privileged body a browser role can only reach through the wrapper beside
+  -- it, or a function no role can call at all and only the executor of a trigger
+  -- reaches (the two in `private`). The grant set beside each is asserted by
+  -- C28a/C28b/C26f/C30 rather than asserted in a comment.
   --
   -- What did NOT change is the reason the check exists: a definer function is the
   -- one shape in this schema that can act above its caller, so the list is the
   -- audit surface, and a new name arriving here must be readable in one line.
-  PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the two trigger definers plus the Stage 3 boundary',
+  PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the privileged publication implementations plus the two trigger definers',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')) s),
-    ARRAY['api.create_invitation_version',
-          'api.get_invitation_publication_state',
-          'api.preview_invitation',
-          'api.publish_invitation_version',
-          'api.resolve_public_invitation',
-          'api.revoke_invitation_publication',
-          'api.rotate_invitation_token',
+    ARRAY['internal_api.create_invitation_version',
+          'internal_api.get_invitation_publication_state',
+          'internal_api.preview_invitation',
+          'internal_api.publish_invitation_version',
+          'internal_api.resolve_public_invitation',
+          'internal_api.revoke_invitation_publication',
+          'internal_api.rotate_invitation_token',
           'private.attach_draft_on_wedding_create',
           'private.handle_new_user']);
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')
                    AND p.proconfig::text NOT LIKE '%search_path%'));
+  -- The other half of the split C26 only partly states: `api` being absent from the
+  -- definer list is a fact worth pinning on its own, because "we moved the privileged
+  -- bodies" is only true if nothing privileged stayed behind. A wrapper that kept
+  -- `SECURITY DEFINER` while delegating to a definer would escalate twice and read as
+  -- a single hop to anyone auditing the exposed surface.
+  PERFORM pg_temp.st2_ok('C26b nothing exposed through the Data API acts above its caller',
+    NOT EXISTS (SELECT 1 FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'api' AND p.prosecdef));
+  -- C27 pins the search_path for every definer, which covers `internal_api` already.
+  -- The wrappers need the same pinning for a different reason: they resolve the name
+  -- `internal_api` themselves, so an inherited path is a steering opportunity — the one
+  -- thing an otherwise empty function body could still be made to carry.
+  PERFORM pg_temp.st2_ok('C26c every exposed wrapper pins its search_path',
+    NOT EXISTS (SELECT 1 FROM pg_proc p
+                  JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'api'
+                   AND p.proconfig::text NOT LIKE '%search_path%'));
+  -- A wrapper is only as trustworthy as how little it decides. This reads the stored
+  -- source and accepts exactly one qualified delegation, so a wrapper that grew an `IF`,
+  -- a second call or an ownership test of its own would fail here rather than in review.
+  -- A text check on purpose: it is proving the absence of logic, which no behavioural
+  -- test can show, and it is the shape C63b's limitation makes worth watching.
+  PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
+    (SELECT count(*) FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'api') = 7
+    AND NOT EXISTS (SELECT 1 FROM pg_proc p
+                      JOIN pg_namespace n ON n.oid = p.pronamespace
+                     WHERE n.nspname = 'api'
+                       -- body must begin with the delegation …
+                       AND (p.prosrc !~ ('^[[:space:]]*SELECT[[:space:]]+internal_api\.'
+                                         || p.proname || '\(')
+                       -- … and be nothing but it: one qualified reference, one statement
+                            OR (SELECT count(*) FROM regexp_matches(p.prosrc,
+                                      'internal_api\.', 'g')) <> 1
+                            OR (SELECT count(*) FROM regexp_matches(p.prosrc,
+                                      ';', 'g')) <> 1)));
+  -- The implementations are the same seven names, and no eighth arrived to sit in the
+  -- unexposed schema where no HTTP request can reach it.
+  PERFORM pg_temp.st2_set('C26e internal_api holds exactly the seven implementations',
+    (SELECT array_agg(p ORDER BY p) FROM (
+       SELECT p.proname AS p FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'internal_api') s),
+    ARRAY['create_invitation_version',
+          'get_invitation_publication_state',
+          'preview_invitation',
+          'publish_invitation_version',
+          'resolve_public_invitation',
+          'revoke_invitation_publication',
+          'rotate_invitation_token']);
+  -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
+  -- two things must hold: every implementation is a pinned definer, and a role that can
+  -- call a wrapper can call its implementation and no more — which is what makes the
+  -- nested-execution grant a consequence of the design rather than an oversight in it.
+  -- `service_role` appears on neither side, asserted in the same pass.
+  PERFORM pg_temp.st2_ok('C26f every implementation is a pinned definer whose caller matrix mirrors its wrapper',
+    (SELECT count(*) FROM pg_proc impl
+        JOIN pg_namespace n ON n.oid = impl.pronamespace
+        JOIN pg_proc wrap ON wrap.proname = impl.proname
+        JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
+       WHERE n.nspname = 'internal_api' AND wn.nspname = 'api') = 7
+    AND NOT EXISTS (SELECT 1 FROM pg_proc impl
+                      JOIN pg_namespace n ON n.oid = impl.pronamespace
+                      JOIN pg_proc wrap ON wrap.proname = impl.proname
+                      JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
+                     WHERE n.nspname = 'internal_api' AND wn.nspname = 'api'
+                       AND (NOT impl.prosecdef
+                         OR impl.proconfig::text NOT LIKE '%search_path%'
+                         OR has_function_privilege('anon', impl.oid, 'EXECUTE')
+                            IS DISTINCT FROM
+                            has_function_privilege('anon', wrap.oid, 'EXECUTE')
+                         OR has_function_privilege('authenticated', impl.oid, 'EXECUTE')
+                            IS DISTINCT FROM
+                            has_function_privilege('authenticated', wrap.oid, 'EXECUTE')
+                         OR has_function_privilege('service_role', impl.oid, 'EXECUTE')
+                         OR has_function_privilege('service_role', wrap.oid, 'EXECUTE'))));
   -- Stage 2's C28 read "no SECURITY DEFINER function is executable by anon or
   -- authenticated", which was true only because nothing of ours was a definer at
   -- all. Replaced by two statements that carry the same weight and survive the
@@ -485,19 +599,25 @@ BEGIN
   -- `auth` is excluded because the local shim defines auth.uid()/auth.role() with
   -- the implicit PUBLIC execute that no ALTER DEFAULT PRIVILEGES can remove
   -- (measured, Stage 2 file 1) — those two are not our surface and cannot be.
-  -- `api` is included because it is now where the callable surface lives.
-  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is exactly the resolver',
+  -- `api` is included because it is where the callable surface lives, and
+  -- `internal_api` because "not served by PostgREST" is a property of the gateway's
+  -- schema list, not of the database's privilege map: from inside SQL, the fourteen
+  -- names below are all one call apart, and this assertion is what keeps that set from
+  -- growing quietly. The HTTP-side half of the claim — that a request cannot name
+  -- `internal_api` at all — is measured by `supabase/tests/api/stage3_security.test.mjs`.
+  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is the resolver and its implementation',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname IN ('public','api','private','legacy')
+        WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('anon', p.oid, 'EXECUTE')) s),
-    ARRAY['api.resolve_public_invitation']);
-  PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the resolver plus the six host operations',
+    ARRAY['api.resolve_public_invitation',
+          'internal_api.resolve_public_invitation']);
+  PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the seven wrappers and their seven implementations',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname IN ('public','api','private','legacy')
+        WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
     ARRAY['api.create_invitation_version',
           'api.get_invitation_publication_state',
@@ -505,7 +625,14 @@ BEGIN
           'api.publish_invitation_version',
           'api.resolve_public_invitation',
           'api.revoke_invitation_publication',
-          'api.rotate_invitation_token']);
+          'api.rotate_invitation_token',
+          'internal_api.create_invitation_version',
+          'internal_api.get_invitation_publication_state',
+          'internal_api.preview_invitation',
+          'internal_api.publish_invitation_version',
+          'internal_api.resolve_public_invitation',
+          'internal_api.revoke_invitation_publication',
+          'internal_api.rotate_invitation_token']);
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
   -- empty `public` meant the data API could not be asked to run anything of ours.
@@ -546,7 +673,7 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM pg_proc p
                   JOIN pg_namespace n ON n.oid = p.pronamespace
                   JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
-                 WHERE n.nspname IN ('api','private','public')
+                 WHERE n.nspname IN ('api','internal_api','private','public')
                    AND a.argname ~* 'user_id|owner|role|uid'));
   PERFORM pg_temp.st2_ok('C30 anon and authenticated cannot execute anything in private',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -984,6 +1111,18 @@ BEGIN
   PERFORM pg_temp.st2_ok('C63b a forgotten revoke in api is reachable, which is why C28a exists',
     has_schema_privilege('anon', 'api', 'USAGE')
     AND pg_temp.st2_state('SELECT api.st2_probe_fn_dp()', 'anon') = '00000');
+  -- And in the schema the closure repair added, where it matters more: `internal_api`
+  -- carries USAGE for the browser roles because nested execution needs it (see the
+  -- migration header), so an un-revoked function there would be SQL-callable by a
+  -- signed-in role the same way. What protects it is not a revoke nobody can rely on
+  -- being remembered, it is that no HTTP request can name the schema — asserted from
+  -- outside in `stage3_security.test.mjs`, because this file cannot see the gateway.
+  EXECUTE 'CREATE FUNCTION internal_api.st2_probe_fn_dp() RETURNS integer LANGUAGE sql AS $body$ SELECT 1 $body$';
+  PERFORM pg_temp.st2_ok('C63c a forgotten revoke in internal_api is equally reachable by SQL, so non-exposure is measured over HTTP',
+    has_schema_privilege('anon', 'internal_api', 'USAGE')
+    AND pg_temp.st2_state('SELECT internal_api.st2_probe_fn_dp()', 'anon') = '00000');
+
+  EXECUTE 'DROP FUNCTION internal_api.st2_probe_fn_dp()';
 
   EXECUTE 'DROP FUNCTION api.st2_probe_fn_dp()';
   EXECUTE 'DROP FUNCTION private.st2_probe_fn_dp()';
@@ -1027,16 +1166,24 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM pg_class WHERE relname LIKE 'st2_probe_%')
     AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname LIKE 'st2_probe_%'));
 
-  -- Measured on this branch: 86. The file ran 76 at Stage 2's head commit, and Stage 3
+  -- Measured on this branch: 94. The file ran 76 at Stage 2's head commit, and Stage 3
   -- added ten by splitting two claims that could no longer be made whole — C13 became
   -- C13a-d (one per command, plus the draft itself) and C28 became C28a/C28b (the
   -- anonymous surface, the signed-in surface) — plus C17c/C17d for the `api` schema,
   -- C29a/C29c for the callable inventory and its argument shape, C32b for the guard
   -- privilege that C32's blanket form can no longer state, and C63b for the limitation
-  -- the new schema inherits. Re-measure and say so whenever a check is added or
-  -- removed: a floor nobody re-measures stops meaning anything.
-  IF (current_setting('st2.passed'))::int < 86 THEN
-    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 86',
+  -- the new schema inherits. That measurement was 86; the independent-review closure
+  -- repair added eight more, all of them about the second RPC schema rather than about
+  -- new subject matter — C17d2 (internal_api holds functions and no policy), C17e (no
+  -- USAGE or CREATE for a server role there), C26b (nothing exposed through `api` acts
+  -- above its caller), C26c (the wrappers pin their own path), C26d (a wrapper is one
+  -- delegation and nothing else), C26e (internal_api is exactly the seven bodies),
+  -- C26f (each body is a pinned definer whose caller matrix mirrors its wrapper), and
+  -- C63c (the limitation C63b states applies inside internal_api too). Re-measure and
+  -- say so whenever a check is added or removed: a floor nobody re-measures stops
+  -- meaning anything.
+  IF (current_setting('st2.passed'))::int < 94 THEN
+    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 94',
       (current_setting('st2.passed'))::int;
   END IF;
 END $CATALOG$;

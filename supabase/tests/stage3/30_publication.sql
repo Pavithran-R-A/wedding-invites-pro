@@ -1195,15 +1195,27 @@ END $E$;
 -- whole matrix is stricter than seven holding one column each: it fails when a
 -- function is added, removed, renamed, re-signatured or re-granted, and the failure
 -- message prints the entire surface as measured.
+--
+-- After the closure repair this reads as two matrices, because the surface is two
+-- schemas: `api` is the profile PostgREST serves and now holds only one-line SECURITY
+-- INVOKER delegations, and `internal_api` is unexposed and holds the PRIVILEGED
+-- SECURITY DEFINER bodies they name. G1/G1f each assert a whole literal, and G1g
+-- asserts the pair relationships — same names, same signatures, one invoker over one
+-- definer, identical browser grants, no server role — which is the property that keeps
+-- the wrapper layer honest: it cannot quietly grow its own authorization, because the
+-- authorization is provably on the other side of the pair.
 DO $G$
 DECLARE
   v_matrix  text;
+  v_impl    text;
+  v_pairs   text;
   v_rel     text;
 BEGIN
   SELECT string_agg(
            p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') -> '
            || pg_get_function_result(p.oid)
            || ' | definer=' || CASE WHEN p.prosecdef THEN 'y' ELSE 'n' END
+           || ' | lang=' || l.lanname
            || ' | vol=' || p.provolatile::text
            || ' | search_path=' || coalesce(array_to_string(p.proconfig, ','), '(unset)')
            || ' | owner=' || pg_get_userbyid(p.proowner)
@@ -1214,15 +1226,99 @@ BEGIN
            E'\n' ORDER BY p.proname COLLATE "C")
     INTO v_matrix
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
    WHERE n.nspname = 'api';
 
-  PERFORM pg_temp.st3p_eq('G1 the whole callable surface of api, function by function', v_matrix, $matrix$create_invitation_version(p_wedding_id uuid) -> jsonb | definer=y | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
-get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=y | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
-preview_invitation(p_wedding_id uuid) -> jsonb | definer=y | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
-publish_invitation_version(p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=y | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
-resolve_public_invitation() -> jsonb | definer=y | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
-revoke_invitation_publication(p_wedding_id uuid) -> jsonb | definer=y | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
-rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n$matrix$);
+  -- Seven `lang=sql`, seven `definer=n`: the exposed schema is pure transport. The
+  -- volatility letters are the same ones as before the repair because the wrappers
+  -- declare them — PostgREST routes GET/POST on `provolatile`, so a wrapper that
+  -- dropped `STABLE` would change the HTTP surface while changing no behaviour.
+  PERFORM pg_temp.st3p_eq('G1 the whole callable surface of api, function by function — invoker wrappers only', v_matrix, $matrix$create_invitation_version(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+publish_invitation_version(p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+resolve_public_invitation() -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+revoke_invitation_publication(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n$matrix$);
+
+  -- The privileged half. Same seven names, same seven signatures, the opposite
+  -- security mode, and the same pinned empty search_path — an empty path is what makes
+  -- running as the owner safe, and it is asserted here rather than assumed from the
+  -- wrapper because the definer is the function that actually touches `private`.
+  SELECT string_agg(
+           p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') -> '
+           || pg_get_function_result(p.oid)
+           || ' | definer=' || CASE WHEN p.prosecdef THEN 'y' ELSE 'n' END
+           || ' | lang=' || l.lanname
+           || ' | vol=' || p.provolatile::text
+           || ' | search_path=' || coalesce(array_to_string(p.proconfig, ','), '(unset)')
+           || ' | owner=' || pg_get_userbyid(p.proowner)
+           || ' | anon=' || CASE WHEN has_function_privilege('anon', p.oid, 'EXECUTE') THEN 'y' ELSE 'n' END
+           || ' | authenticated=' || CASE WHEN has_function_privilege('authenticated', p.oid, 'EXECUTE') THEN 'y' ELSE 'n' END
+           || ' | service_role=' || CASE WHEN has_function_privilege('service_role', p.oid, 'EXECUTE') THEN 'y' ELSE 'n' END
+           || ' | public=' || CASE WHEN has_function_privilege('public', p.oid, 'EXECUTE') THEN 'y' ELSE 'n' END,
+           E'\n' ORDER BY p.proname COLLATE "C")
+    INTO v_impl
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
+   WHERE n.nspname = 'internal_api';
+
+  PERFORM pg_temp.st3p_eq('G1f the whole callable surface of internal_api — privileged bodies, none of it a table', v_impl, $impl$create_invitation_version(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+publish_invitation_version(p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+resolve_public_invitation() -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+revoke_invitation_publication(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n$impl$);
+
+  -- Matched by name *and* argument types, so an implementation renamed into a different
+  -- signature would show as an unpaired row on both sides rather than cancelling out.
+  PERFORM pg_temp.st3p_eq('G1g api and internal_api are one-for-one by signature: no wrapper without a body, no body without a wrapper',
+    (SELECT coalesce(string_agg(t, ', ' ORDER BY t COLLATE "C"), '(none)')
+       FROM (
+         SELECT 'unpaired-api ' || a.proname AS t
+           FROM pg_proc a JOIN pg_namespace an ON an.oid = a.pronamespace
+          WHERE an.nspname = 'api'
+            AND NOT EXISTS (SELECT 1 FROM pg_proc i JOIN pg_namespace ib ON ib.oid = i.pronamespace
+                             WHERE ib.nspname = 'internal_api'
+                               AND i.proname = a.proname AND i.proargtypes = a.proargtypes)
+         UNION ALL
+         SELECT 'unpaired-internal ' || i.proname
+           FROM pg_proc i JOIN pg_namespace ib ON ib.oid = i.pronamespace
+          WHERE ib.nspname = 'internal_api'
+            AND NOT EXISTS (SELECT 1 FROM pg_proc a JOIN pg_namespace ab ON ab.oid = a.pronamespace
+                             WHERE ab.nspname = 'api'
+                               AND a.proname = i.proname AND a.proargtypes = i.proargtypes)
+       ) up),
+    '(none)');
+
+  -- The pair relationships, one line per name, every verdict expected true. Written as
+  -- a literal for the same reason as G1: a mismatch prints all seven lines, so the
+  -- failure says which function drifted and in which direction.
+  SELECT string_agg(
+           a.proname
+           || ' wrapper_is_invoker=' || (NOT a.prosecdef)::text
+           || ' impl_is_definer=' || i.prosecdef::text
+           || ' anon_grants_match=' || (has_function_privilege('anon', a.oid, 'EXECUTE')
+                                        IS NOT DISTINCT FROM has_function_privilege('anon', i.oid, 'EXECUTE'))::text
+           || ' authenticated_grants_match=' || (has_function_privilege('authenticated', a.oid, 'EXECUTE')
+                                        IS NOT DISTINCT FROM has_function_privilege('authenticated', i.oid, 'EXECUTE'))::text
+           || ' no_service_role_on_either=' || (NOT has_function_privilege('service_role', a.oid, 'EXECUTE')
+                                                AND NOT has_function_privilege('service_role', i.oid, 'EXECUTE'))::text,
+           E'\n' ORDER BY a.proname COLLATE "C")
+    INTO v_pairs
+    FROM pg_proc a JOIN pg_namespace an ON an.oid = a.pronamespace
+    JOIN pg_proc i ON i.proname = a.proname AND i.proargtypes = a.proargtypes
+    JOIN pg_namespace inn ON inn.oid = i.pronamespace
+   WHERE an.nspname = 'api' AND inn.nspname = 'internal_api';
+
+  PERFORM pg_temp.st3p_eq('G1h each wrapper delegates to a definer body with exactly the same browser grants', v_pairs, $pairs$create_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+get_invitation_publication_state wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+preview_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+publish_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+resolve_public_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+revoke_invitation_publication wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+rotate_invitation_token wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true$pairs$);
 
   -- Compared as a list rather than a count, so a failure names the relation that
   -- appeared instead of only saying that one did.
@@ -1232,6 +1328,22 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | vol=v | search
    WHERE n.nspname = 'api' AND c.relkind IN ('r', 'v', 'm', 'f', 'p', 'S', 'i');
   PERFORM pg_temp.st3p_eq('G2 api holds no table, view, sequence or index: a request profile can name a function and never a row',
     coalesce(v_rel, '(none)'), '(none)');
+
+  -- The same rule stated for the schema that actually carries the privileges, and the
+  -- sharper version of it: a relation in `internal_api` would be a relation with no
+  -- RLS, no exposed profile and no policy review — reachable by definition because the
+  -- functions in there run as their owner.
+  SELECT string_agg(c.oid::regclass::text || ' = ' || c.relkind::text, ', '
+                    ORDER BY c.oid::regclass::text COLLATE "C") INTO v_rel
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'internal_api' AND c.relkind IN ('r', 'v', 'm', 'f', 'p', 'S', 'i');
+  PERFORM pg_temp.st3p_eq('G2b internal_api holds no table, view, sequence or index — only function bodies',
+    coalesce(v_rel, '(none)'), '(none)');
+  PERFORM pg_temp.st3p_eq('G2c no policy is written inside internal_api, so nothing there is guarded by RLS',
+    (SELECT count(*)::bigint FROM pg_policy pol
+       JOIN pg_class c ON c.oid = pol.polrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'internal_api'), 0::bigint);
 
   PERFORM pg_temp.st3p_eq('G3 the resolver takes no argument at all, which is the mechanism behind "no token in a query string"',
     (SELECT p.pronargs::integer FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -1250,8 +1362,26 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | vol=v | search
   PERFORM pg_temp.st3p_eq('G5b api is owned by the trusted migration role, not by a caller role',
     (SELECT pg_get_userbyid(n.nspowner) FROM pg_namespace n WHERE n.nspname = 'api'),
     'postgres');
+
+  -- The one privilege the repair was forced to take, stated as a literal so its exact
+  -- size is visible. PostgreSQL checks permissions on a nested call as the *invoking*
+  -- role, so a browser role that may call `api.preview_invitation` must also be able to
+  -- name `internal_api.preview_invitation` — otherwise the wrapper raises 42501. USAGE
+  -- on the schema is what makes the name resolvable; it grants no table, because there
+  -- are no tables in there (G2b), and EXECUTE is still per-function (G1f). That this
+  -- grant is load-bearing and not decoration is measured by `stage3_security.test.mjs`,
+  -- which revokes it and watches the browser RPC fail.
+  PERFORM pg_temp.st3p_eq('G5c internal_api USAGE is held by the owner and exactly the two browser roles — nothing more',
+    (SELECT n.nspacl::text FROM pg_namespace n WHERE n.nspname = 'internal_api'),
+    '{postgres=UC/postgres,anon=U/postgres,authenticated=U/postgres}');
+  PERFORM pg_temp.st3p_eq('G5d internal_api is owned by the trusted migration role',
+    (SELECT pg_get_userbyid(n.nspowner) FROM pg_namespace n WHERE n.nspname = 'internal_api'),
+    'postgres');
   PERFORM pg_temp.st3p_ok('G6 service_role has no USAGE on api, so a server key cannot reach a browser boundary',
     NOT has_schema_privilege('service_role', 'api', 'USAGE'));
+  PERFORM pg_temp.st3p_ok('G6b nor on internal_api: the privileged bodies are reached only through a browser session',
+    NOT has_schema_privilege('service_role', 'internal_api', 'USAGE')
+    AND NOT has_schema_privilege('service_role', 'internal_api', 'CREATE'));
   PERFORM pg_temp.st3p_eq('G7 private keeps its ACL to the owner and the server role: no browser role at all',
     (SELECT n.nspacl::text FROM pg_namespace n WHERE n.nspname = 'private'),
     '{postgres=UC/postgres,service_role=U/postgres}');
@@ -1295,6 +1425,18 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | vol=v | search
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'private' AND p.proacl IS NULL
        ) d),
+    '(none)');
+
+  -- The same rule across both halves of the new boundary. A function created in
+  -- `internal_api` without an explicit REVOKE would default to EXECUTE for PUBLIC, and
+  -- because PUBLIC is a pseudo-role every role inherits, that grant would be invisible
+  -- to G1f's `anon=n`/`authenticated=n` columns only if the role happened not to be
+  -- used — so the ACL is read directly here instead.
+  PERFORM pg_temp.st3p_eq('G9c neither RPC schema has a function or relation still running on a default ACL',
+    (SELECT coalesce(string_agg(n.nspname || '.' || p.proname, ', '
+                      ORDER BY n.nspname || '.' || p.proname COLLATE "C"), '(none)')
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname IN ('api', 'internal_api') AND p.proacl IS NULL),
     '(none)');
 END $G$;
 
@@ -1623,6 +1765,126 @@ BEGIN
 END $F$;
 
 -- ===========================================================================
+-- I. Revocation when the credential row is not there
+-- ===========================================================================
+--
+-- Closure-repair directive §9. `api.revoke_invitation_publication` used to end with
+-- `IF FOUND THEN UPDATE public.publications …`, and `FOUND` had been overwritten by
+-- the `UPDATE private.access_tokens` in between. So for the one family whose
+-- publication was active but whose live credential row was missing, `FOUND` was false,
+-- the publication stayed `active`, and the call reported `revoked: false` — a takedown
+-- that silently did nothing. The repaired body captures an explicit
+-- `v_publication_found` before the token UPDATE and tests that.
+--
+-- This group is the state that used to be the bug, built honestly: the credential row
+-- is deleted by the trusted role, which is the "absent" the directive asked for and
+-- the only way to reach it from outside (no browser role may write `private`, and the
+-- RPCs will not mint a credential without a publication). It then runs the case the
+-- *opposite* way round — a live credential whose publication is already revoked — so
+-- both halves of `v_publication_found OR v_count > 0` are observed rather than
+-- reasoned about.
+--
+-- It is placed last, after F, because it removes rows F depends on: F's refusal probes
+-- name `probe.pub_live_c` and a live credential, and those must still be exactly what
+-- group C left them when F runs.
+DO $I$
+DECLARE
+  v_rev   jsonb;
+  v_pub   uuid;
+  v_state jsonb;
+BEGIN
+  -- The precondition is measured, not assumed from group H, and it is asserted before
+  -- anything is deleted: without it, "the credential is absent while the publication
+  -- is live" would be a sentence about a fixture nobody checked.
+  PERFORM pg_temp.st3p_eq('I0 the family is live in both halves — one active publication and exactly one un-revoked credential',
+    (SELECT ARRAY[(SELECT count(*) FROM public.publications
+                    WHERE wedding_id = current_setting('probe.wed_c')::uuid AND status = 'active'),
+                  (SELECT count(*) FROM private.access_tokens
+                    WHERE wedding_id = current_setting('probe.wed_c')::uuid AND revoked_at IS NULL)]),
+    ARRAY[1::bigint, 1::bigint]);
+
+  SELECT p.id INTO v_pub FROM public.publications p
+   WHERE p.wedding_id = current_setting('probe.wed_c')::uuid AND p.status = 'active';
+
+  DELETE FROM private.access_tokens
+   WHERE wedding_id = current_setting('probe.wed_c')::uuid AND revoked_at IS NULL;
+  PERFORM pg_temp.st3p_eq('I0b with the credential deleted, the publication is still the thing that says a guest link exists',
+    (SELECT ARRAY[(SELECT count(*) FROM public.publications
+                    WHERE wedding_id = current_setting('probe.wed_c')::uuid AND status = 'active'),
+                  (SELECT count(*) FROM private.access_tokens
+                    WHERE wedding_id = current_setting('probe.wed_c')::uuid AND revoked_at IS NULL)]),
+    ARRAY[1::bigint, 0::bigint]);
+
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', current_setting('probe.owner_c'), false);
+  SELECT api.revoke_invitation_publication(current_setting('probe.wed_c')::uuid) INTO v_rev;
+  EXECUTE 'RESET ROLE';
+
+  PERFORM pg_temp.st3p_has_keys('I1 the answer still carries exactly the three fields it always did',
+    v_rev, ARRAY['publication_id', 'revoked', 'tokens_revoked']);
+  PERFORM pg_temp.st3p_eq('I2 with no credential to revoke, the takedown still happened, so FOUND-after-UPDATE was the bug and not the design',
+    ARRAY[((v_rev ->> 'revoked')::boolean)::text, (v_rev ->> 'tokens_revoked')::text],
+    ARRAY['true', '0']);
+  PERFORM pg_temp.st3p_eq('I3 and the publication it took down is named, not guessed at',
+    (v_rev ->> 'publication_id')::uuid, v_pub);
+  PERFORM pg_temp.st3p_eq('I4 the publication row is revoked, with the time recorded',
+    (SELECT ARRAY[p.status, (p.revoked_at IS NOT NULL)::text] FROM public.publications p WHERE p.id = v_pub),
+    ARRAY['revoked', 'true']);
+
+  -- A no-op has to be reported as a no-op. With the publication already down and no
+  -- credential left, the same call must not claim a second takedown: `revoked=false`
+  -- and a NULL `publication_id` are what tell a host that nothing was live to begin
+  -- with, which is also why `revoked` cannot simply mean "the call succeeded".
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', current_setting('probe.owner_c'), false);
+  SELECT api.revoke_invitation_publication(current_setting('probe.wed_c')::uuid) INTO v_rev;
+  SELECT api.get_invitation_publication_state(current_setting('probe.wed_c')::uuid) INTO v_state;
+  EXECUTE 'RESET ROLE';
+  PERFORM pg_temp.st3p_eq('I5 revoking an already-down invitation says so instead of repeating itself',
+    ARRAY[((v_rev ->> 'revoked')::boolean)::text, (v_rev -> 'publication_id')::text, (v_rev ->> 'tokens_revoked')::text],
+    ARRAY['false', 'null', '0']);
+  PERFORM pg_temp.st3p_eq('I6 the host read agrees: no active publication, no live link',
+    ARRAY[(v_state -> 'publication_id')::text, (v_state ->> 'link_active')::text],
+    ARRAY['null', 'false']);
+  PERFORM pg_temp.st3p_eq('I7 a guest holding the last known address still gets only the generic refusal',
+    pg_temp.st3p_resolve(current_setting('probe.token_c')), jsonb_build_object('available', false));
+
+  -- The opposite corruption, built rather than imagined: a credential row that is live
+  -- while the publication it names has already been revoked. Nothing in the schema
+  -- prevents the row (the composite FK only requires the publication to belong to the
+  -- same wedding), which is exactly why revocation must not rely on the publication
+  -- half to decide whether to sweep the credential half.
+  INSERT INTO private.access_tokens (token_hash, token_kind, wedding_id, publication_id, expiry_policy)
+    VALUES (current_setting('probe.hash_b'), 'public_invitation',
+            current_setting('probe.wed_c')::uuid, v_pub, 'no_expiry');
+  PERFORM pg_temp.st3p_eq('I7b an orphan credential is representable, so the sweep cannot assume a live publication',
+    (SELECT count(*) FROM private.access_tokens
+      WHERE wedding_id = current_setting('probe.wed_c')::uuid AND revoked_at IS NULL), 1::bigint);
+
+  EXECUTE 'SET ROLE authenticated';
+  PERFORM set_config('test.uid', current_setting('probe.owner_c'), false);
+  SELECT api.revoke_invitation_publication(current_setting('probe.wed_c')::uuid) INTO v_rev;
+  EXECUTE 'RESET ROLE';
+  PERFORM pg_temp.st3p_eq('I8 the orphan is revoked, and the answer reports the credential without inventing a publication',
+    ARRAY[((v_rev ->> 'revoked')::boolean)::text, (v_rev -> 'publication_id')::text, (v_rev ->> 'tokens_revoked')::text],
+    ARRAY['true', 'null', '1']);
+  PERFORM pg_temp.st3p_eq('I9 and it really is revoked in the row, not only in the reply',
+    (SELECT count(*) FROM private.access_tokens
+      WHERE wedding_id = current_setting('probe.wed_c')::uuid AND revoked_at IS NULL), 0::bigint);
+
+  -- The refusal still cannot be reached by a caller who does not own the wedding, even
+  -- in this state — ownership is decided before any of the above runs.
+  INSERT INTO probes (grp, label, stmt, want_state, want_like) VALUES
+    ('I', 'another account cannot take down a family it does not own, credential row or none',
+     $t$SELECT api.revoke_invitation_publication(current_setting('probe.wed_c')::uuid)$t$,
+     '42501', '%the caller may not revoke this wedding%'),
+    ('I', 'and the same refusal for a wedding that does not exist',
+     $t$SELECT api.revoke_invitation_publication(current_setting('probe.no_such')::uuid)$t$,
+     '42501', '%the caller may not revoke this wedding%');
+  PERFORM pg_temp.st3p_run('I', 'authenticated', current_setting('probe.owner_d'));
+END $I$;
+
+-- ===========================================================================
 -- Z. Leave nothing behind
 -- ===========================================================================
 --
@@ -1668,16 +1930,20 @@ END $Z$;
 --
 -- A file that prints its own total proves it reached the end; the floor proves it
 -- reached *this* end. The number below is the count of assertions and probes in
--- groups A-Z as measured by a run of this file: 182 labelled assertions plus 64
--- refusal probes = 246. The probe groups are B(3) B4(1) B2(6) B3(2) C(5) C2(3)
--- C4(4) D(2) E(18) F(13) F2(4) H(3); every one of them also fails the run outright
--- if it executes zero probes, so a group cannot quietly empty itself.
+-- groups A-Z as measured by a run of this file: 203 labelled assertions plus 66
+-- refusal probes = 269. The previous measurement on this branch was 246 (182 plus
+-- 64); the closure repair added 23, of which 9 are the `internal_api` half of group
+-- G (G1f, G1g, G1h, G2b, G2c, G5c, G5d, G6b, G9c), 12 are group I's revocation
+-- states, and 2 are group I's ownership probes. The probe groups are B(3) B4(1)
+-- B2(6) B3(2) C(5) C2(3) C4(4) D(2) E(18) F(13) F2(4) H(3) I(2); every one of them
+-- also fails the run outright if it executes zero probes, so a group cannot quietly
+-- empty itself.
 DO $END$
 DECLARE n integer;
 BEGIN
   n := coalesce(nullif(current_setting('st3p.passed', true), ''), '0')::int;
-  IF n < 246 THEN
-    RAISE EXCEPTION 'FAIL: only % assertions ran; this file has 246 and stopped early', n;
+  IF n < 269 THEN
+    RAISE EXCEPTION 'FAIL: only % assertions ran; this file has 269 and stopped early', n;
   END IF;
   RAISE NOTICE 'ALL STAGE 3 PUBLICATION TESTS PASSED (%)', n;
 END $END$;
