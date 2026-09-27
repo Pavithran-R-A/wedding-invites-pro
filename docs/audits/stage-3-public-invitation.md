@@ -1312,22 +1312,20 @@ whitespace of my own printing, not in one hash or one length), and `dist/index.h
 `788a374ddb36159d1fcb4d37c75f6f31`, the §9.3 document. That is the proof that the bundle §9.1's journey
 was tested in is the bundle this branch describes; `npm audit` → exit 0; `git diff --check` → exit 0.
 
-**And once more after the last of §9's own edits** (the §9.0 table, this section's numbering fixes,
-§9.14's cleanup rewrite): `npm run lint` → **0 errors**, the same 8 pre-existing `react-refresh` warnings;
-`npm run typecheck` → clean; `npm run dbtypes:check` → 17 migration files, 0 findings;
-`npm run product:check` → **154** files, **0 violations**; `npm run test` → **188 tests / 18 files**, exit
-0; `npm run build` → exit 0 with the entry chunk at **489.05 kB / 147.25 kB gzip**, `InvitationRenderer`
-at **7.80 kB / 2.85 kB gzip**, **30** assets in `dist/assets`, and `dist/index.html` at md5
-`788a374ddb36159d1fcb4d37c75f6f31` again — the same three fingerprints, so the last edits were markdown
-and nothing the bundle is built from.
+**Then twice more, as §9 kept being written.** After the §9.0 table, §9.1's wording fix and the §9.7/§9.8
+numbering fixes, the whole set ran again: lint **0 errors** / the same 8 pre-existing `react-refresh`
+warnings, typecheck clean, `dbtypes:check` 17 migration files / 0 findings, `product:check` **154** files /
+**0 violations**, `npm run test` **188 tests / 18 files**, and `npm run build` exit 0 with the entry chunk
+at **489.05 kB / 147.25 kB gzip**, `InvitationRenderer` at **7.80 kB / 2.85 kB gzip**, **30** assets in
+`dist/assets` and `dist/index.html` at md5 `788a374ddb36159d1fcb4d37c75f6f31` again — the same three
+fingerprints, so those edits touched nothing the bundle is built from.
 
-**Re-checked once more after every §9 wording change had landed** (the §9.0 table, this section's
-numbering fixes, §9.14's cleanup rewrite and §9.5's font paragraph): `npm run lint`, `npm run typecheck`
-and `npm run product:check` each exit **0** — 0 errors / the same 8 warnings, clean, 154 files / 0
-violations — and `git diff --check` is exit 0 over the working tree and over the closure range from
-`78a37da`. The only files touched after the `test`/`build` run above are markdown under `docs/`, which is
-why those two results are quoted from that run rather than repeated: nothing the tests or the bundle are
-built from changed in between, and `docs/audits/` is outside the product checker's scanned paths.
+The lines immediately below were measured against the tree as this section's **last** commit left it, after
+§9.14's cleanup rewrite and §9.5's font paragraph: lint, typecheck and `product:check` each exit **0**, and
+`git diff --check` is exit 0 over the working tree and over the closure range from `78a37da`. Nothing
+outside `docs/` changed after the run above, and `docs/audits/` is outside the product checker's scanned
+paths, which is why the test total and the bundle numbers are quoted from that run rather than repeated a
+fourth time.
 
 Two counts legitimately moved and are reported moved rather than smoothed:
 
