@@ -37,34 +37,52 @@ const RouteFallback = () => (
   </main>
 );
 
+/** Every route that answers to a signed-in person, and the only place the session
+ *  machinery exists. `AuthProvider` subscribes to `onAuthStateChange` and reads
+ *  `getSession()` as soon as it mounts, so a guest who opens a shared link must never render
+ *  through it: they have no account, the invitation needs no session to read, and a page that
+ *  asks for one is a page that touched a stranger's device for nothing.
+ *
+ *  `PublicInvitation` is a sibling of this component rather than a child of it — see `App`. */
+const AccountApplication = () => (
+  <AuthProvider>
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        <Route path="/" element={<Index />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/terms-of-service" element={<TermsOfService />} />
+        <Route path="/cookie-policy" element={<CookiePolicy />} />
+        <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/create-project" element={<ProtectedRoute><CreateProject /></ProtectedRoute>} />
+        <Route path="/project/:id/configure" element={<ProtectedRoute><ConfigureProject /></ProtectedRoute>} />
+        <Route path="/project/:id/edit" element={<ProtectedRoute><EditProject /></ProtectedRoute>} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
+  </AuthProvider>
+);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <AuthProvider>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<Signup />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
-              <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-              <Route path="/terms-of-service" element={<TermsOfService />} />
-              <Route path="/cookie-policy" element={<CookiePolicy />} />
-              <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-              <Route path="/create-project" element={<ProtectedRoute><CreateProject /></ProtectedRoute>} />
-              <Route path="/project/:id/configure" element={<ProtectedRoute><ConfigureProject /></ProtectedRoute>} />
-              <Route path="/project/:id/edit" element={<ProtectedRoute><EditProject /></ProtectedRoute>} />
-              {/* Deliberately not wrapped in `ProtectedRoute`: a guest has no account, and
-                  the page reads one anonymous RPC. Adding auth here would turn every
-                  shared link into a login wall, which is the opposite of the product. */}
-              <Route path="/i/:token" element={<PublicInvitation />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </AuthProvider>
+        {/* One router, two halves: the guest's page is matched first and rendered with no
+            auth anywhere in its tree; everything else is the account application. */}
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            {/* Deliberately outside `AuthProvider` and not wrapped in `ProtectedRoute`: a
+                guest has no account, the page reads one anonymous RPC, and adding auth here
+                would turn every shared link into a login wall — which is the opposite of
+                the product. */}
+            <Route path="/i/:token" element={<PublicInvitation />} />
+            <Route path="/*" element={<AccountApplication />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
