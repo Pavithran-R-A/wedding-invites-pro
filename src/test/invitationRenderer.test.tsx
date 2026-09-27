@@ -95,6 +95,13 @@ describe("the invitation renderer", () => {
     expect(link?.getAttribute('target')).toBe('_blank');
   });
 
+  it("focuses the guest's one interactive control with the shared ring token", () => {
+    const { container } = render(<InvitationRenderer invitation={parsed()} />);
+    const classes = (container.querySelector('a') as HTMLElement).className;
+    expect(classes).toContain('focus-visible:ring-ring');
+    expect(classes).not.toMatch(/focus-visible:ring-(gold|ceremonial|green|ink|line|surface)\b/);
+  });
+
   it("refuses a style value that is not a colour, a font or a usable size", () => {
     const invitation = shaped(i => ({
       ...i,
