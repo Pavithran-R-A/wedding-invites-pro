@@ -1321,6 +1321,14 @@ at **7.80 kB / 2.85 kB gzip**, **30** assets in `dist/assets`, and `dist/index.h
 `788a374ddb36159d1fcb4d37c75f6f31` again — the same three fingerprints, so the last edits were markdown
 and nothing the bundle is built from.
 
+**Re-checked once more after every §9 wording change had landed** (the §9.0 table, this section's
+numbering fixes, §9.14's cleanup rewrite and §9.5's font paragraph): `npm run lint`, `npm run typecheck`
+and `npm run product:check` each exit **0** — 0 errors / the same 8 warnings, clean, 154 files / 0
+violations — and `git diff --check` is exit 0 over the working tree and over the closure range from
+`78a37da`. The only files touched after the `test`/`build` run above are markdown under `docs/`, which is
+why those two results are quoted from that run rather than repeated: nothing the tests or the bundle are
+built from changed in between, and `docs/audits/` is outside the product checker's scanned paths.
+
 Two counts legitimately moved and are reported moved rather than smoothed:
 
 * `product:check` now prints **154** active files where the table above printed 158. The checker scans
