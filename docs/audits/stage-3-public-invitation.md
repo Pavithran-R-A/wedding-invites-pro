@@ -1378,7 +1378,9 @@ The pass was told to fix the closure defects and nothing else, so these are disc
    measured against the card's own `rgb(255, 246, 240)`. Body text and link text
    measure 8.82:1 on the same paper and the links are 216 × 47 CSS px, so this is one narrow shortfall
    rather than a general accessibility problem — and no design token was changed on a guess.
-   `render-contract.md` §5 finding 5 carries it.
+   `render-contract.md` §5 finding 5 carries it. **Repaired by the next pass; see §10.4** — including
+   the correction that the colour in this bullet is `--gold`, applied by a per-component override,
+   and not `--ring`, which was already the ceremonial token.
 2. **Two moderate `react-router` advisories remain** (an open-redirect bypass in `<Link>`/`useNavigate`,
    and `deserializeErrors()` constructor injection in SSR hydration — the app is not SSR, and the
    `Link` usage takes literals). npm's fix is a `--force` major bump; `^6.30.1` was not widened, and the
@@ -1458,3 +1460,227 @@ pass adds four limits of its own:
    correct in every respect, only that this pass measured what it can see. Likewise, "glyph fidelity
    could not be captured" (§8.4) is replaced by "captured and looked at", which is a weaker claim than
    the one §8.4 was being honest about not making: **no native speaker reviewed any of it.**
+
+## 10. FINAL TRUTH SYNC, AND THE FOCUS RING CLOSED
+
+Starting tree `a2b19c76`, already pushed and already accepted on its substance. This pass was told to
+add no surface: re-read the readiness document against what §9 actually measured, correct one comment
+that overstated its own justification, and close the one accessibility shortfall §9.13 had chosen to
+carry. §5's exclusions still hold in full — no RSVP, approval, QR, image/PDF/video export, payment,
+entitlement, admin, account-deletion, `document.title` truncation, `wa.me` redesign, router migration or
+Stage 4 tradition content was touched, and nothing was merged, tagged or deployed.
+
+### 10.1 The readiness document, line by line
+
+`docs/product/feature-readiness.md` calls itself the anti-delusion document, and it had gone stale in
+exactly the direction that flatters the build: it still described the pre-§9 world. Twelve statements
+were corrected, each against a §9 measurement rather than against a preference:
+
+| what it claimed | what it says now, and why |
+| --- | --- |
+| "PostgREST 16.2" in the preamble | the preamble now prints the reading that matches the stack at the end of the branch (`postgrest/16.3`, re-read off the live loopback header in this pass) and names 16.2 as the earlier measurement, which §4.1/§8.5 keep as their record |
+| "three modules", `weddings.ts` "is the only module naming a table" | **false**, and corrected to the four modules that exist: `weddings.ts`, `weddingContent.ts`, `publication.ts`, `publicInvitation.ts` — the first two naming seven tables between them, the last two naming none and calling `api` wrappers |
+| "Two of the eighteen are read by product code" | seven are read or written directly, and `publications` plus `private.access_tokens` are reached only through the wrapper functions; the other eleven are listed as carrying no client `.from()` at all |
+| "13 imperative migrations" | **17**, which `npm run dbtypes:check` prints independently; Stage 2's 13 stays in Stage 2's audit as Stage 2's count |
+| "322 security assertions … plus 75 catalog assertions" | 325 and 94 **at the current head** (§9.11), with the earlier pair labelled as what Stage 2 closed with. The counts were not backdated: Stage 3's own migrations added tables, and therefore policies, and therefore assertions |
+| "Eight scaffold tables moved to `legacy`" | seven tables and four enum types, which is what the archive migration actually moves |
+| "Measured at 360×740 on six content shapes" | 10 shapes × 4 viewports = 40 loads of real guest pages (§9.9), with the resolved font/size/colour/alignment matching each shape's own style object |
+| "glyph fidelity unverifiable in this environment" | screenshots **did** succeed for the stated subset, and the claim they support is deliberately weaker: rendering verification, no native-speaker review, no WCAG claim |
+| "never loaded with real data against a verified project" (dashboard) | the query ran under a real JWT in a real browser (§9.1 step 3) and rendered its **0-draft empty state**; the row stays `FOUNDATION`, because what has never been seen is a dashboard listing one real row. The qualification narrowed; the status did not inflate |
+| sign-up / log-in / protected routes / logout | split into what the local stack proved and what nothing has proved: sign-up and log-in are `IMPLEMENTED (local stack qualification only)` with the synthetic account named and deleted, the signed-in pass-through is exercised, and **Log out was rendered but never clicked**, so it stays `FOUNDATION` |
+| "Data-access adapter `FOUNDATION`" | `IMPLEMENTED (local stack only)`, citing §9.1's 24-step journey plus the 37 + 56 HTTP assertions, and keeping "no hosted project was ever contacted" in the same cell |
+| "Hosted CI verification — runs are deferred by quota" | the honest shape of the evidence: **no run exists for this branch at all** (the workflow triggers only on `main` push or PR), and `main`'s latest attempt failed in ~2 s with no steps and no log. Quota remains the operating explanation, labelled as one |
+
+Two rows are new, because §9 measured things the document had no line for: **keyboard operation of the
+guest page** (with the 2.54:1 finding stated while it was still true, and the repaired value pointed at
+§10.4) and **referrer leakage on the guest page** (with the browser-default correction from §10.3).
+
+### 10.2 The truth search
+
+Every tracked file was grepped for the phrases that could now mislead a reader: `PostgREST 16.2`,
+`Noto Serif Tamil`, `glyph fidelity could not`, `13 migrations`, `322 security`, `75 catalogue`,
+`six shapes`, `only module naming`, `never loaded with real data`, `not exercised against`.
+
+The hits divided into three kinds, and the handling differs by kind:
+
+* **Present-state claims that are now wrong** — all in `feature-readiness.md`, fixed above, plus one
+  sentence in `stage-2-domain-blueprint.md`'s I-28 row that printed 322 as though it were the current
+  figure. It now reads "what Stage 2 closed with" and points at the larger count at the current head.
+* **Historical record that must not be "fixed"** — §1–§8 of this file, §9.5's retraction of the font
+  finding, and §8.4's "could not be captured" note all stay verbatim. §9.5 and §9.12 exist to retract
+  them, and a retraction that edits its own subject stops being a retraction.
+* **Self-referential text** — this file and `scripts/` are excluded from `product:check`'s walk by
+  design (`EXCLUDED_PREFIXES` in `scripts/check-product-contract.mjs:49`), which is worth stating out
+  loud here: **no automated gate checks whether this audit tells the truth.** The readiness document is
+  the machine-policed artefact; these sections are policed only by the next reader.
+
+### 10.3 The referrer comment, corrected without touching the policy
+
+`index.html` keeps `<meta name="referrer" content="no-referrer" />` byte-for-byte; `git diff` on that
+file shows comment lines on both sides of it and nothing else. What changed is the justification, which
+had overstated the threat: it said a browser "would" send the guest's full `/i/<credential>` address to
+`fonts.googleapis.com` without the tag. Current browsers default to `strict-origin-when-cross-origin`,
+which sends only the origin on a cross-origin HTTPS request, so the tag is not plugging that leak. The
+rewritten comment says what the tag is actually for — making the property explicit and ours rather than
+inherited from a default, and suppressing the referrer for **same-origin** requests too, where that
+default does send the full path — keeps §9.3's measurement (the fonts request carried no `Referer` at
+all), and keeps the limit no meta tag reaches: the credential is still in browser history and in
+whatever access logs the hosting stack keeps.
+
+This pass did not re-run the network capture, so §9.3's numbers remain the evidence and are cited, not
+re-measured. One thing this pass did produce by accident is worth recording: while probing focus on the
+guest page, a synthetic activation of the venue map link **did** navigate, and Chrome opened the host's
+own typed `https://www.google.com/maps/…` URL in a new tab of the isolated context. The tab was closed
+by this pass. The invitation credential is not in that destination URL, and no claim is made about that
+request's `Referer` — the debugger attached after the request had completed, so it was not observed
+either way.
+
+### 10.4 The focus indicator, repaired and measured
+
+**What changed** is one class list, `src/components/invitation/InvitationRenderer.tsx:174`: the map link
+carried `focus-visible:ring-gold`, a per-component override of the design system, and now carries the
+same `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+focus-visible:ring-offset-background` set that `button.tsx`, `input.tsx`, `Dashboard.tsx` and
+`EditProject.tsx` already use. No colour was invented and no token was edited: `--ring` was already
+`--ceremonial` (`src/index.css:55`), and the global `:focus-visible` rule (`src/index.css:134`) was
+already the intended behaviour. The defect was the override, so the repair is its removal — which is why
+this closes rather than carries §9.13's item 1.
+
+**§9.13's own description of the colour was wrong, and is corrected here as well as in
+`render-contract.md` §5:** `rgb(205, 146, 45)` is `--gold`, not `--ring`.
+
+Measured on the production build served at `http://127.0.0.1:4173`, guest page opened in an **isolated
+CDP browser context** (so no session, no storage, no cookies shared with the host tab), viewport
+504 × 828 CSS px at dpr 1.25, driven by real CDP `Tab` / `Shift+Tab` key events:
+
+| | indicator | adjacent background | ratio |
+| --- | --- | --- | --- |
+| before (§9.13) | 2 px ring `rgb(205, 146, 45)` | paper `rgb(255, 246, 240)` | **2.54:1** |
+| after, guest map link | 2 px ring `rgb(107, 30, 44)` | paper offset band `rgb(255, 246, 240)` | **10.66:1** |
+| after, host editor controls | same ring | same band, over a `rgb(252, 246, 238)` card | **10.66:1** against the band, 10.59:1 against the card |
+
+The computed value read off the focused link, verbatim:
+`rgb(255, 246, 240) 0px 0px 0px 2px, rgb(107, 30, 44) 0px 0px 0px 4px, rgba(0, 0, 0, 0) 0px 0px 0px 0px`
+— the 2 px paper offset band, then the 2 px ceremonial ring outside it, with `outline` transparent. The
+ring's own maroon against the link's maroon border is 1.00:1 and is not the relevant measure: the offset
+band separates them, which is what the band is for.
+
+Keyboard traversal re-run, on this invitation's real guest page (one venue, therefore one tabbable
+control): `Tab` lands on *Open the venue map* with `:focus-visible` true and the ring above present; the
+next `Tab` leaves the document (`document.activeElement` is `BODY`); `Shift+Tab` returns to the link with
+the ring. On the host editor, the first `Tab` stop and the `Save Draft`, `Publish` and
+`Take the link down` buttons all resolve to the identical maroon ring on the paper band. A viewport
+screenshot of the focused guest page was taken and read: the indicator renders as a dark double outline
+with a visible paper gap, clearly distinguishable from the card.
+
+Pinned statically in `src/test/invitationRenderer.test.tsx`: the map link's class list must contain
+`focus-visible:ring-ring` and must **not** contain `focus-visible:ring-` followed by any palette colour
+(`gold|ceremonial|green|ink|line|surface`). That is the test that would fail if the override came back.
+`npm test` after the change: **189 tests in 18 files**, one more than §9.11's 188, which is this test.
+
+Two limits, stated rather than smoothed:
+
+* This is one control's indicator and one page's traversal, in one Chromium on one Windows host at one
+  viewport. **No WCAG conformance is claimed for the product** — only that this indicator now measures
+  above the 3:1 that WCAG 1.4.11 asks of a focus indicator. No screen reader was run.
+* **One observation found and deliberately not repaired:** the editor's prose textareas do not resolve to
+  the token ring. Measured after a cache-ignoring reload, `#…-welcome` reports
+  `outline: solid 2.4px rgb(44, 36, 33)` with all three `box-shadow` layers transparent, while the
+  `--tw-ring-*` variables on the same element are correctly set to the ceremonial colour — i.e. those
+  fields show the browser's own focus outline instead of the design-system one. It is pre-existing (this
+  pass's diff touches one line of `InvitationRenderer.tsx` and seven of its test), it is a *higher*
+  contrast than the token ring rather than a shortfall, and its cause was not isolated — so it is
+  recorded here as an unexplained inconsistency in the editor, not as a fixed defect.
+
+### 10.5 The journey that made something to measure, and the battery on this tree
+
+The guest page above had to exist, so it was made the way §9.1 insists on making them: sign-up through
+the product's own form against the local stack's GoTrue (`s10focus+e2e@example.test`), log-in, dashboard
+empty state, create a wedding, then one venue row and one ceremony row typed into the editor's own forms,
+`Save Draft`, *Freeze this draft as a version*, *Publish*, and the shown-once address opened in the
+isolated context. No SQL was used to author anything; the only SQL in this section is the read-only
+discovery and the scoped delete in §10.6. §9.2's disclosure repeats itself: the two `datetime-local`
+fields were set through the widget's native value setter plus `input`/`change`, not by emulated
+keystrokes, because the emulated keystrokes do not reach them.
+
+Gates, run after the last edit:
+
+| gate | result |
+| --- | --- |
+| `npm run lint` | 0 errors, 8 warnings — all `react-refresh/only-export-components`, seven in `src/components/ui/` and one in `src/components/auth/AuthProvider.tsx`, none of them new in §9.11's set |
+| `npm run typecheck` | clean |
+| `npm run dbtypes:check` | "Database contract OK — 17 migration file(s). schema: 18 public + 10 non-client table(s); client types: 18 table(s); data layer: 23 query column group(s) reconciled, 0 finding(s)" |
+| `npm run product:check` | "Product contract OK — 154 active file(s) scanned, 0 violation(s)" |
+| `npm test` | 18 files, **189 passed**, 0 failed |
+| `npm run build` | built; guest route `PublicInvitation` 2.38 kB and `InvitationRenderer` 7.86 kB still split from `index` 557.19 kB (gzip 164.96 kB) |
+| `npm audit --omit=dev --audit-level=high` | 0 high/critical; the same 2 moderate `react-router` advisories §9.13 item 2 records |
+| `git diff --check` | clean (the only stderr is a `core.autocrlf` notice on the test file, not a whitespace error) |
+
+Two numbers moved and both were investigated before being reported:
+
+* **`product:check` prints 154, where §9.11 recorded 158.** The tracked file set is identical to the
+  commit under audit — `git diff --name-status` against it lists modified files only, with no `A` and no
+  `D` — so the four missing files were untracked scratch with scanned extensions
+  (`.txt`/`.mjs`/`.json`/`.md`), deleted by §9.14 *after* §9.11 measured. The count went down because
+  the tree got cleaner, not because the checker got quieter. `docs/audits/` and `scripts/` are excluded
+  from its walk either way.
+* **The entry chunk is 557.19 kB, not §9.11's 489.05 kB.** This pass re-verified the cause found earlier
+  in the same tree: `node_modules` is now pnpm-managed (`.pnpm/`, `.modules.yaml`, Vite resolved from
+  `.pnpm/vite@5.4.21_…`) and was rebuilt after §9.11's battery ran. Reverting both bundle-affecting files
+  and rebuilding produced **byte-identical** output (557,198 bytes), so this pass's change is not the
+  cause. Vite's 500 kB warning threshold was **not** raised; the warning still prints, and the guest-facing
+  chunks are still separate.
+
+Because a source file changed, the whole battery was re-run on the live local stack rather than trusted
+from §9.11, and every count matched it exactly:
+
+| suite | result |
+| --- | --- |
+| `supabase/tests/rls/run.sh` | **24** Stage 0 assertions, `RESULT: PASS` |
+| `supabase/tests/stage2/run.sh both`, clean chain | outcome **41**, draft invariant **46**, publication boundary **269**, privilege + RLS attacks **325**, catalogue **94** |
+| same, legacy chain | outcome **75**, draft invariant **49**, publication **269**, attacks **325**, catalogue **94** |
+| `supabase/tests/api/run.sh` | publication **37/37**, security **56/56**, preconditions "17 migrations applied, matching supabase/migrations", post-run "weddings back to 1 rows / auth.users back to 1 / invitation_drafts back to 1" |
+
+The API runner printed its target before touching it —
+`project_id=localvivaahvarnam`, containers `supabase_{kong,rest,auth,db}_localvivaahvarnam` — which is
+the proof that the 1 row it returned to was this pass's synthetic wedding, not somebody else's data. No
+hosted project was contacted by any command in this section.
+
+### 10.6 Cleanup, scoped to what this pass created
+
+* **Rows**, deleted in one transaction by exact id (wedding `7b3af3ca-…`, user `017e59ee-…`), printed as
+  executed: `access_tokens 1`, `publications 1`, `invitation_versions 1`, `wedding_events 1`,
+  `venues 1`, `wedding_people 0` (this pass never added a person), `invitation_drafts 1`, `weddings 1`,
+  `user_roles 1`, `profiles 1`, `auth.users 1`. Afterwards every one of
+  `weddings`, `invitation_drafts`, `invitation_versions`, `publications`, `private.access_tokens`,
+  `wedding_people`, `venues`, `wedding_events`, `auth.users`, `profiles`, `user_roles`, `entitlements`,
+  `guest_households` and `private.audit_events` counts **0**. The published address died with its
+  credential row, so no live link survives this section.
+* **Processes:** the `vite preview` server (PID 35040, bound to `127.0.0.1:4173` and confirmed not
+  listening on any other interface while it ran) was terminated, and nothing now listens on
+  4173/54400/54401/54403. The tab the accidental navigation opened was closed.
+* **Files:** `s10-preview.log` in the parent session directory, written by this pass, deleted by exact
+  path. Nothing was deleted recursively, and no state, worktree or temp root was touched.
+* **Stack:** `npx supabase stop --no-backup`, run from the repository root against
+  `supabase/config.toml`'s synthetic `project_id = "localvivaahvarnam"` with no linked-project state
+  (`supabase/.temp` holds only `cli-latest`). After it: no `localvivaah` container in `docker ps -a`, no
+  `localvivaah` volume, and `supabase/.branches` holding only the `_current_branch` pointer — so no
+  backup dump was written. `.env.local` (loopback URL, this stack's local keys) is kept, as §8.8 and
+  §9.14 keep it, because the README's local-testing section is unrunnable without it.
+* **Untouched:** the unrelated DueWeave stack still runs **11** containers, none of them stopped,
+  reconfigured or removed by this pass. `pnpm-lock.yaml` and `pnpm-workspace.yaml` remain untracked and
+  unstaged, exactly as found.
+
+### 10.7 What §10 does not claim
+
+§8.10's list and §9.15's four limits stand in full, and this pass adds three of its own:
+
+1. **The accessibility evidence is one control deep.** A repaired focus ratio on the guest page's map
+   link, plus the same ring on four editor controls, is not an accessibility audit of the product, and
+   no conformance is claimed anywhere in this file. The editor's textarea inconsistency (§10.4) is the
+   clearest sign of how narrow the sample is.
+2. **The journey in §10.5 corroborates §9.1; it does not replace it.** One wedding, one venue, one
+   ceremony, no people, no rotation or revocation attempted, and the datetime fields driven rather than
+   typed.
+3. **Nothing was deployed, merged, tagged or re-migrated.** The local stack was stopped, not reset, and
+   the next `supabase start` rebuilds from the same 17-file chain §9.11 qualified.

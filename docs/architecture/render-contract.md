@@ -127,16 +127,26 @@ a note surviving an empty ceremony list, `lang`, and the map link's attributes.
    Tamil shape's three prose fields were seeded with 19 stray Telugu codepoints from the generator,
    visible as fallback glyphs in the first capture; the rows were corrected and republished as a V2 on
    the same link, and the re-captured page holds 0 Telugu and 170 Tamil codepoints.
-5. **The focus ring's contrast is below 3:1 against the paper.** Keyboard operation was measured, not
+5. **The focus ring's contrast was below 3:1 against the paper — repaired, see §10 of the Stage 3
+   audit.** Keyboard operation was measured, not
    assumed: Tab walked the three venue links in DOM order, Shift+Tab walked back, the fourth Tab left
    the document, and every stop matched `:focus-visible` and was scrolled into view. What the check
    also found is that the indicator is a single 2 px `box-shadow` ring in `rgb(205, 146, 45)`
-   (`--ring`) with a transparent `outline`, and against the card's own
+   with a transparent `outline`, and against the card's own
    `rgb(255, 246, 240)` background that measures **2.54:1** — visible, but short of the 3:1 that
    WCAG 1.4.11 asks of a focus indicator. Body text and link text measure 8.82:1 on the same paper,
    and the links are 216×47 CSS px, so this is one narrow shortfall rather than a general problem.
-   It is recorded here and in the audit's closure section; it is not one of the five defects this
-   pass was told to repair, so no token change was made on a guess.
+   It is recorded here and in the audit's closure section; it is not one of the five defects that
+   closure pass was told to repair, so no token change was made on a guess.
+   Two corrections, both from the pass that did repair it:
+   the colour named `--ring` above is **`--gold`** — the map link carried its own
+   `focus-visible:ring-gold`, which overrode the design system, while `--ring` had already been
+   `--ceremonial` (`rgb(107, 30, 44)`) all along. And the fix was to delete that override, not to
+   invent a colour: the link now uses the same `ring-2 ring-ring ring-offset-2 ring-offset-background`
+   token set every other control in `src/` uses, which measures **10.66:1** against the paper offset
+   band it sits on. The rule this leaves behind is the contract's own: a guest-facing control takes
+   the shared focus token, and a component that wants a different one has to say why in this file
+   first.
 
 ## 6. Adding a field
 

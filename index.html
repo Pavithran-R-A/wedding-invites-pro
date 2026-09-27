@@ -4,11 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- A guest's address is `/i/<credential>`, and the page loads a stylesheet from
-         fonts.googleapis.com. Without this tag a browser sends the full address as that
-         request's `Referer`, which would put a live invitation link in a third party's
-         logs. `no-referrer` covers every request the page makes, same-origin included;
-         the credential still appears in browser history and in whatever logs the hosting
-         stack keeps, which no meta tag can reach. -->
+         fonts.googleapis.com. Browsers today default to `strict-origin-when-cross-origin`,
+         which already sends only the origin — not this path — to a cross-origin HTTPS
+         request; this tag is not there to fix a leak that default would otherwise cause.
+         It is here to make the property explicit and ours rather than inherited from a
+         browser default that a different browser, an older one, or a changed setting could
+         give us. It also suppresses the referrer for same-origin requests, where that
+         default sends the full path. Measured on the local stack: the fonts.googleapis.com
+         request carried no `Referer` header at all.
+         What this does NOT do: the credential still sits in browser history and in whatever
+         access logs the hosting stack keeps. No meta tag reaches either. -->
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 
