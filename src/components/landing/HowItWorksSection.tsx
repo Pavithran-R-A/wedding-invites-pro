@@ -15,6 +15,7 @@ const implementedFoundations = [
   "Protected account routes that redirect while you are signed out",
   "Invitation draft creation flow, with design direction and language selection",
   "Planning guest-count persistence code for your own draft",
+  "The people, the venues and each function, entered as rows you can add, edit, reorder and remove",
   "Styling preview and persistence code: font, size, colour, alignment and a simulated foil overlay",
   "The wording a guest reads, written and saved in four passages",
   "Freezing a draft as an immutable version, and publishing a chosen version as one link",
@@ -22,7 +23,6 @@ const implementedFoundations = [
 ];
 
 const plannedForV1 = [
-  "Structured wedding, family and event details",
   "Family approval tied to a specific invitation version",
   "Personalised guest links and household scoping",
   "RSVP replies and an export of the guest list",
@@ -77,8 +77,9 @@ const HowItWorksSection = () => {
               ))}
             </ul>
             <p className="mt-5 border-t border-line pt-4 text-sm text-ink-muted">
-              The signed-in create, dashboard, configure and styling flows were not
-              exercised end to end against a live backend during this stage.
+              The signed-in create, configure, edit, publish and guest-viewing flows
+              were exercised end to end against a local Supabase stack. Nothing here
+              has been exercised against a hosted deployment, and nothing is deployed.
             </p>
           </div>
 

@@ -326,8 +326,10 @@ migration plan, and is executed in `20_attacks.sql` groups 11a–11e.
 ## 12. What this domain does not do yet
 
 A guest can now be given a link and nothing else: there is no guest, RSVP or approval *screen*, no
-event/venue/family editor (Stage 3's editor writes prose and styling only, so the E2E's ceremonies were
-seeded), no upload path, no payment provider, no price, no admin console and no deployed schema.
-`npm run product:check` and the readiness matrix
+upload path, no payment provider, no price, no admin console and no deployed schema. The editor does
+now write the rows this domain owns: `ContentEditor` on the workbench adds, edits, reorders and
+removes `wedding_people`, `venues` and `wedding_events` rows, which is how the Stage 3 host-to-guest
+run got its content — by being typed into the product, not by seeded SQL. `npm run product:check` and the
+readiness matrix
 ([`../product/feature-readiness.md`](../product/feature-readiness.md)) are the mechanisms that keep
 this document from being read as a feature list.

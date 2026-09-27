@@ -75,8 +75,10 @@ animations and no transition class on the article; the only animated thing in th
 
 * **`break-words` on the article root.** `overflow-wrap` is inherited, and host text carries no break
   point of its own. Without it, a 465-character title pushed a 360 px guest page to
-  `scrollWidth 2786` against `clientWidth 345` — the document ran sideways. With it: 345 = 345, no
-  horizontal overflow, on all six fixture shapes.
+  `scrollWidth 2786` against `clientWidth 345` — the document ran sideways. With it: no horizontal
+  overflow at all. Re-measured in the closure pass across 10 content shapes × 4 viewports
+  (360×740, 390×844, 768×1024, 1440×900): 40 loads, every one with
+  `documentElement.scrollWidth == clientWidth` and 0 elements whose right edge passed the viewport.
 * **A stated default lead size.** `weddings.style_settings` is `'{}'` until a host opens the editor, so
   a draft frozen straight from the planning page has no size at all. Treating that as "say nothing"
   rendered the paper at the page's 16 px body text with a 12.9 px caption. `DEFAULT_LEAD = 26` states
@@ -88,23 +90,53 @@ a note surviving an empty ceremony list, `lang`, and the map link's attributes.
 
 ## 5. Findings this contract records rather than hides
 
-1. **`role_key` can reach a guest as a label.** `PersonLine` renders `roleLabel ?? roleKey`, so a person
-   whose role has no platform label shows the machine key (e.g. `guest`). Not a defect in the chain —
-   the projection is faithful — but the wrong fallback for a document a family reads aloud. Fixing it
-   means deciding what an unlabelled role should render as, which is a content question for the
-   tradition-pack stage, not a rendering one.
+1. **`role_key` could reach a guest as a label.** Closed in the closure-repair pass, and this is the
+   record of how it was checked rather than the claim that it was fixed. `PersonLine` used to render
+   `roleLabel ?? roleKey`, so a person whose role had no word written for them showed the machine key
+   (e.g. `guest`). It now prints `role_label` and nothing else: no key is a word on this paper, and a
+   person with no role label renders by name alone. Measured on the qualified host-to-guest run — three
+   people entered through the editor carried `role_key = 'host_defined'` with `group_key IS NULL` and
+   Tamil display names; the guest page drew `Groom · அருண் குமார்`, `Bride · தீபா லட்சுமி` and, for the
+   person whose `role_label` is `NULL`, `குவிலு ராணி` with no separator at all. The string
+   `host_defined`, every `role_key` and `group_key` value and every identifier were absent from the
+   rendered text. Pinned in `src/test/invitationRenderer.test.tsx`.
 2. **`document.title` is unbounded.** On the extreme fixture the page title is the invitation's title
    verbatim, measured at 465 characters. Browsers cope; a chat app's link card does not. A truncation
    rule belongs to whoever next owns sharing, and is not applied here on a guess.
-3. **A chosen font may not be a loaded font.** `Noto Serif Tamil` is offered by the editor and is not
-   among the faces the page loads (which include `Noto Sans Tamil`), so that choice falls through to
-   the script fallback. Recorded as a font-availability gap; the fallback is correct behaviour, the
-   offering is the bug.
-4. **Glyph fidelity is unverified.** Screenshot capture does not work in the qualified environment, so
-   no check confirmed that a Tamil codepoint rendered as a letter rather than a tofu box. This
-   document therefore claims **rendering verification only** — structure, contrast, sizes, overflow and
-   escaping were measured; nothing was read by a native speaker of any supported script and no WCAG
-   conformance is claimed.
+3. **Retracted: "a chosen font may not be a loaded font."** This finding was **false as written**. It
+   claimed `Noto Serif Tamil` was offered by the editor while not being among the faces the page loads.
+   No such family is offered: `FONT_FAMILIES` in `src/pages/EditProject.tsx` lists Playfair Display,
+   DM Sans, and Noto Sans Tamil/Telugu/Kannada/Malayalam, and `index.html` requests exactly those six
+   faces from Google Fonts. The claim was not re-checked before it was recorded, and the earlier
+   Stage 3 report repeats it verbatim at §7.6 — that text stands as the historical record of the error,
+   and this paragraph is the correction. Nothing is substituted for it: no font-availability gap was
+   measured in this pass, and none is claimed. What *was* measured is in the audit's closure section —
+   the guest document's resolved `font-family`, `font-size`, `colour` and `text-align` matched the
+   host's chosen values on all 10 shapes at all 4 viewports, and the faces were requested from
+   Google Fonts.
+4. **Glyph fidelity, now captured.** The earlier note here claimed screenshots did not work in the
+   qualified environment; that was wrong and is corrected. With CDP device emulation at 360×740 @3x
+   (mobile + touch) the guest page was captured for the Tamil, Telugu, Malayalam, Kannada,
+   mixed-script and hostile-markup shapes. Every Indic codepoint drew as a letter of its own script —
+   no tofu boxes, no clipped vowel signs, no sideways document — and the mixed-script page proved
+   per-codepoint fallback: its computed `font-family` was `"Noto Sans Tamil"` throughout, yet Kannada,
+   Telugu, Malayalam and Devanagari codepoints each rendered through the browser's fallback without
+   disturbing line width. Two honest limits stay: the sweep was authored by this author, so it is
+   **rendering verification only** — nothing was read by a native speaker of any supported script, and
+   no WCAG conformance is claimed. One fixture artifact is disclosed rather than smoothed over: the
+   Tamil shape's three prose fields were seeded with 19 stray Telugu codepoints from the generator,
+   visible as fallback glyphs in the first capture; the rows were corrected and republished as a V2 on
+   the same link, and the re-captured page holds 0 Telugu and 170 Tamil codepoints.
+5. **The focus ring's contrast is below 3:1 against the paper.** Keyboard operation was measured, not
+   assumed: Tab walked the three venue links in DOM order, Shift+Tab walked back, the fourth Tab left
+   the document, and every stop matched `:focus-visible` and was scrolled into view. What the check
+   also found is that the indicator is a single 2 px `box-shadow` ring in `rgb(205, 146, 45)`
+   (`--ring`) with a transparent `outline`, and against the card's own
+   `rgb(255, 246, 240)` background that measures **2.54:1** — visible, but short of the 3:1 that
+   WCAG 1.4.11 asks of a focus indicator. Body text and link text measure 8.82:1 on the same paper,
+   and the links are 216×47 CSS px, so this is one narrow shortfall rather than a general problem.
+   It is recorded here and in the audit's closure section; it is not one of the five defects this
+   pass was told to repair, so no token change was made on a guess.
 
 ## 6. Adding a field
 

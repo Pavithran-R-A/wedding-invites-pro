@@ -6,7 +6,9 @@
 > same sentence. The stage that built it is
 > [`../audits/stage-3-public-invitation.md`](../audits/stage-3-public-invitation.md) §6, which carries
 > the measurements; the code is
-> [`20260926130000_stage3_publication_resolution_boundary.sql`](../../supabase/migrations/20260926130000_stage3_publication_resolution_boundary.sql).
+> [`20260926130000_stage3_publication_resolution_boundary.sql`](../../supabase/migrations/20260926130000_stage3_publication_resolution_boundary.sql),
+> with the privileged-body split of the closure repair in
+> [`20260926150000_stage3_privileged_bodies_behind_wrappers.sql`](../../supabase/migrations/20260926150000_stage3_privileged_bodies_behind_wrappers.sql).
 
 ## 1. What is being protected
 
@@ -26,8 +28,8 @@ and pays for it by making the link unguessable, revocable, and worth nothing bey
 ## 2. The callable surface
 
 `api` is a schema with **no tables**: seven functions and nothing else. PostgREST exposes
-`public` and `api` only, so `private`, `legacy` and every internal builder are unaddressable over HTTP
-before any policy is consulted.
+`public` and `api` only, so `private`, `internal_api`, `legacy` and every internal builder are
+unaddressable over HTTP before any policy is consulted.
 
 | Function | Callable by | Derives its caller from |
 | --- | --- | --- |
@@ -41,9 +43,15 @@ before any policy is consulted.
 
 Rules the surface obeys, each of which a catalogue check enforces:
 
-* every function is `SECURITY DEFINER`, owned by `postgres`, `SET search_path = ''`, bodies fully
-  qualified — it needs privileges its callers do not have, and that is exactly why the search path is
-  pinned and the grant list is exact;
+* the exposed `api` functions are `SECURITY INVOKER` wrappers holding one `SELECT` each. The
+  privileged implementations they call live in `internal_api`, which PostgREST does not expose: those
+  are `SECURITY DEFINER`, owned by `postgres`, `SET search_path = ''`, bodies fully qualified — they
+  need privileges their callers do not have, and that is exactly why the search path is pinned, the
+  grant list is exact, and the bodies are not themselves reachable over HTTP. The split is recorded in
+  [ADR 0006's deviation record](decisions/0006-database-rpc-publication-boundary.md);
+* `REVOKE ALL … FROM PUBLIC` first, then `GRANT EXECUTE` to the one or two roles that need it.
+  `service_role` holds no `EXECUTE` on any `api` function and no `USAGE` on the schema: it is not a
+  browser and does not need the browser boundary;
 * `REVOKE ALL … FROM PUBLIC` first, then `GRANT EXECUTE` to the one or two roles that need it.
   `service_role` holds no `EXECUTE` on any `api` function and no `USAGE` on the schema: it is not a
   browser and does not need the browser boundary;
@@ -79,6 +87,30 @@ still `/i/<token>` — a shareable link has to carry its own credential, and the
 to the guest — so the residual is disclosed rather than argued away: the path segment appears in that
 visitor's history and in path-logging infrastructure. What is eliminated is the API hop repeating it,
 and the whitelist below keeps it out of every response body.
+
+**Referrer, measured rather than assumed.** The guest document is served with
+`<meta name="referrer" content="no-referrer">` (in `index.html`, before the stylesheet links), and the
+request log of a live guest page was read back through CDP rather than reasoned from browser defaults:
+
+| Request out of the guest page | Measured `referer` |
+| --- | --- |
+| `GET https://fonts.googleapis.com/css2?family=…` (the stylesheet the invitation needs) | present with an **empty value**, `sec-fetch-site: cross-site` |
+| a font resource request issued by the live guest document (`sec-fetch-dest: font`, `sec-fetch-mode: cors`, to `fonts.gstatic.com`) | `http://127.0.0.1:5173/` — the **origin only, path stripped**; no `/i/<token>` |
+| `POST /rest/v1/rpc/resolve_public_invitation` (loopback API) | present with an empty value |
+
+**No measured request carried the credential in `Referer`.** The second row is the honest limit of the
+meta tag's reach: for that one request the browser applied an origin-only referrer instead of sending
+nothing, so this document claims *the path does not leak to third parties*, not *no referrer is ever
+sent*. `document.referrer` on the guest page is `""`. Four `fonts.gstatic.com` font files were loaded
+by the page; their individual request headers were not each dumped (binary response bodies), so the
+font-row evidence above is from a same-document request of the same type, and the stylesheet row is a
+real page request.
+
+What this does **not** claim, stated because the residual is the interesting part: the credential still
+appears in that visitor's **browser history**, in any **same-origin server log** that logs request
+paths, and in **hosting/CDN request logs** for `/i/<token>`. A referrer policy changes what leaves the
+browser to other origins; it cannot remove a URL from the places a URL is written. Anyone with those
+logs has the link.
 
 **Lifetime.**
 
@@ -137,21 +169,26 @@ guests will not see, and a bug fixed in one place is fixed for both.
   the only thing that distinguishes "may not" from "unreachable") and contributes no server text. A
   page shows a phrase its adapter chose. The test that pins the hint's shape is what keeps this from
   decaying into `error.message` again.
-* The guest client is built per read, with `persistSession: false`, so a visit writes nothing to
-  storage — no session, no refresh token, nothing left on a shared family phone.
+* The guest route does not mount the account session machinery at all: `/i/:token` is rendered outside
+  `AuthProvider`, so opening an invitation neither inspects nor refreshes anyone's session (pinned in
+  `src/test/appRoutingAuthIsolation.test.tsx`, and measured as **0 requests to `/auth/v1`** on a live
+  guest page). The client that read call is built with `persistSession: false`, so a visit writes
+  nothing to storage — no session, no refresh token, nothing left on a shared family phone. Measured:
+  `localStorage`, `sessionStorage` and `document.cookie` all empty after a full guest read, on the
+  available page and on the refusal page.
 
 ## 6. Where each rule is tested
 
 | Rule | SQL (`30_publication.sql`, groups named below; throwaway Postgres, both chains) | HTTP (real Kong + PostgREST + GoTrue) |
 | --- | --- | --- |
-| surface is exactly the seven | G — the `api` surface as one matrix; plus C26/C28a/C28b/C29/C30/C32 in `40_catalog.sql` | `API01`–`API05`, `API33`, `API34` |
+| surface is exactly the seven, and no privileged body is exposed | G — the `api` surface as one matrix, plus the `internal_api` inventory (its functions, its zero relations, and that `api`'s seven are `SECURITY INVOKER`); plus C26/C28a/C28b/C29/C30/C32 in `40_catalog.sql` | `API01`–`API05`, `API33`, `API34` |
 | ownership comes from the caller, and strangers reach nothing | B, B2/B3 | `API06`–`API11` |
 | freeze is explicit, and a version never moves | B | `API07`, `API19`, `API20` |
 | credential shape, storage and transport | C | `API12`–`API16` |
 | generic refusal, whitelist, projection rules | D (including D32's unsafe-link case) | `API21`–`API24` |
 | a credential can only point at a live, same-wedding version | E | `API17`, `API18` |
 | no client may write the publication tables directly | F, F2 | §5's `stage3_security.test.mjs` |
-| rotation, expiry, revocation as a guest experiences them | H | `API27`–`API32` |
+| rotation, expiry, revocation as a guest experiences them | H — including the case where a publication is live but its credential row is not there, which the repair migration's `v_publication_found` flag now decides instead of a leftover `FOUND` | `API27`–`API32`, plus `API35` for that same case through HTTP |
 
 Every refusal above is paired with a control that must succeed — the same write by the owner, the same
 insert against the attacker's own wedding, an `https` link after five refused schemes — because a test

@@ -1,12 +1,13 @@
 # VivaahVarnam — Digital Wedding Patrika
 
 **Status: Preview.** VivaahVarnam is an early, development-stage product. One loop is complete and was
-exercised end to end — a host signs up, creates a wedding, edits the invitation's words and styling,
-freezes an immutable version, publishes it as a single link, and a visitor with no account opens that
-link on a phone — **against a real local Supabase stack** (Kong, PostgREST, GoTrue, PostgreSQL 17.6)
-driven from a browser. Nothing is deployed and no hosted project was used, so no claim here is that a
-customer can do this on a live site today. Guest lists, RSVP collection, payment and printing do not
-exist yet.
+exercised end to end — a host signs up, creates a wedding, adds the people, venues and ceremonies,
+edits the invitation's words and styling, freezes an immutable version, publishes it as a single link,
+revises it into a second version and republishes, rotates and revokes the link, and a visitor with no
+account opens that link on a phone — **against a real local Supabase stack** (Kong, PostgREST, GoTrue,
+PostgreSQL 17.6) driven from a browser. Nothing is deployed and no hosted project was used, so no claim
+here is that a customer can do this on a live site today. Guest lists, RSVP collection, payment and
+printing do not exist yet.
 
 **Brand status: preliminary working brand — not legally cleared.** The name may change before
 launch. Nothing in this repository should be read as a trademark claim, and no trademark search
@@ -67,18 +68,21 @@ The database layer, exercised against throwaway local Postgres containers only:
 
 ## Implemented foundations requiring a configured backend
 
-Real code paths that compile and ship in this build, whose end-to-end behaviour was **not**
-demonstrated against a verified Supabase environment during Stage 1 or Stage 2:
+Real code paths that compile and ship in this build. Stage 3 exercised the host-to-guest loop
+through the product's own screens against a **local** Supabase stack (see
+[`docs/audits/stage-3-public-invitation.md`](docs/audits/stage-3-public-invitation.md)); what has
+**not** been demonstrated for any of them is a deployed, hosted project:
 
-- Sign-up, log-in, logout and password reset against a Supabase Auth project — the screens render,
-  the round trip and email delivery were never exercised
+- Sign-up, log-in, logout and password reset against a Supabase Auth project — the sign-up and
+  sign-in round trip was driven from the browser on the local stack; email delivery and the
+  confirmation click were not (that stack auto-confirms), and reset has never been exercised end to end
 - A **My invitations** dashboard that reads the signed-in user's drafts
 - Draft creation: name, main language, optional design direction, inserted into `public.weddings`
   through the data adapter
 - A draft configuration page that stores an *estimated guest count* (planning only — there is no
   checkout, so it affects nothing commercial)
-- A design preview that saves font, size, colour, alignment and a **simulated** foil overlay with
-  the draft
+- The workbench editor: the four prose passages, the styling of the paper (font, size, colour,
+  alignment and a **simulated** foil overlay), and the people, venues and ceremonies as rows
 
 No **production** Supabase environment was validated: a deployed project, its gateway configuration
 and its transport security are all still unproven here. What Stage 3 did close is the layer Stages 1
@@ -91,10 +95,11 @@ through Kong and PostgREST rather than inferred. See
 that did and did not buy.
 
 What deliberately does **not** exist yet is a **product surface** for guest lists, RSVP collection,
-QR codes, PDF/image export, payment, GST handling, print ordering, and admin tooling — and no screen
-yet lets a host add a ceremony, a venue or a family member, which is why the audit's richer fixtures
-were seeded. Stage 2 gives several of those capabilities tables and rules; a schema is not a feature.
-Where the UI mentions them, it labels them *Planned for V1*.
+QR codes, PDF/image export, payment, GST handling, print ordering, and admin tooling. The people,
+venues and ceremonies of a wedding are now edited on screen as rows, so the fixtures behind Stage 3's
+host-to-guest run were entered through the product itself. Stage 2 gives several of the remaining
+capabilities tables and rules; a schema is not a feature. Where the UI mentions them, it labels them
+*Planned for V1*.
 
 ## Target V1
 
@@ -184,7 +189,7 @@ No secret belongs in this repository. The app only ever reads a browser-public p
 - [`docs/product/brand-clearance.md`](docs/product/brand-clearance.md) — brand status and remaining clearance work
 - [`docs/product/design-principles.md`](docs/product/design-principles.md) — visual and editorial rules
 - [`docs/product/feature-readiness.md`](docs/product/feature-readiness.md) — IMPLEMENTED / FOUNDATION / PLANNED V1 / LATER / EXCLUDED
-- [`docs/architecture/decisions/`](docs/architecture/decisions/) — ADRs 0001–0005
+- [`docs/architecture/decisions/`](docs/architecture/decisions/) — ADRs 0001–0006
 - [`docs/architecture/stage-2-domain-blueprint.md`](docs/architecture/stage-2-domain-blueprint.md) — documentation-only domain design
 
 ## Local development

@@ -886,3 +886,569 @@ weakest point named:
 3. *"One draft per wedding, guaranteed."* Guaranteed against everything a customer can do through the
    API, not against a trusted role's manual `DELETE` (§3.2) — and the difference is asserted by name in
    `20_draft_invariant.sql` rather than implied by the invariant's phrasing.
+
+## 9. POST-INDEPENDENT-REVIEW CLOSURE REPAIR
+
+This label is the review's own requirement, and so is the rule that shapes the section: **§1–§8 stay
+exactly as they were written**, including the sentences that turned out to be wrong. Where this pass
+contradicts an earlier claim, the earlier text is left standing as the record of the error and the
+subsection here is the correction, pointed at by section number. Nothing in §8 is deleted, softened or
+quietly re-measured into agreement.
+
+### 9.0 What the review asked for, and what this pass was allowed to touch
+
+These sections of the directive asked for a change to the tree rather than for more evidence, and the
+table lists each one with the label this session carried for it:
+
+| Directive | The defect, as the review stated it | What landed |
+| --- | --- | --- |
+| §2 | the release could not author people, venues and ceremonies from the product at all, so the §3 journey was only reachable through the database | a row editor in `src/components/invitation/ContentEditor.tsx` over a read/write layer in `src/integrations/supabase/weddingContent.ts`, held by 19 + 23 new unit tests (`contentEditor`, `weddingContentQueries`), and walked end to end by §9.1's steps 6–8 |
+| §3 | the qualified E2E's people, venues and events were seeded with trusted SQL (§8.1 admits it), so the editor's own write path was never walked end to end | the whole journey re-run on the **production build**, every row created through the UI (§9.1) |
+| §4 | the guest route sat inside the account tree, so opening a shared link touched the visitor device's auth state | `/i/:token` moved out of `AuthProvider` — `AccountApplication` at `src/App.tsx:47`, the sibling route at `:82` — pinned by the five cases in `src/test/appRoutingAuthIsolation.test.tsx` (§9.1's steps 13–14, §9.10) |
+| §5 | `no-referrer` was reasoned about, not measured | the fonts request's actual `referer` header read out of the browser's network log (§9.3) |
+| §6 | the privileged publication bodies sat in the exposed `api` schema | seven `SECURITY DEFINER` bodies moved to unexposed `internal_api`, wrappers left invokable (§9.7, ADR 0006) |
+| §7 | document metadata described capability the release does not ship | three description fields rewritten, README's ADR range corrected, landing copy re-read in the browser on the final build (§9.4) |
+| §8 | the recorded `Noto Serif Tamil` font finding (§7.6) was **false** | retracted with the check that shows it was false; §8.4's capture limitation retracted with it (§9.5) |
+| §9 | revocation decided its own outcome from `FOUND` after an intervening `UPDATE` | `v_publication_found`, captured where it is true, plus a SQL group and `API35` that reach the exact shape (§9.6) |
+
+A reading note for the rest of §9: a bare section number in that first column and in the paragraphs that
+follow it is the **directive's** numbering, while `§8.1`, `§7.6`, `§4.3` and the like elsewhere in this
+section are **this document's** own sections — the two series collide, and the subsection headings here
+(`9.3 §5`, `9.7 §6`) give both on purpose.
+
+Two more asked for records instead of code: §10 wanted ADR 0006 amended with a deviation record rather
+than re-authored, and §11 wanted old and new test counts side by side (§9.7, §9.8). §12 (ten content
+shapes × four viewports), §13 (request classification on the final build) and §14 (the whole battery
+after a clean reinstall) were re-executions of §7/§8's evidence on the tree that is actually being
+pushed; they are §9.9, §9.10 and §9.11.
+
+Provenance, disclosed the way §8.0 disclosed it: the directive reached this session as an attached file,
+and that file was gone from disk before this section was written. Its section numbering and the
+requirements quoted throughout §9 were carried in-session, so **quotations are of wording this session
+retained, not of a document re-read**. Where a demand was structural — "no direct SQL/database seeding
+of people/events/venues is allowed in this final E2E", "Do not merely reason from browser defaults",
+"Report OLD counts + NEW counts", "Do not claim the path itself disappears from browser history" — it is
+met and the evidence is below. Where the numbered wording would have to be recited to be verified, it is
+not recited.
+
+Scope, held: this pass repaired the items in that table and re-measured what §11–§14 asked about. It did
+not start Stage 4, did not merge, did not tag, did not deploy, and did not repair the four observations
+§9.13 records as found-and-left.
+
+### 9.1 §3: the host-to-guest journey again, with no SQL anywhere near it
+
+Run against **`vite preview` on `127.0.0.1:4173`** serving the production bundle of §9.11 — not the dev
+server §8.1 used — with the §4 local stack behind it, in a real Chromium page over CDP. The guest half
+ran in a page with no session, no storage and no cookies. **No SQL was written to create or populate any
+invitation content in this run**; every click below is a UI action, and every timestamp was read back
+out of the local database afterwards, from the rows this session created, so the table is reconstructed
+from stored facts rather than from notes taken while clicking. Synthetic-account creation is the one
+thing that went through GoTrue's own local sign-up form, as the directive permits.
+
+| # | What was done in the browser | What the rows and the page say |
+| --- | --- | --- |
+| 1–2 | Landing → "Create your invitation" → sign-up form, `s3final+e2e@example.test` with a local-only password (not recorded here, and the row is deleted at §9.14) | `auth.users` row `ea0a5c27-3820-4cc4-9faf-4d4310556d30`, `is_sso_user = false`, created 05:26:48 UTC; the app landed on `/login`, so the session was not assumed |
+| 3 | Signed in through the form | Dashboard with **0** drafts — nothing pre-existed for this account |
+| 4 | "New wedding" → title "Arun weds Deepa — Final E2E", main language Tamil, estimated guests 120 → create | `weddings` row `57886709-ac62-4091-93d4-994fae17950c` at 05:28:32 UTC |
+| 5 | *(no action — this is the point)* | `invitation_drafts` row `a19ef7c1-3e73-4c54-9639-25c6f4e509d9`, same statement and same timestamp, written by §3's trigger from the app's own insert |
+| 6 | Editor → People → three "Add person" rows: `அருண் குமார்` / role `Groom` / group `Groom's family`; `தீபா லட்சுமி` / `Bride` / `Bride's family`; `குவிலு ராணி` with **no role word**, group `Bride's family` | three `wedding_people` rows, all `role_key = 'host_defined'`, all `group_key IS NULL`, `display_order` 1/2/3, and the third row's `role_label` `NULL` |
+| 7 | Venue → name `கல்யாண மண்டபம்`, two-line address, map link `https://www.google.com/maps/search/?api=1&query=13.03+80.27` | one `venues` row, `map_url` `https` and nothing else |
+| 8 | Ceremony → `திருமணம்`, 2026-11-14 08:00 → 09:30, timezone `Asia/Kolkata`, linked to that venue → the §9.2 caveat attaches to this row | one `wedding_events` row, `event_key = 'host_defined'`, `starts_at`/`ends_at` as above, venue FK set, order 1 |
+| 9 | Four prose blocks typed (welcome, family introduction, event notes, closing) and the style panel set to `Noto Sans Tamil`, `#1f6f52`, size `30`, left | `content` holds all four keys; `style_settings` = `{"font":"Noto Sans Tamil","color":"#1f6f52","fontSize":"30","alignment":"left","foilEnabled":false}`, draft `updated_at` 05:41:15 |
+| 10 | Preview | the same renderer the guest gets, showing exactly these rows |
+| 11 | "Freeze this version" | `invitation_versions` v1, `snapshot_schema_version = 1`; the panel states "Version 1 is frozen. It cannot be edited." |
+| 12 | Publish | `publications` row + `private.access_tokens` row at 05:42:01, `expiry_policy = 'no_expiry'`; the link is shown **once** with a copy affordance — the raw credential exists nowhere in the database (only `token_hash`, §6.3) |
+| 13 | Link opened in a page with no session | article rendered: `html lang="en"`, `article lang="ta"`, one `<h1>`, `scrollWidth == clientWidth`, computed `30px` / `rgb(31, 111, 82)` / `left` / `"Noto Sans Tamil"`, one anchor with `rel="noopener noreferrer" target="_blank"` |
+| 14 | The guest's own text compared with the host's inputs | every host value present and nothing invented: the three people drawn as `Groom · அருண் குமார்`, `Bride · தீபா லட்சுமி` and `குவிலு ராணி` (name only, because its stored `role_label` is null); the strings `host_defined`, every `role_key`/`group_key` value and every uuid absent from the document; `localStorage` and `sessionStorage` empty; **0 cookies** |
+| 15–16 | Host edits the welcome line, appends ` — புதிய அழைப்பு`, saves | guest reload shows the **old** text: v1 is a frozen snapshot and the edit touched only the draft |
+| 17–18 | Freeze v2 (the version selector's native list), publish | same address, and the panel now reads "A link is live showing version 2"; `link_reused` true, so no new path was minted; guest reload shows the new clause. `(snapshot->'draft')->>'welcome'` differs between the two version rows — read out of the database, not inferred |
+| 19–21 | "New link, same version" | second credential at 05:44:47; the **old** link answers the one generic refusal, "This invitation is not available", with no names, no venue, no dates in it; the new link renders v2 |
+| 22–23 | "Take the link down" | panel reverts to "This invitation has not been published yet" with rotate and revoke disabled; guest reload of the live link shows the same generic refusal |
+| 24 | Rows read back | both `publications` rows `status = 'revoked'` with `revoked_at` set, both `public_invitation` tokens revoked (`token_hash` prefixes `71f46cb6f3c7`, `bc59d38c3ebf`), no active publication for the wedding |
+
+Two things this run replaces rather than adds to: §8.1's journey ran on the dev server, and its
+venue/ceremony/people rows came from `.s3-seed-e2e.sql`, so it never proved the editor could author an
+invitation. This one does, on the bundle that ships from this branch. §8.1's text stands as the record of
+what was actually run at that moment.
+
+### 9.2 The one step in that journey that was not a keystroke
+
+Disclosed because the directive requires it in as many words ("If any is inferred rather than executed:
+say so") and because an automation shortcut inside a UI-only claim is exactly the thing a reviewer should
+not have to hunt for.
+
+Step 8's two `datetime-local` fields could not be filled by emulated keystrokes. What was tried, and
+what happened:
+
+* `fill_form` reported success and left both inputs at `""` — it resolves the field's label, not the
+  widget's internal date segments;
+* clicking a segment's uid then `type_text` (CDP `insertText`) produced nothing, because the segments
+  live in the input's shadow tree and are not addressable nodes;
+* `press_key` per digit did reach the widget but landed in the wrong segment and produced
+  `202608-11-14T00:14` — the year segment accepted `202608` (it takes values up to 275760), which is
+  evidence the keystrokes were delivered and not swallowed;
+* `Control+A` then `type_text` did nothing further.
+
+The value was therefore set by calling the native input value setter on the product's own
+`<input type="datetime-local">` and dispatching bubbling `input` and `change` events — the same events a
+keyboard-driven change fires — producing `["2026-11-14T08:00","2026-11-14T09:30"]`, which the app's
+controlled `TextField` accepted, held in state, saved, and which then appeared in the frozen snapshot, in
+the guest DTO and in the guest document.
+
+So: the handler → state → save → freeze → DTO → renderer chain is **executed** evidence. What is *not*
+demonstrated is a human typing digits into that widget with real keys in this environment; no product
+defect was shown by the failure above, and none is claimed — the fault was in the automation layer's
+ability to focus a shadow-DOM segment, and nothing in the application distinguishes the synthetic event
+from a typed one. The alternative was to seed `starts_at` with SQL, which the directive's §3 forbids, or
+to drop the step, which would have hidden it.
+
+### 9.3 §5: the referrer, measured rather than reasoned about
+
+`index.html:12` carries `<meta name="referrer" content="no-referrer" />`, with the comment above it
+stating what it does and does not reach. It is in the built document, not only in the source: the
+`served` `dist/index.html` (md5 `788a374ddb36159d1fcb4d37c75f6f31`) contains the tag, and the loaded page
+reported `document.querySelector('meta[name=referrer]').content === 'no-referrer'`.
+
+The measurement the review asked for is the header, and it was read from the browser's own request log
+for the guest load of §9.1:
+
+* the `https://fonts.googleapis.com/css2?family=…` request carries **`referer:` with an empty value** —
+  not "absent because the browser defaulted to it", but present-and-empty on a page whose address is
+  `/i/<credential>`;
+* the credential appears in **0 request URLs** in that log (checked as a substring over all 21 URLs, not
+  by eyeballing three of them);
+* the only third-party origins contacted are `fonts.googleapis.com` and `fonts.gstatic.com`.
+
+The limit the directive insisted on is kept in the same words as §5's doc change
+(`public-invitation-security.md`): `no-referrer` covers requests the page makes. The path **does** remain
+in browser history, in whatever access log the hosting layer keeps, and in this local stack's own request
+records. No claim is made that this pass removed those, and none is made about `Referrer-Policy` response
+headers, which are a hosting-layer mechanism this build does not set.
+
+### 9.4 §7: what the document says about itself
+
+The three description fields in `index.html` now describe this release, in these words: the `description`
+meta names it as "a South-India-first digital wedding patrika" whose flow is "signs in, writes and styles
+an invitation, freezes it as a version, and publishes it as a link guests read without an account", and
+then states the negation — "RSVP, approval workflows and printing are not part of this release."
+`og:description` and `twitter:description` carry the same sentence with the same negation, so a link card
+cannot be more generous than the page it points at. The review's specific checks:
+
+* no field claims RSVP, guest replies, family approval, PDF/image/video export, QR codes, payments,
+  pricing or an admin console;
+* no usage, customer count, testimonial or launch claim appears in any of them, and none was invented to
+  fill the space;
+* `README.md:192` cited "ADRs 0001–0005" while ADR 0006 exists — corrected to 0001–0006, and the range
+  was re-checked against the directory rather than against the sentence.
+
+The landing page was then re-read **in the browser on the final build** rather than in source: the
+"How it works" steps describe write → freeze → publish → share, and the copy that could have implied a
+guest reply is written as a promise about a later release. Nothing on it asserts capability this branch's
+code does not implement — the check that pinned this is `npm run product:check` (§9.11), whose shape
+rules include the claims §AI added for exactly this purpose.
+
+### 9.5 §8: the font finding was false, and what replaced it
+
+§7.6 recorded: "on the multi-language fixture the host-chosen family `Noto Serif Tamil` is **not** among
+the font faces the page loads (which include `Noto Sans Tamil`), so that choice falls through to the
+script fallback." **That finding was wrong as written**, and the review was right to call it out.
+
+The check that shows it: `src/pages/EditProject.tsx:87` `FONT_FAMILIES` lists exactly six families —
+Playfair Display, DM Sans, Noto Sans Tamil, Noto Sans Telugu, Noto Sans Kannada, Noto Sans Malayalam —
+and `index.html:18` requests exactly those six from Google Fonts, so nothing named `Noto Serif` is
+offered by the editor or loaded by the page: `grep -rn "Noto Serif" src index.html` returns no match.
+Searching the whole tree instead of those two paths finds the string only where it is a record or a
+written value, never a capability — §7.6 of this file, `render-contract.md` §5's retraction, the
+legacy-chain fixtures `supabase/tests/stage2/10_seed_legacy.sql:84` and `30_migration_legacy.sql:189`
+(which write `{"font": "Noto Serif", …}` into a historical row on purpose), and §9.9's sweep, where four
+shapes declare it as a style object. That contrast is exactly what §7.6 missed: **what a database row can
+be made to hold is not what a host can choose.** The finding therefore described a choice no host can make,
+and it reached the audit report without being re-checked against the list it named.
+`render-contract.md` §5's finding 3 is now headed "Retracted" and keeps the same correction; the paragraph
+above stays as the historical record of the error.
+
+Nothing was substituted for it. No font-availability gap was measured in this pass and none is claimed.
+What *was* measured, and is claimed: across all 10 shapes at all 4 viewports the guest document's
+resolved `font-family`, `font-size`, `color` and `text-align` equalled the values that shape's own style
+object declares (§9.9), and on the §9.1 page — where those values were chosen in the editor's style
+panel rather than written by a harness — the document computed to `30px`, `rgb(31, 111, 82)`, `left` and
+`"Noto Sans Tamil"`, with the faces fetched from Google Fonts.
+
+Two more retractions follow from the same pass, because §8.4 and §8.10 rested on a premise that did not
+hold:
+
+* **§8.4's limitation is retracted.** "screenshot and pixel capture do not work in this environment
+  (`take_screenshot` failed on every attempt)" was true of the attempts made then and false as a general
+  statement. With CDP device emulation set to 360 × 740 @3x (mobile + touch) the guest page captured
+  normally, and the Tamil, Telugu, Malayalam, Kannada, mixed-script and hostile-markup shapes were
+  captured and looked at.
+* **§8.10 item 2's "glyph fidelity could not be captured" is therefore no longer true.** Every Indic
+  codepoint in those captures drew as a letter of its own script — no tofu boxes, no clipped vowel
+  signs. The mixed-script capture additionally proved per-codepoint fallback: its computed
+  `font-family` was `"Noto Sans Tamil"` throughout, yet its Kannada, Telugu, Malayalam and Devanagari
+  codepoints each rendered through the browser's fallback without disturbing line width.
+
+What replaces the overclaim is a narrower one, and it is still an overclaim risk a reader should price:
+this is **rendering verification only**. No native speaker of Tamil, Telugu, Kannada or Malayalam read
+any of it, no linguistic or typographic review was performed, and no WCAG conformance is claimed (§9.13
+records one contrast measurement that is short of 3:1).
+
+One fixture artifact is disclosed rather than smoothed over, because it was visible in the first capture:
+the `tamil` shape's three prose fields were seeded by the sweep generator with 19 stray Telugu codepoints
+— a bug in the generator, not in the renderer, and it showed up as fallback glyphs in the image. The rows
+were corrected and republished as a V2 on the same link, and the re-captured page holds **0 Telugu and
+170 Tamil codepoints**.
+
+### 9.6 §9: revocation that does not ask a stale `FOUND` what happened
+
+The body of the revocation path ended with a result assembled as `'revoked', FOUND OR v_count > 0`,
+where `FOUND` was read *after* the credential `UPDATE` two statements above it. In PL/pgSQL `FOUND` is a
+session flag describing the most recent statement, so it no longer referred to the publication lookup at
+all. The consequence was not cosmetic: for an active publication whose live credential row is missing —
+a shape a host's screen can reach, and the one the review pointed at — the flag said "nothing", the
+publication stayed `active`, and the response said `revoked: false` while a link was still being taken
+down, or the reverse.
+
+The repair captures the lookup where it is true and never consults the flag afterwards:
+
+* `supabase/migrations/20260926150000_stage3_privileged_bodies_behind_wrappers.sql:320` declares
+  `v_publication_found boolean := false`, `:337` sets it immediately after the publication `SELECT`, and
+  `:356–357` use it for both the `revoked` flag and the `publication_id` the caller gets back;
+* the historical migration is **not** touched — this is a forward repair in the same file as §9.7's move,
+  because the body being relocated was also the body being corrected;
+* `supabase/tests/stage3/30_publication.sql`'s group H (the file's own header at `:1777` names the flag)
+  asserts both halves of the disjunction separately, so neither arm can be satisfied by the wrong
+  statement;
+* `API35` (`supabase/tests/api/stage3_publication.test.mjs:935`) is the HTTP half, through the host's own
+  RPC: create a complete wedding → freeze → publish → *confirm the link resolves* → delete the live
+  credential out from under it with trusted SQL → revoke. It then asserts
+  `{ revoked: true, publication_id: <the real id>, tokens_revoked: 0 }`, that the deleted token no longer
+  resolves (`{ available: false }`), and that `get_invitation_publication_state` comes back with no live
+  link rather than `link_active: false` beside a publication id — the difference between "there is no
+  link" and "your link is out of date", which is a promise to the host's screen, not a row count.
+
+Per the standing rule about refusal tests, the `API35` fixture builds complete rows: an insert that would
+have failed on a missing required field would have proved nothing about `FOUND`.
+
+### 9.7 §6 and §10: where the privileged bodies live, and what the ADR still says
+
+The review's structural finding: seven publication-path functions were `SECURITY DEFINER` bodies
+declared inside `api`, the one schema PostgREST exposes. Grants limited who could *call* them; nothing
+limited what a caller could *address*, and the wrapper/implementation distinction the design was arguing
+for existed only in comments. The forward migration
+`supabase/migrations/20260926150000_stage3_privileged_bodies_behind_wrappers.sql` splits them:
+
+* `api.*` keeps the same names, signatures and grants, and each wrapper is now `SECURITY INVOKER` with an
+  empty `search_path` — it is the surface, not the privilege;
+* the bodies move to `internal_api`, which is **not** in PostgREST's exposed
+  `pgrst.db_schemas`, each `SECURITY DEFINER` with `SET search_path TO ''`;
+* `service_role` holds no `USAGE` on `internal_api` at all, so even a leaked service key cannot reach the
+  privileged body directly; the browser roles gain `USAGE` and nothing else, and `API37` asserts that
+  grant is exactly its size;
+* `API36` asserts the converse half from the HTTP layer: `internal_api` is not a profile, so its
+  functions are not addressable by any path PostgREST will serve.
+
+ADR 0006 was **amended, not re-authored**, per §10's instruction not to rewrite history as if the first
+architecture never existed: the original Decision, Reasons and Rejected sections stand with their
+reasoning, one sentence was added in-line pointing at the record below them, and the file ends with
+"Deviation record — where the privileged bodies live (closure repair, 2026-09-27)", which says what
+changed, what did not, that the callable surface is identical, and that the suites passed before and
+after. Its Evidence section now cites both measurements honestly: 34 HTTP tests API01–API34 with 246 SQL
+assertions at the time of the original decision, and 37 tests API01–API37 with 269 assertions after the
+move (§9.8 has the full old/new table).
+
+### 9.8 §11: every suite, old count and new count
+
+The directive's instruction was not to replace numbers: "Report OLD counts + NEW counts. Do not silently
+replace suites and report only the larger number." Every "now" column below is from a run made in the
+closure pass on the pinned tree, not from §8's records, and the Stage 2 column is reproducible from
+commit `a51856f`.
+
+| Suite | Stage 2 at `a51856f` | §8.6, pre-closure | now | Δ this pass |
+| --- | --- | --- | --- | --- |
+| Stage 0 RLS baseline (`tests/rls`) | — | 24 | **24** | 0 |
+| Stage 2 migration outcome, clean chain | 41 | 41 | **41** | 0 |
+| Stage 2 migration outcome, legacy chain | 75 | 75 | **75** | 0 |
+| Stage 3 draft invariant, clean chain | — (did not exist) | 46 | **46** | 0 |
+| Stage 3 draft invariant, legacy chain | — | 49 | **49** | 0 |
+| Stage 3 publication boundary SQL | — | 246 | **269** | **+23** |
+| Stage 2 privilege + RLS attacks | 322 | 325 | **325** | 0 |
+| Stage 2 `api` catalogue conformance | 75 | 86 | **94** | **+8** |
+| HTTP publication (`tests/api`, 37 tests) | — | 34 | **37** | **+3** — `API35` (§9.6), `API36`/`API37` (§9.7) |
+| HTTP security (`tests/api`, 56 tests) | — | 56 | **56** | 0 |
+| vitest unit + component | — | 138 / 15 files | **188 / 18 files** | **+50 / +3 files** — the three new files hold 47 of them (`contentEditor` 19, `weddingContentQueries` 23, `appRoutingAuthIsolation` 5) and the other 3 are added cases in `editInvitationPage.test.tsx` (+1) and `invitationRenderer.test.tsx` (+2) |
+
+Nothing was retired, renamed out of a count or replaced by a smaller suite: the two suites that grew did
+so by **added** assertion groups (revocation's `FOUND` case and the `internal_api` half of the catalogue),
+and the three HTTP tests and three vitest files are new files/cases, not restatements of old ones. Both
+SQL chains were re-run end to end for this table (`bash supabase/tests/stage2/run.sh both`, exit 0), and
+the post-run leak check on the HTTP suites again returned the database to its pre-run row counts.
+
+### 9.9 §12: ten content shapes × four viewports, on the final bundle
+
+§8.2 measured six shapes at 360 px and two of them at three more viewports. §12 asked for the matrix
+without the holes, so the sweep was rebuilt at ten shapes × four viewports — **40 loads** of real guest
+pages against the final build.
+
+The harness for this one *was* SQL-seeded, and that is disclosed rather than glossed: `.s12-shapes.sql`
+(scratch, deleted at §9.14) created one wedding per shape under a trusted local role, populated people,
+venues and events, then froze and published **through the product's own privileged functions**
+(`internal_api.create_invitation_version` / `publish_invitation_version`, §9.7's layout) and recorded each
+raw credential. That is legitimate for a *render* sweep — §3's no-seeding rule governs the journey that
+claims to prove the editor, and §9.1 is that journey with zero SQL in it. It is not legitimate for an
+authoring claim, and no authoring claim is made from these 40 loads.
+
+| shape | what it stresses |
+| --- | --- |
+| `minimal` | prose and two people, with `style_settings` `{}` and **no venue and no ceremony at all** |
+| `long-title` | a literal 465-character unbroken title, with a long paragraph beside it |
+| `five-events` | five ceremonies — two with no end time and two with no venue — across one hall |
+| `long-venue` | a 260-character venue name and the same again as its address, with no line breaks given |
+| `tamil` / `telugu` / `malayalam` / `kannada` | one Indic script as the primary language, each with its own chosen font, colour, size and alignment |
+| `mixed-script` | Kannada, Telugu, Malayalam and Devanagari codepoints inside a Tamil document |
+| `hostile-markup` | `<script>`, `<img onerror>`, `<marquee>`, `<h1>`, `javascript:` hrefs in every prose slot, and `color: "red;}"` / `fontSize: "999"` / `alignment: "justify; url(http://evil.example)"` |
+
+Two details of that fixture matter to the reading of the results, so they are stated rather than left
+implicit. First, the harness writes `role_key` from the label it is given (`Groom` → `groom`) and writes
+`host_defined` when the label is blank — so the Indic and hostile shapes each carry a person whose
+`role_label` is `NULL` beside `role_key = 'host_defined'`, which is exactly the row that would have shown
+a machine key under the old renderer. Second, four shapes deliberately carry the font value
+`"Noto Serif"`, which no editor offers: it is a fall-through case for the renderer, not evidence about
+what a host can choose, and §9.5 is where that distinction was got wrong the first time.
+
+Measured across all 40:
+
+* **overflow** — `documentElement.scrollWidth == clientWidth` on every load, and **0** elements whose
+  right edge passed the viewport, at 360 × 740, 390 × 844, 768 × 1024 and 1440 × 900. This is the re-run
+  of the `break-words` rule that §4 of the render contract exists to record;
+* **host intent survives the chain** — the guest document's resolved `font-family`, `font-size`, `color`
+  and `text-align` equalled the values in that shape's own style object, on all 10 shapes at all 4
+  viewports. Two of those 40 sets are worth reading precisely, because both are mechanism rather than
+  accident: `minimal` declares `{}`, so its document renders at the stated defaults
+  (`DEFAULT_LEAD = 26`, `var(--ink)`, centred) instead of at the page's 16 px body text — the defect
+  §4 of the render contract exists for — and `hostile-markup` declares an invalid `alignment`, which
+  `parseStyle` answers by refusing the **whole** style object, so its `999` and `red;}` never reach a
+  declaration either. The four shapes carrying `"Noto Serif"` resolved to a stack led by that family and
+  fell through to the document's own script stack, which is the designed behaviour, not the gap §7.6
+  invented. This is the measurement that replaces §9.5's retracted claim with a number;
+* **structure** — one `<h1>` per document, `lang` on the article taken from the shape's own primary
+  language, and dates drawn from their stored digits rather than from a locale guess;
+* **links** — the venue anchors that appeared were `https`, carried `rel="noopener noreferrer"
+  target="_blank"`, and the non-`https` alternative never reached a page because `venues_map_url_check`
+  refuses the write (§8.2's unplanned evidence, same constraint, still doing the job);
+* **injection** — the `hostile-markup` shape's markup, style strings and `javascript:` hrefs produced no
+  element, no attribute and no declaration of their own in the document; they were drawn as words. React's
+  escaping is the mechanism and the renderer's 15 pinned cases are the guarantee; the screenshot of that
+  shape (§9.5) is the picture;
+* **machine values** — no uuid, and no `host_defined`, appeared in any of the 40 documents, including the
+  five shapes that hold a person whose `role_label` is `NULL`: those people rendered by name alone, with
+  no separator beside them.
+* **keyboard** — Tab walked the venue links in DOM order, Shift+Tab walked back, and the fourth Tab left
+  the document; every stop matched `:focus-visible` and was scrolled into view. The contrast shortfall
+  this measurement also produced is §9.13's, not a passing grade.
+
+Screenshot capture worked for this pass, so six of the ten shapes were also captured at 360 × 740 @3x and
+looked at as images (§9.5). Where capture is quoted, the claim is "this rendered as letters of that
+script", and nothing more.
+
+### 9.10 §13: where the final build's requests actually went
+
+One cold load of a real guest page from the final bundle, classified from the browser's request log by
+destination:
+
+| destination | count | what it is |
+| --- | --- | --- |
+| the local preview origin (`127.0.0.1:4173`) | 8 | 1 document + 7 same-origin chunks / stylesheet / icon |
+| `fonts.googleapis.com` | 1 | the stylesheet |
+| `fonts.gstatic.com` | 10 | the font files that stylesheet pulls |
+| local API (`127.0.0.1:54400`) | 2 | 1 `POST /rest/v1/rpc/resolve_public_invitation` + its `OPTIONS` preflight |
+| anything else | **0** | — |
+| **total** | **21** | |
+
+* **0** requests to any hosted `supabase.co` host, and no command in this stage addressed a remote
+  project (§4.3's proof, unchanged);
+* **0** occurrences of the credential in any request URL, including the fonts requests (§9.3);
+* the resolver call's own headers, read rather than reasoned about: `apikey` and `authorization` carrying
+  **the same publishable key value** — so the anonymous key, never a user JWT — plus
+  `x-invitation-token: <the 43-character credential>`, `content-profile: api`,
+  `x-client-info: supabase-js-web/2.97.0`, an **empty** `referer`, a body of `{}`, no `Cookie` header, and
+  no `Set-Cookie` in the response.
+
+Against §8.7's pinned-tree count of **12**, this is 21. The growth is entirely inside two already-known
+categories — Google Fonts files went 2 → 10 and local assets 5 → 7 — and neither the API half (1 POST +
+1 preflight, both before) nor the set of third-party origins (Google Fonts only, before and now) changed.
+**This pass did not isolate the cause of that difference** and does not offer one as a finding; what it
+did was recount on the shipped bundle, in one cold load, and publish the categories. There is no "zero
+network" claim here or anywhere else in this file, and the page genuinely reaches two Google hosts.
+
+### 9.11 §14: the battery, on the final tree
+
+The order §14 demanded — nothing quoted from an earlier run, and the reinstall before anything else. The
+dev and preview servers were stopped, `node_modules` was deleted, `npm ci` reinstalled from
+`package-lock.json` (**exit 0**), and only then did the gates below run. Afterwards the only changes to
+the tree were markdown.
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| lint | `npm run lint` | **0 errors**, 8 warnings — all pre-existing `react-refresh/only-export-components` in `src/components/ui/*` |
+| typecheck | `npm run typecheck` | clean |
+| generated types | `npm run dbtypes:check` | OK — **17** migration files reconciled, 0 findings, regenerated from the **local** database with no `--linked` flag anywhere in the command |
+| product contract | `npm run product:check` | OK — **158** active files, **0 violations** |
+| unit + component | `npm run test` | **188 tests / 18 files, all passing** |
+| build | `npm run build` | succeeds; largest chunk (the entry) **489.05 kB / 147.25 kB gzip**, `InvitationRenderer` **7.80 kB / 2.85 kB gzip** in its own chunk, the guest route in its own — `vite.config.ts`'s warning threshold untouched, so nothing was quieted by raising it |
+| production audit | `npm audit --omit=dev --audit-level=high` | **exit 0** — 2 *moderate* `react-router` advisories, unchanged from §8.6, range not widened (§9.13) |
+| database, both chains | `bash supabase/tests/stage2/run.sh both` | clean 41 / 46 / 269 / 325 / 94; legacy 75 / 49 / 269 / 325 / 94 — **exit 0** |
+| database, Stage 0 baseline | `bash supabase/tests/rls/run.sh` | **24**, exit 0 |
+| API over the real local stack | `bash supabase/tests/api/run.sh` | publication **37/37**, security **56/56**, exit 0, and the post-run leak check returned the row counts it started from |
+| whitespace | `git diff --check` | exit 0 |
+| UI regression | the §9.1 journey | run on the build from this battery, at the end of the sequence |
+
+**Re-run after §9's own markdown**, because a report that edits the tree it certifies must say so:
+`npm run lint` → 0 errors / the same 8 warnings; `npm run typecheck` → clean; `npm run dbtypes:check` →
+17 migration files, 0 findings; `npm run test` → **188 / 18 files** again; `npm run build` → the asset
+names came back **byte-identical** — all 30 assets' content-hash and byte-size triples matched a
+fingerprint captured before the document work (`diff` between the two captures differs only in the
+whitespace of my own printing, not in one hash or one length), and `dist/index.html` kept md5
+`788a374ddb36159d1fcb4d37c75f6f31`, the §9.3 document. That is the proof that the bundle §9.1's journey
+was tested in is the bundle this branch describes; `npm audit` → exit 0; `git diff --check` → exit 0.
+
+**And once more after the last of §9's own edits** (the §9.0 table, this section's numbering fixes,
+§9.14's cleanup rewrite): `npm run lint` → **0 errors**, the same 8 pre-existing `react-refresh` warnings;
+`npm run typecheck` → clean; `npm run dbtypes:check` → 17 migration files, 0 findings;
+`npm run product:check` → **154** files, **0 violations**; `npm run test` → **188 tests / 18 files**, exit
+0; `npm run build` → exit 0 with the entry chunk at **489.05 kB / 147.25 kB gzip**, `InvitationRenderer`
+at **7.80 kB / 2.85 kB gzip**, **30** assets in `dist/assets`, and `dist/index.html` at md5
+`788a374ddb36159d1fcb4d37c75f6f31` again — the same three fingerprints, so the last edits were markdown
+and nothing the bundle is built from.
+
+Two counts legitimately moved and are reported moved rather than smoothed:
+
+* `product:check` now prints **154** active files where the table above printed 158. The checker scans
+  `.txt` among its extensions and does not skip dotted files, so the four scratch `*.txt` dumps §9.9's
+  harness left in the repository root were being counted; §9.14 deleted them, and 154 is what the tree
+  under this commit contains. **0 violations both times.**
+* The same suite ran in **5.95 s** once and **38.17 s** once on this machine, which is the §9.12
+  contention note in the other direction — the wall clock moves, the pass count does not.
+
+The two database runners were executed again after §9.14's deletes, on the now-empty local stack, and
+returned the same numbers as the table above — `stage2/run.sh both` exit 0 with 41 / 46 / 269 / 325 / 94
+clean and 75 / 49 / 269 / 325 / 94 legacy, `rls/run.sh` at 24, and `api/run.sh` at 37/37 and 56/56 with
+its post-run check now reporting `weddings back to 0 rows`, `auth.users back to 0 rows`, `invitation_drafts
+back to 0 rows`. That is also the check that §9.14 removed test *data* and nothing the suites need.
+
+Two interlocks worth naming, because they are the difference between "a suite passed" and "this suite
+could not have quietly hit something else": the SQL runners refuse to start unless the target is a
+loopback host on a port they created themselves, and the API runner reads its URL from `.env.local`,
+which holds only the loopback URL and this stopped-and-started local stack's keys. `--single-transaction`
+and the throwaway containers mean no SQL assertion in this table can persist anything to the stack.
+
+### 9.12 Drift this pass found in its own instruments
+
+Three measurements moved underneath the earlier sections, and each is recorded as an instrument note
+rather than folded into a result:
+
+* **PostgREST 16.2 → 16.3.** §4.1's corrected table and §8.5 both read `server: postgrest/16.2` off the
+  live local stack; this pass read **`postgrest/16.3`** from the same response header on the same host
+  and port. Nothing in Stage 3 pins a PostgREST version, no assertion in any suite depends on one, and the
+  API suites were re-run afterwards on 16.3 (§9.11) — so the effect on the evidence is nil, but the number
+  in §8.5 is no longer what the stack reports, and saying so is cheaper than being caught by it.
+* **vitest timeouts that were not test failures.** An earlier run of `npm run test` in this pass produced
+  5000 ms timeouts on files that pass in ~2 s. Per "if a gate fails, investigate; do not weaken the gate",
+  the cause was isolated before anything was edited: `--no-file-parallelism` ran **188/188**, and a
+  subsequent plain parallel run also passed **188/188** (§9.11), which points at worker oversubscription
+  on this machine rather than at a slow assertion. No timeout value, no `test` config and no assertion was
+  changed to make the line green.
+* **The entry chunk grew, 488.93 kB → 489.05 kB** (gzip 147.23 → 147.25), and `InvitationRenderer` with
+  it, 7.72 → 7.80 kB. §7.8's figures were the pinned tree before §9.1's editor work; the final build is
+  larger on the same file set and still under the untouched 500 kB threshold. Both numbers stay in the
+  file because both were real at their moment.
+
+### 9.13 Observations recorded and deliberately not repaired
+
+The pass was told to fix the closure defects and nothing else, so these are disclosures, not work:
+
+1. **The keyboard focus indicator is 2.54:1 against the paper**, where WCAG 1.4.11 asks 3:1 of a focus
+   indicator. It is a single 2 px `box-shadow` ring in `rgb(205, 146, 45)` with a transparent `outline`,
+   measured against the card's own `rgb(255, 246, 240)`. Body text and link text
+   measure 8.82:1 on the same paper and the links are 216 × 47 CSS px, so this is one narrow shortfall
+   rather than a general accessibility problem — and no design token was changed on a guess.
+   `render-contract.md` §5 finding 5 carries it.
+2. **Two moderate `react-router` advisories remain** (an open-redirect bypass in `<Link>`/`useNavigate`,
+   and `deserializeErrors()` constructor injection in SSR hydration — the app is not SSR, and the
+   `Link` usage takes literals). npm's fix is a `--force` major bump; `^6.30.1` was not widened, and the
+   advisory pair is unchanged from §8.6's record.
+3. **`document.title` is unbounded** — 465 characters on the `long-title` shape. Browsers cope; a chat
+   app's link card may not. Truncating it is a sharing decision for whoever next owns sharing.
+4. **The `wa.me` share affordance still carries the invitation URL in a query string** (§6.3's known
+   limit). It is an `<a href>` that issues no request until the host taps it, so nothing leaks on page
+   load, and the review did not list it as a closure defect.
+
+### 9.14 §16/§17: cleanup scoped to this pass
+
+Everything below is a row or file this pass created, deleted by exact name, and then verified — not a
+"probably fine" sweep of a directory.
+
+* **Rows removed from the local stack**, in dependency order, in one transaction:
+  `DELETE 14` from `private.access_tokens`, `DELETE 16` from `public.publications`, `DELETE 16` from
+  `public.invitation_versions`, `DELETE 10` from the §9.9 harness table followed by
+  `DROP TABLE public.s12_manifest`, `DELETE 12` from `public.weddings` scoped to the two synthetic owners
+  (which cascaded their 12 drafts, 32 people, 12 venues and 16 events), `DELETE 2` from `public.user_roles`,
+  `DELETE 0` from `public.profiles`, `DELETE 2` from `auth.users`. The `profiles` line matched nothing and
+  is reported as it printed; the post-check below is what makes it a disclosed oddity rather than a
+  silent one. Afterwards `weddings`, `invitation_drafts`, `invitation_versions`, `publications`,
+  `private.access_tokens`, `wedding_people`, `venues`, `wedding_events`, `auth.users`, `profiles`,
+  `user_roles`, `entitlements`, `guest_households` and `private.audit_events` all count **0**, and
+  `to_regclass('public.s12_manifest')` is null.
+* **Both E2E accounts went with them** — `s3final+e2e@example.test` (this pass, §9.1) and
+  `s3cr1+hosta@example.test` plus its `Arun weds Deepa — closure E2E` wedding (the superseded attempt
+  that ran before the §14 reinstall, recorded at §9.1's "replaces rather than adds to"). Their raw
+  credentials were never in the database in any case (§6.3 stores a hash), and the ones this pass held in
+  a scratch file are deleted with it, so no live link survives this section.
+* **Scratch files deleted**, by exact path: the sixteen `.s12-*` files in the repository root — the shape
+  harness, its variants, the generator script and dumps, and `.s12-tokens.txt`, which held raw
+  credentials and is the reason this bullet exists — plus `depth.txt` and every log and fingerprint file
+  this pass wrote into the parent session directory (`s14*`, `s14b*`, `api.log`, `rls.log`,
+  `stage2-both.log`), which are this session's scratch, not this repository's.
+  `git status` now shows the tree with only this stage's real additions
+  untracked, and `pnpm-lock.yaml` / `pnpm-workspace.yaml` are **still untracked and unstaged**, exactly as
+  found (§8.8's discipline, not repeated by accident).
+* **Throwaway containers:** the SQL runners create and remove their own; `docker ps -a` after §9.11's
+  runs showed no leftovers from them, and this pass created none of its own.
+* **This project's local stack** was then stopped with `npx supabase stop --no-backup`, run from the
+  repository root with `supabase/config.toml`'s synthetic `project_id = "localvivaahvarnam"` as its only
+  target selector and no linked-project state in `supabase/.temp` (the directory holds `cli-latest` and
+  nothing else), so no remote project could be addressed by it. What it left behind, measured afterwards:
+  `docker ps -a` matching `localvivaah` returns nothing, `docker volume ls` has no `localvivaah` volume
+  either — so no `--no-backup` dump was written into `supabase/.branches` (that directory holds only the
+  gitignored `_current_branch` pointer), nothing listens on 127.0.0.1:54400/54401/54403, and the next
+  `supabase start` rebuilds the schema from the migration chain, which is the state §9.11's post-cleanup
+  re-runs were measured against.
+* **Not touched, and one number corrected:** the unrelated DueWeave project is still running — `docker ps`
+  counts **eleven** `*_dueweave` containers now, including the crash-looping `supabase_vector_dueweave`,
+  and its three volumes are still listed. §8.8 recorded "twelve"; that count in this file was one too
+  high, and the correction belongs here rather than in §8.8's text. Nothing of theirs was stopped,
+  reconfigured or removed by this pass — the bullet exists to say exactly that. `.env.local` (gitignored,
+  loopback URL and this stack's local keys) and `supabase/.temp/cli-latest` are kept for the same reason
+  §8.8 gives: the README's "API testing against the local stack" section is unrunnable without them.
+
+### 9.15 What §9 does not claim
+
+§8.10's list still stands in full — no RSVP, guest input, approval, PDF/image/video export, QR, payments,
+entitlement granting, admin console, audit surface, reviewed tradition or template content, event/venue
+editor beyond what §9.1's editor writes, uploads, Storage, Realtime, or deployment of any kind — and this
+pass adds four limits of its own:
+
+1. **One browser, one machine, one run.** §9.1's journey and §9.9's sweep were executed in a single
+   Chromium via CDP on one Windows host against one local stack. Nothing is claimed about Safari, iOS
+   WebView, Firefox, or a screen reader actually reading the document aloud — the accessibility evidence
+   is DOM and computed-style measurement, and no WCAG conformance is asserted anywhere in this file.
+2. **The datetime fields were driven, not typed** (§9.2). The chain from the app's own change handler
+   onwards is executed evidence; keystroke entry into that widget is not.
+3. **The 12 → 21 request delta is described, not explained** (§9.10). The categories are counted and the
+   invariants (one API call plus preflight, Google Fonts as the only third party, 0 hosted requests, 0
+   credentials in URLs) hold in both observations; a cause for the larger count was not isolated.
+4. **Retracted claims are retracted, not re-verified in the other direction.** §9.5 shows the
+   `Noto Serif Tamil` finding was false as written; it does not establish that the font story is
+   correct in every respect, only that this pass measured what it can see. Likewise, "glyph fidelity
+   could not be captured" (§8.4) is replaced by "captured and looked at", which is a weaker claim than
+   the one §8.4 was being honest about not making: **no native speaker reviewed any of it.**
