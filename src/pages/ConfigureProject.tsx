@@ -121,8 +121,8 @@ const ConfigureProject = () => {
           <Card>
             <CardContent className="py-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
-                Write the invitation, choose its styling, and publish it as a link you can
-                share with guests.
+                Add the people, venues and ceremonies, write the wording and choose its
+                styling, then publish it as a link you can share with guests.
               </p>
               <Button className="rounded-xl shrink-0" asChild>
                 <Link to={`/project/${id}/edit`}>Open Invitation Editor</Link>
@@ -148,7 +148,6 @@ const ConfigureProject = () => {
             Planned, not part of this draft yet
           </h2>
           <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-            <li>Couple, family, function and venue details</li>
             <li>Family approval of a specific version</li>
             <li>Guest lists, personalised links and RSVP replies</li>
             <li>QR code, PDF, payment and printing options</li>

@@ -56,6 +56,7 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { sanitizeSvg } from '@/lib/sanitizeSvg';
 import InvitationRenderer from '@/components/invitation/InvitationRenderer';
 import DraftTextEditor from '@/components/invitation/DraftTextEditor';
+import ContentEditor from '@/components/invitation/ContentEditor';
 import PublicationPanel from '@/components/invitation/PublicationPanel';
 
 interface EditorState {
@@ -236,6 +237,13 @@ const EditProject = () => {
     };
   }, [id, user]);
 
+  /** Re-read the projection so the canvas is the server's document rather than the local
+   *  overlay; a failed refresh leaves the overlay in place, which shows the same words. */
+  const refreshPreview = async (weddingId: string) => {
+    const refreshed = await previewInvitation(weddingId);
+    if (refreshed.data) setServerPreview(refreshed.data);
+  };
+
   const handleSave = async () => {
     if (!id || !user) return;
     setSaveState('saving');
@@ -250,10 +258,7 @@ const EditProject = () => {
     // typing while it was in flight — anything after it is unsaved again, correctly.
     setBaseline(saved);
     setSaveState('saved');
-    // Re-read the projection so the canvas is the server's document rather than the local
-    // overlay; a failed refresh leaves the overlay in place, which shows the same words.
-    const refreshed = await previewInvitation(id);
-    if (refreshed.data) setServerPreview(refreshed.data);
+    await refreshPreview(id);
   };
 
   const runPublication = async <T,>(
@@ -353,7 +358,7 @@ const EditProject = () => {
     );
   }
 
-  if (!design) {
+  if (!design || !id) {
     return (
       <div className="min-h-screen bg-background">
         <main className="container py-16 text-center" role="status">
@@ -406,9 +411,9 @@ const EditProject = () => {
             <InvitationRenderer invitation={invitation} />
             <p className="text-xs leading-snug text-muted-foreground">
               This is the layout your guests get, drawn by the same code that renders their
-              page. Your words and styling change as you type; the names, ceremonies and
-              venues shown here are what is already saved, and this build has no editor for
-              them yet.
+              page. Your words and styling change as you type and reach the document when you
+              press Save Draft; the people, venues and ceremonies below are saved row by row,
+              because they are rows rather than draft text.
             </p>
           </div>
         </section>
@@ -420,6 +425,15 @@ const EditProject = () => {
             </h2>
             <DraftTextEditor value={draft} onChange={setDraft} disabled={saveState === 'saving'} />
           </section>
+
+          <Separator />
+
+          <ContentEditor
+            weddingId={id}
+            onContentChanged={() => {
+              void refreshPreview(id);
+            }}
+          />
 
           <Separator />
 

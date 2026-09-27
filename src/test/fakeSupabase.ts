@@ -70,6 +70,10 @@ class FakeChain {
     return this.record("update", values);
   }
 
+  delete(): this {
+    return this.record("delete");
+  }
+
   eq(column: string, value: unknown): this {
     return this.record("eq", column, value);
   }
@@ -117,9 +121,9 @@ export const fakeSupabase = {
   },
 };
 
-export const databaseError = (message: string): FakeResponse => ({
+export const databaseError = (message: string, code = "42501"): FakeResponse => ({
   data: null,
-  error: { message, details: "", hint: "", code: "42501" },
+  error: { message, details: "", hint: "", code },
 });
 
 export const rowReturned = (row: unknown): FakeResponse => ({ data: row, error: null });

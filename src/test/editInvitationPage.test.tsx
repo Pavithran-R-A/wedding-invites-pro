@@ -6,12 +6,12 @@
 // must be visible and must be labelled as unsaved, a freeze must refuse that paragraph,
 // and a failure must leave the words on screen.
 //
-// The two adapter modules are mocked, which is the honest seam for this file: what the
+// The three adapter modules are mocked, which is the honest seam for this file: what the
 // page asks the database for is qualified over real PostgREST in `supabase/tests/api/`,
-// and what the adapter does with an answer is qualified in `weddingQueries.test.tsx` and
-// `publicInvitationTransport.test.ts`. Re-stubbing the transport here would test the
-// mock. `InvitationRenderer` is deliberately real, because the point of §U is that this
-// page draws with the guest's renderer and not a copy of it.
+// and what an adapter does with an answer is qualified in `weddingQueries.test.tsx`,
+// `weddingContentQueries.test.ts` and `publicInvitationTransport.test.ts`. Re-stubbing the
+// transport here would test the mock. `InvitationRenderer` is deliberately real, because
+// the point of §U is that this page draws with the guest's renderer and not a copy of it.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -42,6 +42,9 @@ const api = vi.hoisted(() => ({
   publishInvitation: vi.fn(),
   rotateInvitationLink: vi.fn(),
   revokeInvitationPublication: vi.fn(),
+  listPeople: vi.fn(),
+  listVenues: vi.fn(),
+  listCeremonies: vi.fn(),
 }));
 
 vi.mock("@/integrations/supabase/weddings", () => ({
@@ -61,6 +64,27 @@ vi.mock("@/integrations/supabase/publication", () => ({
   rotateInvitationLink: (...a: unknown[]) => api.rotateInvitationLink(...a),
   revokeInvitationPublication: (...a: unknown[]) => api.revokeInvitationPublication(...a),
 }));
+
+// The three row lists arrive empty: this page's contract is the draft text, the styling and
+// the publication gesture. `contentEditor.test.tsx` is where the rows themselves are tested,
+// and `weddingContentQueries.test.ts` where what the adapter sends is proved.
+vi.mock("@/integrations/supabase/weddingContent", () => {
+  const unused = vi.fn();
+  return {
+    listPeople: (...a: unknown[]) => api.listPeople(...a),
+    listVenues: (...a: unknown[]) => api.listVenues(...a),
+    listCeremonies: (...a: unknown[]) => api.listCeremonies(...a),
+    createPerson: unused,
+    updatePerson: unused,
+    removePerson: unused,
+    createVenue: unused,
+    updateVenue: unused,
+    removeVenue: unused,
+    createCeremony: unused,
+    updateCeremony: unused,
+    removeCeremony: unused,
+  };
+});
 
 // One stable identity object: a fresh one per call would re-run the load effect on every
 // render, which is not what the provider does.
@@ -143,6 +167,9 @@ beforeEach(() => {
   api.publishInvitation.mockReset();
   api.rotateInvitationLink.mockReset();
   api.revokeInvitationPublication.mockReset();
+  api.listPeople.mockReset().mockResolvedValue(ok([]));
+  api.listVenues.mockReset().mockResolvedValue(ok([]));
+  api.listCeremonies.mockReset().mockResolvedValue(ok([]));
 });
 
 describe("what the host is shown while editing", () => {
@@ -153,6 +180,19 @@ describe("what the host is shown while editing", () => {
     expect(container.textContent).toContain("Sri Kanchi Mahal");
     expect(container.textContent).toContain("Wedding ceremony");
     expect(api.previewInvitation).toHaveBeenCalledWith(WEDDING);
+  });
+
+  it("mounts the row editor for this wedding's people, venues and ceremonies", async () => {
+    await visit();
+    // The workbench is the only place a host can put a grandmother's name into the
+    // invitation, so the page has to carry the section rather than a link to it.
+    expect(screen.getByRole("heading", { level: 2, name: "People, venues and ceremonies" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a person" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a venue" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a ceremony" })).toBeInTheDocument();
+    expect(api.listPeople).toHaveBeenCalledWith(WEDDING);
+    expect(api.listVenues).toHaveBeenCalledWith(WEDDING);
+    expect(api.listCeremonies).toHaveBeenCalledWith(WEDDING);
   });
 
   it("shows typing at once and says it is not saved yet", async () => {
