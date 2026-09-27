@@ -22,6 +22,10 @@
 //     nothing at all rather than as a plausible placeholder, and a date is formatted from
 //     its own digits instead of being run through `new Date()` — a wall-clock time that
 //     crosses a client timezone on the way to the screen is the wrong ceremony's time.
+//   * It prints no machine key. `role_key`, `group_key` and `event_key` reach this file in
+//     the projection and are never drawn: they are platform identifiers, and a guest's
+//     document shows only words a host wrote. An unlabelled role therefore renders as the
+//     name alone, which is what the host was left with when they wrote it.
 //
 // Design intent (§Q): a digital patrika. Warm paper, a ceremonial double rule in gold
 // over maroon, generous type that an elder can read on a phone, one column that fits
@@ -99,10 +103,18 @@ const safeFont = (font: string | null): string | undefined => {
   return `"${font}", var(--font-display)`;
 };
 
+/** Text a host wrote, or nothing at all. A stored value that is empty or only spaces says
+ *  nothing, and printing it as a bare separator would be our mark on their document. */
+const hostText = (value: string | null): string | null =>
+  value !== null && value.trim() !== '' ? value : null;
+
 const PersonLine = ({ person }: { person: InvitationPerson }) => {
-  const name = person.displayName;
+  const name = hostText(person.displayName);
   if (name === null) return null;
-  const role = person.roleLabel ?? person.roleKey;
+  // `role_key` is never printed. It is a machine identifier, and this is a document a
+  // family may read aloud, so a person whose role has no word written for them is shown
+  // by name alone rather than by a key they were never asked for.
+  const role = hostText(person.roleLabel);
   return (
     <li className="text-[0.95em] leading-relaxed">
       {role !== null && role !== name ? (
@@ -117,10 +129,10 @@ const PersonLine = ({ person }: { person: InvitationPerson }) => {
 
 /** An event that froze with nothing on it is not a ceremony the guest can attend; an
  *  empty ruled box would be decoration standing in for information. Both the block and
- *  the list that holds them ask this one question. */
+ *  the list that holds them ask this one question. The machine key is not content — a
+ *  row whose only populated field is `event_key` has said nothing to a guest. */
 const hasEventContent = (event: InvitationEvent): boolean =>
-  event.displayName !== null ||
-  event.eventKey !== null ||
+  hostText(event.displayName) !== null ||
   event.startsAtLocal !== null ||
   event.endsAtLocal !== null ||
   event.venue !== null;
@@ -131,7 +143,7 @@ const EventBlock = ({ event }: { event: InvitationEvent }) => {
   const to = event.endsAtLocal !== null ? formatTime(event.endsAtLocal) : null;
   const hours = from !== null ? `${from}${to !== null ? ` – ${to}` : ''}` : null;
   const venue = event.venue;
-  const title = event.displayName ?? event.eventKey;
+  const title = hostText(event.displayName);
   const addressLines = venue?.addressText?.split('\n').filter((line) => line.trim() !== '') ?? [];
 
   if (!hasEventContent(event)) return null;
@@ -191,8 +203,11 @@ export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
   const fontFamily = safeFont(invitation.style.font);
   const textAlign = invitation.style.alignment ?? 'center';
 
+  // A group's identity: the platform key when a row carries one, otherwise the host's own
+  // label. The heading printed below is only ever the label — `group_key` keeps rows of one
+  // group together, it is not a word to set over a family's names.
   const groupedPeople = invitation.people.reduce<Record<string, InvitationPerson[]>>((groups, person) => {
-    const key = person.groupLabel ?? person.groupKey ?? '';
+    const key = hostText(person.groupKey) ?? hostText(person.groupLabel) ?? '';
     const bucket = groups[key];
     if (bucket) bucket.push(person);
     else groups[key] = [person];
@@ -239,18 +254,24 @@ export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
 
       {groups.length > 0 ? (
         <section className="pt-7" aria-label="Family and blessings">
-          {groups.map(([label, members]) => (
-            <div key={label || 'unlabelled'} className="pb-4">
-              {label !== '' ? (
-                <h2 className="font-display text-[1.05em] font-medium text-ink-muted">{label}</h2>
-              ) : null}
-              <ul className="mt-1 space-y-1">
-                {members.map((person, index) => (
-                  <PersonLine key={`${person.displayName ?? 'person'}-${index}`} person={person} />
-                ))}
-              </ul>
-            </div>
-          ))}
+          {groups.map(([bucket, members]) => {
+            const heading = members.reduce<string | null>(
+              (found, person) => found ?? hostText(person.groupLabel),
+              null,
+            );
+            return (
+              <div key={bucket || 'unlabelled'} className="pb-4">
+                {heading !== null ? (
+                  <h2 className="font-display text-[1.05em] font-medium text-ink-muted">{heading}</h2>
+                ) : null}
+                <ul className="mt-1 space-y-1">
+                  {members.map((person, index) => (
+                    <PersonLine key={`${person.displayName ?? 'person'}-${index}`} person={person} />
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
         </section>
       ) : null}
 

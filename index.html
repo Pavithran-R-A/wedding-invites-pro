@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- A guest's address is `/i/<credential>`, and the page loads a stylesheet from
+         fonts.googleapis.com. Without this tag a browser sends the full address as that
+         request's `Referer`, which would put a live invitation link in a third party's
+         logs. `no-referrer` covers every request the page makes, same-origin included;
+         the credential still appears in browser history and in whatever logs the hosting
+         stack keeps, which no meta tag can reach. -->
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,14 +22,14 @@
     <title>VivaahVarnam — Digital Wedding Patrika</title>
     <meta
       name="description"
-      content="VivaahVarnam is a South-India-first digital wedding patrika. Preview stage: the draft-creation and styling foundation is in the codebase, while publishing, sharing, RSVP and printing are planned for later releases."
+      content="VivaahVarnam is a South-India-first digital wedding patrika. A family signs in, writes and styles an invitation, freezes it as a version, and publishes it as a link guests read without an account. RSVP, approval workflows and printing are not part of this release."
     />
     <meta name="author" content="VivaahVarnam" />
 
     <meta property="og:title" content="VivaahVarnam — Digital Wedding Patrika" />
     <meta
       property="og:description"
-      content="Create and preview a South Indian wedding invitation draft. Preview stage — publishing, RSVP and printing are planned."
+      content="Write and style a South Indian wedding patrika, freeze it as a version, and share it as a link your guests can read without an account. RSVP, approval workflows and printing are not part of this release."
     />
     <meta property="og:type" content="website" />
 
@@ -30,7 +37,7 @@
     <meta name="twitter:title" content="VivaahVarnam — Digital Wedding Patrika" />
     <meta
       name="twitter:description"
-      content="Create and preview a South Indian wedding invitation draft. Preview stage — publishing, RSVP and printing are planned."
+      content="Write and style a South Indian wedding patrika, freeze it as a version, and share it as a link your guests can read without an account. RSVP, approval workflows and printing are not part of this release."
     />
   </head>
 

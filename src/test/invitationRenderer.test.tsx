@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import InvitationRenderer from "@/components/invitation/InvitationRenderer";
 import { parsePublicInvitation, type PublicInvitation } from "@/lib/publicInvitation";
-import { guestPayload } from "@/test/invitationFixture";
+import { guestPayload, payloadWith } from "@/test/invitationFixture";
 
 const parsed = (): PublicInvitation => {
   const invitation = parsePublicInvitation(guestPayload());
@@ -175,6 +175,54 @@ describe("the invitation renderer", () => {
     expect(screen.getByText('The ceremonies')).toBeInTheDocument();
     // A person carries the host's own role word beside the name, in one line.
     expect(container.textContent).toContain('Groom · Arun Kumar');
+  });
+
+  // The machine keys are the platform's own columns: `role_key`, `group_key` and
+  // `event_key`. Leaving the matching word empty is now a choice the editor offers, so a
+  // blank must not be filled in with a key. These go through the parser with the null in
+  // the document — the shape the projection really answers with — rather than the
+  // camelCase object the test above builds by hand.
+  it("prints no key where a host left the word out", () => {
+    const unlabelledRole = parsePublicInvitation(payloadWith(['invitation', 'people', 0, 'role_label'], null));
+    const unlabelledGroup = parsePublicInvitation(payloadWith(['invitation', 'people', 0, 'group_label'], null));
+    expect(unlabelledRole).not.toBeNull();
+    expect(unlabelledGroup).not.toBeNull();
+
+    const role = render(<InvitationRenderer invitation={unlabelledRole as PublicInvitation} />);
+    const line = role.container.querySelector('ul li');
+    // The name alone: no key, and no separator standing in for the word that is not there.
+    expect(line?.textContent).toBe('Arun Kumar');
+
+    const group = render(<InvitationRenderer invitation={unlabelledGroup as PublicInvitation} />);
+    expect(group.container.textContent).toContain('Arun Kumar');
+    expect(group.container.textContent).not.toContain('groom_family');
+  });
+
+  it("keeps an unlabelled ceremony's time and drops one that said nothing", () => {
+    const unnamed = parsePublicInvitation(payloadWith(['invitation', 'events', 0, 'display_name'], null));
+    expect(unnamed).not.toBeNull();
+    const { container } = render(<InvitationRenderer invitation={unnamed as PublicInvitation} />);
+    // The date is a fact the host wrote; the key that names the rite is not.
+    expect(container.textContent).toContain('14 November 2026');
+    expect(container.textContent).not.toContain('muhurtham');
+    expect(container.querySelector('h3')).toBeNull();
+
+    const silent = parsePublicInvitation(
+      payloadWith(['invitation', 'events', 0], {
+        event_key: 'muhurtham',
+        display_name: null,
+        starts_at_local: null,
+        ends_at_local: null,
+        timezone: 'Asia/Kolkata',
+        venue: null,
+      }),
+    );
+    expect(silent).not.toBeNull();
+    const bare = render(<InvitationRenderer invitation={silent as PublicInvitation} />);
+    // Scoped to this render: the invitation above, which does have a ceremony, is still in
+    // the document.
+    expect(bare.container.textContent).not.toContain('muhurtham');
+    expect(bare.container.textContent).not.toContain('The ceremonies');
   });
 
   it("does not display the platform's template or pack revision", () => {
