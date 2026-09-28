@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkGeneratedTypesEof,
   extractDataLayerQueries,
   parseGeneratedTypes,
   parseMigrations,
@@ -50,6 +51,21 @@ describe("database contract checker", () => {
       ["const WEDDING_COLUMNS =", "  'id, title';", "supabase.from('weddings').select(`${WEDDING_COLUMNS}, created_at`).eq('owner_user_id', u);"].join("\n"),
     );
     expect(queries).toEqual([{ table: "weddings", columns: ["id", "title", "created_at", "owner_user_id"] }]);
+  });
+
+  it("accepts the end of the generated file the write step is supposed to leave", () => {
+    expect(checkGeneratedTypesEof("export const x = 1\n} as const\n")).toEqual([]);
+    // CRLF in the working copy is autocrlf, not a defect.
+    expect(checkGeneratedTypesEof("} as const\r\n")).toEqual([]);
+  });
+
+  it("refuses the blank line the generator itself prints after `} as const`", () => {
+    // Measured against `supabase gen types typescript --local` on CLI 2.118.0: stdout ends
+    // `} as const\n\n`. A regeneration that writes stdout verbatim therefore has to be
+    // caught, not reviewed by eye.
+    expect(checkGeneratedTypesEof("} as const\n\n")).toHaveLength(1);
+    expect(checkGeneratedTypesEof("} as const\r\n\r\n")).toHaveLength(1);
+    expect(checkGeneratedTypesEof("} as const")).toHaveLength(1);
   });
 
   it("agrees with the repository as it stands", () => {

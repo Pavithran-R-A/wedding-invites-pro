@@ -42,7 +42,9 @@ describe("domain contract", () => {
     // The inventory below is only as trustworthy as this line: an unparsed statement would mean
     // the assertions are looking at a schema with holes in it.
     expect(unparsed).toEqual([]);
-    expect(publicKeys.length).toBe(18);
+    // 19 since Stage 4 added `tradition_pack_releases`; the count is the tripwire that makes
+    // the inventory assertions below worth reading.
+    expect(publicKeys.length).toBe(19);
     expect(privateKeys.sort()).toEqual(["private.access_tokens", "private.audit_events"]);
     expect(legacyKeys.length).toBe(8);
   });
@@ -75,11 +77,14 @@ describe("domain contract", () => {
     ]) {
       expect(hostile).toMatch(IDENTITY_VOCABULARY);
     }
-    // `section_key` and `tradition_pack_id` are the near misses that must stay legal: the first is
-    // a document region, the second is ADR 0003's host-selected behaviour pack.
+    // `section_key` and the pack selection columns are the near misses that must stay legal: the
+    // first is a document region, the others are ADR 0003's host-selected behaviour pack, which
+    // Stage 4 pointed at a release rather than at a concept.
     for (const allowed of [
       "public.approval_feedback.section_key",
-      "public.weddings.tradition_pack_id",
+      "public.weddings.tradition_pack_release_id",
+      "public.invitation_versions.tradition_pack_release_id",
+      "public.tradition_pack_releases.definition",
       "public.tradition_packs.pack_key",
       "public.wedding_people.group_label",
     ]) {
@@ -88,7 +93,8 @@ describe("domain contract", () => {
   });
 
   it("attaches heritage only to the wedding, never to a person or a guest", () => {
-    expect(namesOf("public.weddings")).toContain("tradition_pack_id");
+    expect(namesOf("public.weddings")).toContain("tradition_pack_release_id");
+    expect(namesOf("public.weddings")).not.toContain("tradition_pack_id");
     for (const key of [
       "public.wedding_people",
       "public.guest_households",

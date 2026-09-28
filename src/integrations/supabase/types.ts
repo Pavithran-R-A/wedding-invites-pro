@@ -1,5 +1,5 @@
-// Database types for the canonical Stage 3 schema: the RLS-governed tables in
-// `public`, and the seven browser-callable RPCs in `api`.
+// Database types for the canonical Stage 4 schema: the RLS-governed tables in `public`,
+// and the seven browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -11,19 +11,42 @@
 // No remote project was connected or queried to produce it, and `--linked` is not
 // part of the command because it must not become one.
 //
+// Two edits sit between that stdout and this file, and both are mechanical: the blank
+// line the generator prints after `} as const` is dropped (rule 5 of
+// `npm run dbtypes:check` is what notices if it comes back), and the text is run through
+// `prettier --no-semi` so the file stays readable. Prettier is not a project dependency;
+// no check reads this file's layout, only its structure.
+//
+// That qualifier is load-bearing, because the previous version of this file had been
+// tidied further by hand. `NonNullable<Json>` had been replaced with `Json` on six NOT NULL
+// jsonb columns (in each of their `Row`, `Insert` and `Update` forms), and the guest door's
+// empty argument list spelled as `never` rather than the generator's
+// `Record<PropertyKey, never>`. Both describe the same schema, which is why
+// `dbtypes:check`, which compares column names, stayed green over that change. It is the
+// generator's own text again now, because a file that says it was generated has to be
+// re-derivable from the generator — and because a reader who trusts this header should be
+// able to diff a fresh regeneration against it and see only schema changes.
+//
 // `--schema` names exactly two schemas, and the reason is the grant model:
-//   * `private` holds `access_tokens`, `audit_events`, the snapshot builder and the
-//     projection. It is not exposed to PostgREST at all, so a type that named it
-//     would describe a surface the client cannot reach and invite someone to try.
+//   * `private` holds `access_tokens`, `audit_events`, the snapshot builder, the
+//     projection and the Stage 4 release guard. It is not exposed to PostgREST at all, so
+//     a type that named it would describe a surface the client cannot reach and invite
+//     someone to try.
 //   * `legacy` holds archived scaffold tables for the same reason.
 // `npm run dbtypes:check` fails if either reappears here, and also if this file stops
 // matching the migrations that produce it.
 //
-// Note what `api.Functions` says about the guest door: `resolve_public_invitation`
-// has `Args: never`. That is the token-never-in-a-URL rule expressed as a type —
-// there is no parameter to pass a credential through, and regenerating this file is
-// how a later change to that signature becomes visible here instead of surprising
-// the client at runtime.
+// Note what `api.Functions` says about the guest door: `resolve_public_invitation` has
+// `Args: Record<PropertyKey, never>`. That is the token-never-in-a-URL rule expressed as a
+// type — there is no parameter to pass a credential through, and regenerating this file is
+// how a later change to that signature becomes visible here instead of surprising the
+// client at runtime.
+//
+// Stage 4 is why the `tradition_packs` entry shrank and a `tradition_pack_releases` entry
+// appeared beside it: the pack is now the concept (slug, display name, scope statement) and
+// the release is the frozen definition with its review provenance. `weddings` and
+// `invitation_versions` renamed their `tradition_pack_id` to `tradition_pack_release_id`,
+// so a selection and a pinned snapshot both point at a release, never at a moving concept.
 export type Json =
   | string
   | number
@@ -58,7 +81,10 @@ export type Database = {
         }
         Returns: Json
       }
-      resolve_public_invitation: { Args: never; Returns: Json }
+      resolve_public_invitation: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
       revoke_invitation_publication: {
         Args: { p_wedding_id: string }
         Returns: Json
@@ -186,7 +212,7 @@ export type Database = {
           created_at: string
           display_name: string
           id: string
-          layout_settings: Json
+          layout_settings: NonNullable<Json>
           preview_svg: string | null
           reviewed_at: string | null
           reviewed_by: string | null
@@ -200,7 +226,7 @@ export type Database = {
           created_at?: string
           display_name: string
           id?: string
-          layout_settings?: Json
+          layout_settings?: NonNullable<Json>
           preview_svg?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
@@ -214,7 +240,7 @@ export type Database = {
           created_at?: string
           display_name?: string
           id?: string
-          layout_settings?: Json
+          layout_settings?: NonNullable<Json>
           preview_svg?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
@@ -359,21 +385,21 @@ export type Database = {
       }
       invitation_drafts: {
         Row: {
-          content: Json
+          content: NonNullable<Json>
           created_at: string
           id: string
           updated_at: string
           wedding_id: string
         }
         Insert: {
-          content?: Json
+          content?: NonNullable<Json>
           created_at?: string
           id?: string
           updated_at?: string
           wedding_id: string
         }
         Update: {
-          content?: Json
+          content?: NonNullable<Json>
           created_at?: string
           id?: string
           updated_at?: string
@@ -395,10 +421,10 @@ export type Database = {
           created_by: string
           design_template_id: string | null
           id: string
-          snapshot: Json
+          snapshot: NonNullable<Json>
           snapshot_schema_version: number
           supersedes_version_id: string | null
-          tradition_pack_id: string | null
+          tradition_pack_release_id: string | null
           version_number: number
           wedding_id: string
         }
@@ -407,10 +433,10 @@ export type Database = {
           created_by: string
           design_template_id?: string | null
           id?: string
-          snapshot: Json
+          snapshot: NonNullable<Json>
           snapshot_schema_version?: number
           supersedes_version_id?: string | null
-          tradition_pack_id?: string | null
+          tradition_pack_release_id?: string | null
           version_number: number
           wedding_id: string
         }
@@ -419,10 +445,10 @@ export type Database = {
           created_by?: string
           design_template_id?: string | null
           id?: string
-          snapshot?: Json
+          snapshot?: NonNullable<Json>
           snapshot_schema_version?: number
           supersedes_version_id?: string | null
-          tradition_pack_id?: string | null
+          tradition_pack_release_id?: string | null
           version_number?: number
           wedding_id?: string
         }
@@ -435,10 +461,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "invitation_versions_tradition_pack_id_fkey"
-            columns: ["tradition_pack_id"]
+            foreignKeyName: "invitation_versions_tradition_pack_release_id_fkey"
+            columns: ["tradition_pack_release_id"]
             isOneToOne: false
-            referencedRelation: "tradition_packs"
+            referencedRelation: "tradition_pack_releases"
             referencedColumns: ["id"]
           },
           {
@@ -537,7 +563,7 @@ export type Database = {
       }
       rsvp_responses: {
         Row: {
-          answers: Json
+          answers: NonNullable<Json>
           attending: string
           created_at: string
           event_id: string
@@ -550,7 +576,7 @@ export type Database = {
           wedding_id: string
         }
         Insert: {
-          answers?: Json
+          answers?: NonNullable<Json>
           attending: string
           created_at?: string
           event_id: string
@@ -563,7 +589,7 @@ export type Database = {
           wedding_id: string
         }
         Update: {
-          answers?: Json
+          answers?: NonNullable<Json>
           attending?: string
           created_at?: string
           event_id?: string
@@ -592,19 +618,96 @@ export type Database = {
           },
         ]
       }
+      tradition_pack_releases: {
+        Row: {
+          approved_at: string | null
+          author_label: string
+          changelog: string | null
+          created_at: string
+          definition: NonNullable<Json>
+          definition_schema_version: number
+          deprecated_at: string | null
+          id: string
+          languages: string[]
+          machine_assistance_notes: string | null
+          machine_assisted: boolean
+          pack_id: string
+          release_number: number
+          review_basis: string | null
+          review_label: string | null
+          review_scope: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          reviewed_languages: string[] | null
+          source_reference: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          author_label: string
+          changelog?: string | null
+          created_at?: string
+          definition: NonNullable<Json>
+          definition_schema_version: number
+          deprecated_at?: string | null
+          id?: string
+          languages: string[]
+          machine_assistance_notes?: string | null
+          machine_assisted?: boolean
+          pack_id: string
+          release_number: number
+          review_basis?: string | null
+          review_label?: string | null
+          review_scope?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewed_languages?: string[] | null
+          source_reference?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          author_label?: string
+          changelog?: string | null
+          created_at?: string
+          definition?: NonNullable<Json>
+          definition_schema_version?: number
+          deprecated_at?: string | null
+          id?: string
+          languages?: string[]
+          machine_assistance_notes?: string | null
+          machine_assisted?: boolean
+          pack_id?: string
+          release_number?: number
+          review_basis?: string | null
+          review_label?: string | null
+          review_scope?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewed_languages?: string[] | null
+          source_reference?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tradition_pack_releases_pack_id_fkey"
+            columns: ["pack_id"]
+            isOneToOne: false
+            referencedRelation: "tradition_packs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tradition_packs: {
         Row: {
           created_at: string
           display_name: string
           id: string
           pack_key: string
-          review_notes: string | null
-          reviewed_at: string | null
-          reviewed_by: string | null
-          revision: number
-          status: string
-          structure: Json
-          supported_languages: string[]
+          scope_statement: string
           updated_at: string
         }
         Insert: {
@@ -612,13 +715,7 @@ export type Database = {
           display_name: string
           id?: string
           pack_key: string
-          review_notes?: string | null
-          reviewed_at?: string | null
-          reviewed_by?: string | null
-          revision: number
-          status?: string
-          structure?: Json
-          supported_languages?: string[]
+          scope_statement: string
           updated_at?: string
         }
         Update: {
@@ -626,13 +723,7 @@ export type Database = {
           display_name?: string
           id?: string
           pack_key?: string
-          review_notes?: string | null
-          reviewed_at?: string | null
-          reviewed_by?: string | null
-          revision?: number
-          status?: string
-          structure?: Json
-          supported_languages?: string[]
+          scope_statement?: string
           updated_at?: string
         }
         Relationships: []
@@ -869,9 +960,9 @@ export type Database = {
           lifecycle_status: string
           owner_user_id: string
           primary_language: string | null
-          style_settings: Json
+          style_settings: NonNullable<Json>
           title: string
-          tradition_pack_id: string | null
+          tradition_pack_release_id: string | null
           updated_at: string
         }
         Insert: {
@@ -883,9 +974,9 @@ export type Database = {
           lifecycle_status?: string
           owner_user_id: string
           primary_language?: string | null
-          style_settings?: Json
+          style_settings?: NonNullable<Json>
           title: string
-          tradition_pack_id?: string | null
+          tradition_pack_release_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -897,9 +988,9 @@ export type Database = {
           lifecycle_status?: string
           owner_user_id?: string
           primary_language?: string | null
-          style_settings?: Json
+          style_settings?: NonNullable<Json>
           title?: string
-          tradition_pack_id?: string | null
+          tradition_pack_release_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -911,10 +1002,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "weddings_tradition_pack_id_fkey"
-            columns: ["tradition_pack_id"]
+            foreignKeyName: "weddings_tradition_pack_release_id_fkey"
+            columns: ["tradition_pack_release_id"]
             isOneToOne: false
-            referencedRelation: "tradition_packs"
+            referencedRelation: "tradition_pack_releases"
             referencedColumns: ["id"]
           },
         ]
@@ -970,8 +1061,7 @@ export type Tables<
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -995,8 +1085,7 @@ export type TablesInsert<
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1020,8 +1109,7 @@ export type TablesUpdate<
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
   EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -1062,4 +1150,3 @@ export const Constants = {
     },
   },
 } as const
-

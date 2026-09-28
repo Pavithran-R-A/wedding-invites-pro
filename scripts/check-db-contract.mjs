@@ -20,6 +20,10 @@
  *   2. every column the data layer selects or filters on exists on that table;
  *   3. `private` and `legacy` have no surface in client types;
  *   4. no scaffold column (paid_status, selected_features, …) came back as canonical.
+ *   5. the generated file ends the way the write step leaves it — one newline, not the
+ *      blank line the generator itself prints;
+ *   6. the section vocabulary the Stage 4 release guard accepts is the section vocabulary
+ *      `src/lib/traditionPackContract.ts` renders against, name for name.
  *
  * Anything the SQL reader cannot classify is reported, never skipped: a silently ignored
  * statement would leave this check green after it had stopped looking.
@@ -167,14 +171,66 @@ function splitTopLevel(body) {
   return parts.map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length > 0);
 }
 
+/**
+ * The clause list of one `ALTER TABLE`, cut on commas that are inside neither parentheses
+ * nor quotes. `splitTopLevel` cannot serve here: a Stage 4 constraint body is
+ * `CHECK (pack_key ~ '^[a-z][a-z0-9]*(_[a-z0-9]*)*$')`, whose parentheses live inside a
+ * string literal, and counting them would leave the splitter inside a paren for the rest
+ * of the statement — every following clause, including `ADD COLUMN scope_statement`, would
+ * then be swallowed and the inventory would silently keep a column the migration dropped.
+ */
+function splitClauses(text) {
+  const parts = [];
+  let depth = 0;
+  let chunk = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const close = skipString(text, i);
+      chunk += text.slice(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth -= 1;
+    else if (ch === "," && depth === 0) {
+      parts.push(chunk);
+      chunk = "";
+      i += 1;
+      continue;
+    }
+    chunk += ch;
+    i += 1;
+  }
+  parts.push(chunk);
+  return parts.map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length > 0);
+}
+
 const CREATE_TABLE = /^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)/i;
 const SET_SCHEMA = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\s+SET\s+SCHEMA\s+([a-z_]+)/i;
-/** Column inventory changes this reader cannot fold in. Constraint edits are excluded
- *  deliberately: they change what a column accepts, not which columns exist, and this
- *  check is about the inventory the client types claim. */
-const DRIFT = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\s+(ADD|DROP|ALTER)\s+COLUMN\b/i;
-const RENAME = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\s+RENAME/i;
+/**
+ * Column inventory changes this reader folds rather than reports. It used to report them:
+ * the Stage 4 migration retires seven columns from `public.tradition_packs` and renames a
+ * selection column on two tables, and a reader that only *nags* about an edit ends up
+ * nagging forever, which trains everyone to ignore a gate that is actually useful. Folding
+ * is what makes the checker able to tell whether the types file caught up.
+ */
+const ALTER_TABLE = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\s+(.+)$/is;
+const TABLE_RENAME = /^\s*RENAME\s+TO\s+([a-z_]+)\b/i;
+const ADD_COLUMN = /^\s*ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\b/i;
+const DROP_COLUMN = /^\s*DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?([a-z_]+)\b/i;
+const RENAME_COLUMN = /^\s*RENAME\s+(?:COLUMN\s+)?([a-z_]+)\s+TO\s+([a-z_]+)\b/i;
+/**
+ * Clauses that change what a column accepts, who owns the table, or which rows the database
+ * will let through — not which columns exist. This check compares an inventory, so these are
+ * correctly silent. `ALTER COLUMN … TYPE`, `ADD CONSTRAINT …`, `ENABLE ROW LEVEL SECURITY`
+ * and `SET NOT NULL` all belong here; the Stage 2/3/4 migrations use each of them.
+ */
+const INVENTORY_NEUTRAL =
+  /^\s*(?:ADD|DROP)\s+CONSTRAINT\b|^\s*(?:ADD|DROP)\s+(?:PRIMARY|FOREIGN|UNIQUE|EXCLUDE|CHECK|SPACE)\b|^\s*ALTER\s+COLUMN\b|^\s*(?:ENABLE|DISABLE|FORCE)\s+(?:ROW\s+SECURITY|ROW\s+LEVEL\s+SECURITY|REPLICA\s+IDENTITY|TRIGGER|RULE)\b|^\s*(?:OWNER|SET|RESET|VALIDATE|ATTACH|DETACH|INHERIT|NO|OF|NOT|CLUSTER|REPLICA|LOGGED|UNLOGGED)\b/i;
 const BARE_CREATE_TABLE = /^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z_0-9]*)\s*\(/i;
+
 
 /**
  * Migrations are forward-only and ordered, so the schema is their fold: create, then move.
@@ -222,17 +278,55 @@ export function parseMigrations(sources) {
         tables.delete(key);
         continue;
       }
-      const drift = DRIFT.exec(statement);
-      const renamed = drift ? null : RENAME.exec(statement);
-      const hit = drift || renamed;
-      if (hit) {
-        const op = drift ? `${drift[3].toUpperCase()} COLUMN` : "RENAME";
-        const key = `${hit[1]}.${hit[2]}`;
-        // Only a `public` table's inventory reaches the client types; an edit inside
-        // `private` or `legacy` changes nothing this check compares.
-        if (hit[1] === "public" && tables.has(key)) {
-          unparsed.push(`${fileName}: ${op} on ${key} changes the inventory this check cannot fold — regenerate the types and extend the reader`);
+      const altered = ALTER_TABLE.exec(statement);
+      if (altered) {
+        const [, schema, table, clauses] = altered;
+        const key = `${schema}.${table}`;
+        const moved = TABLE_RENAME.exec(clauses);
+        if (moved) {
+          // A table rename keeps its columns; only the qualified name changes. If the
+          // reader skipped this, the old name would linger as a table the client types are
+          // told to describe and the new one would appear as missing.
+          if (!tables.has(key)) {
+            unparsed.push(`${fileName}: renames ${key} to ${schema}.${moved[1]}, but no earlier statement created it`);
+            continue;
+          }
+          tables.set(`${schema}.${moved[1]}`, tables.get(key));
+          tables.delete(key);
+          continue;
         }
+        const columns = tables.has(key) ? tables.get(key) : null;
+        for (const clause of splitClauses(clauses)) {
+          if (INVENTORY_NEUTRAL.test(clause)) continue;
+          const edit = RENAME_COLUMN.exec(clause) ?? ADD_COLUMN.exec(clause) ?? DROP_COLUMN.exec(clause);
+          if (!edit) {
+            unparsed.push(
+              `${fileName}: cannot classify an ALTER TABLE ${key} clause: ${clause.slice(0, 80)} — extend the reader rather than trust the inventory`,
+            );
+            continue;
+          }
+          // An inventory edit on a table this fold never saw is worth reporting even when
+          // the table is not `public`: it means the migration edits something the repo did
+          // not create, which is exactly how a hand-edited schema stays invisible here.
+          if (columns === null) {
+            unparsed.push(`${fileName}: changes the columns of ${key}, but no earlier statement created it`);
+            break;
+          }
+          if (edit[2] !== undefined) {
+            const at = columns.indexOf(edit[1]);
+            if (at < 0) {
+              unparsed.push(`${fileName}: renames ${key}.${edit[1]}, which no earlier statement gave it`);
+              break;
+            }
+            columns[at] = edit[2];
+          } else if (/^\s*ADD\b/i.test(clause)) {
+            if (!columns.includes(edit[1])) columns.push(edit[1]);
+          } else {
+            const at = columns.indexOf(edit[1]);
+            if (at >= 0) columns.splice(at, 1);
+          }
+        }
+        continue;
       }
     }
   }
@@ -324,15 +418,19 @@ function membersOf(text, start, end) {
   let chunkStart = start;
   const flush = (stop) => {
     const chunk = text.slice(chunkStart, stop);
-    const key = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:/.exec(chunk);
+    // A generated file may name a member `Row:` or `"Row":` — the current CLI quotes every
+    // identifier it emits, so a reader that only knew the unquoted form would report each
+    // table of a freshly generated file as missing and each column of it as absent.
+    const key = /^\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`|([A-Za-z_$][A-Za-z0-9_$]*))\??\s*:/.exec(chunk);
     if (key) {
+      const name = key[1] ?? key[2] ?? key[3] ?? key[4];
       const after = chunkStart + key[0].length;
       const open = text.indexOf("{", after);
       const nested = open > 0 && open < stop ? (() => {
         const close = matchingBrace(text, open);
         return close < 0 ? [] : membersOf(text, open + 1, close);
       })() : [];
-      members.push({ key: key[1], members: nested });
+      members.push({ key: name, members: nested });
     }
     chunkStart = stop + 1;
   };
@@ -456,6 +554,240 @@ export function checkContract({ schemaTables, typeTables, queries }) {
   return findings;
 }
 
+/**
+ * The bytes at the end of the generated file, not its types.
+ *
+ * `supabase gen types typescript` prints a blank line after its closing `} as const`
+ * (measured on CLI 2.118.0: stdout ends `} as const\n\n`). Left in place, that blank line
+ * made every later write to the end of the file a `git diff --check` whitespace error, so
+ * it is stripped by the step that writes the file — and checked here, because the only
+ * thing that puts it back is the regeneration this rule exists to police.
+ *
+ * Line endings are not checked: `core.autocrlf` on this machine means the working copy is
+ * CRLF and the stored blob is LF, and neither is a defect.
+ */
+export function checkGeneratedTypesEof(text) {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const trailingNewlines = normalized.length - normalized.replace(/\n+$/, "").length;
+  if (trailingNewlines === 1) return [];
+  return [
+    `${TYPES_FILE} must end with exactly one newline; it ends with ${trailingNewlines}. The generator prints a blank line after "} as const" — drop it when writing the file.`,
+  ];
+}
+
+/**
+ * The section vocabulary `private.guard_tradition_pack_release()` accepts, read out of the
+ * migration and compared with the lists `src/lib/traditionPackContract.ts` gives the client.
+ *
+ * This is the rule that makes that file's header comment true rather than aspirational. The
+ * guard is the gate that decides what may be stored; the client lists decide what the app has a
+ * renderer for. If the two differ in the permissive direction, a candidate definition validates
+ * in the browser and is refused on write, which is the worst possible time to discover a rule;
+ * if they differ in the strict direction, the editor refuses a release the database would have
+ * accepted, and someone will "fix" it by weakening the client. Either way the fix is a
+ * conversation about the vocabulary, so the checker is what starts that conversation early.
+ *
+ * Every site is located by an anchor that has to be present. A site that cannot be found is a
+ * finding, never a skip: a checker that silently stopped looking would report parity forever.
+ */
+const CONTRACT_FILE = "src/lib/traditionPackContract.ts";
+const GUARD_ANCHOR = "CREATE FUNCTION private.guard_tradition_pack_release()";
+
+const VOCABULARY_SITES = [
+  { name: "definition keys", clientConst: "PACK_DEFINITION_KEYS", anchor: "FROM jsonb_object_keys(NEW.definition) k" },
+  { name: "section field keys", clientConst: "PACK_SECTION_FIELD_KEYS", anchor: "FROM jsonb_object_keys(v_section) k" },
+  { name: "section slots", clientConst: "PACK_SECTION_KEYS", anchor: "(v_section ->> 'section_key') NOT IN" },
+  { name: "section kinds", clientConst: "PACK_SECTION_KINDS", anchor: "v_kind IS NULL OR v_kind NOT IN" },
+  { name: "host fields", clientConst: "PACK_HOST_FIELDS", anchor: "v_bad NOT IN" },
+  { name: "event vocabulary entry keys", clientConst: "PACK_EVENT_ENTRY_KEYS", anchor: "jsonb_object_keys(ev) k" },
+  { name: "design guidance keys", clientConst: "PACK_DESIGN_GUIDANCE_KEYS", anchor: "FROM jsonb_object_keys(NEW.definition -> 'design_guidance') k" },
+];
+
+/** Quoted names inside the first balanced paren group after `from`, or null if there is none. */
+function quotedGroup(sql, from, within) {
+  const open = sql.indexOf("(", from);
+  if (open < 0 || (within !== undefined && open - from > within)) return null;
+  let depth = 0;
+  for (let i = open; i < sql.length; i += 1) {
+    if (sql[i] === "(") depth += 1;
+    else if (sql[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return [...sql.slice(open, i).matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    }
+  }
+  return null;
+}
+
+export function extractGuardVocabulary(sources) {
+  const files = Object.entries(sources).filter(([, text]) => text.includes(GUARD_ANCHOR));
+  if (files.length !== 1) {
+    return { findings: [`no single migration defines ${GUARD_ANCHOR} (found ${files.length})`], lists: {} };
+  }
+  const [file, text] = files[0];
+  const body = text.slice(text.indexOf(GUARD_ANCHOR));
+  const findings = [];
+  const lists = {};
+  for (const site of VOCABULARY_SITES) {
+    const at = body.indexOf(site.anchor);
+    if (at < 0) {
+      findings.push(`${file}: could not locate the guard's ${site.name} list (anchor "${site.anchor}" is gone)`);
+      continue;
+    }
+    const fromNotIn = body.indexOf("NOT IN", at + site.anchor.length - "NOT IN".length);
+    const found = fromNotIn >= 0 ? quotedGroup(body, fromNotIn + "NOT IN".length, 40) : null;
+    if (!found || found.length === 0) {
+      findings.push(`${file}: the guard's ${site.name} list could not be read after anchor "${site.anchor}"`);
+      continue;
+    }
+    lists[site.clientConst] = found;
+  }
+  return { findings, lists };
+}
+
+/** `export const NAME = ['a', 'b'] as const` — the shape every list in the contract file uses. */
+export function extractClientVocabulary(text) {
+  const findings = [];
+  const lists = {};
+  for (const site of VOCABULARY_SITES) {
+    const match = new RegExp(`export const ${site.clientConst} = \\[([^\\]]*)\\] as const`).exec(text);
+    if (!match) {
+      findings.push(`${CONTRACT_FILE}: ${site.clientConst} is not an \`as const\` array of quoted names`);
+      continue;
+    }
+    const names = [...match[1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    if (names.length === 0) {
+      findings.push(`${CONTRACT_FILE}: ${site.clientConst} is empty`);
+      continue;
+    }
+    lists[site.clientConst] = names;
+  }
+  return { findings, lists };
+}
+
+export function checkTraditionPackVocabulary({ guard, client }) {
+  const findings = [...guard.findings, ...client.findings];
+  for (const site of VOCABULARY_SITES) {
+    const a = guard.lists[site.clientConst];
+    const b = client.lists[site.clientConst];
+    if (!a || !b) continue; // already reported by whichever side could not read it
+    const missing = a.filter((name) => !b.includes(name));
+    const extra = b.filter((name) => !a.includes(name));
+    if (missing.length === 0 && extra.length === 0) continue;
+    findings.push(
+      `${CONTRACT_FILE} ${site.clientConst} is not the guard's ${site.name} list: ` +
+        `client is missing [${missing.join(", ")}], client names what the guard does not [${extra.join(", ")}]`,
+    );
+  }
+  return findings;
+}
+
+/**
+ * `private.default_invitation_definition()` versus `NO_PACK_SECTIONS`, field by field.
+ *
+ * The client copy is what lets a document with no section list (a version frozen before
+ * Stage 4, which the projection still serves) go through the same renderer loop as one with
+ * a pack. A copy is only honest while it matches, and the two live in different languages in
+ * different directories, so nothing but this check keeps them the same list: a section added
+ * to the database's default that the client does not know drops off every legacy page in
+ * silence, and a section the client invented renders on a legacy page that the database would
+ * never produce for a new one.
+ *
+ * Read as data, not as text: the SQL side is parsed as the JSON literal it is, so a reflow of
+ * the migration's formatting cannot make the check lie in either direction.
+ */
+const SECTIONS_FILE = "src/lib/invitationSections.ts";
+const DEFAULT_DEFINITION_ANCHOR = "CREATE FUNCTION private.default_invitation_definition()";
+
+export function extractDefaultDefinition(sources) {
+  const files = Object.entries(sources).filter(([, text]) => text.includes(DEFAULT_DEFINITION_ANCHOR));
+  if (files.length !== 1) {
+    return {
+      findings: [`no single migration defines ${DEFAULT_DEFINITION_ANCHOR} (found ${files.length})`],
+      rows: [],
+    };
+  }
+  const [file, text] = files[0];
+  const body = text.slice(text.indexOf(DEFAULT_DEFINITION_ANCHOR));
+  const open = body.indexOf("'{");
+  const close = body.indexOf("'::jsonb");
+  if (open < 0 || close < 0 || close < open) {
+    return { findings: [`${file}: the default invitation definition is not a single quoted JSON literal`], rows: [] };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(body.slice(open + 1, close));
+  } catch (error) {
+    return { findings: [`${file}: the default invitation definition is not valid JSON (${error.message})`], rows: [] };
+  }
+  const sections = Array.isArray(parsed.sections) ? parsed.sections : null;
+  if (sections === null) {
+    return { findings: [`${file}: the default invitation definition declares no sections array`], rows: [] };
+  }
+  const rows = sections.map((section, index) => {
+    const keys = Object.keys(section.heading ?? {});
+    return {
+      position: section.position,
+      key: section.section_key,
+      kind: section.kind,
+      hostField: section.host_field ?? null,
+      headingLanguages: keys,
+      headingEnglish: keys.length === 1 && keys[0] === "en" ? section.heading.en : null,
+      path: `${file} default_invitation_definition sections[${index}]`,
+    };
+  });
+  return { findings: [], rows };
+}
+
+const CLIENT_SECTION_ENTRY =
+  /\{\s*key:\s*'([^']+)',\s*position:\s*(\d+),\s*kind:\s*'([^']+)',\s*hostField:\s*(null|'[^']*'),\s*headingEnglish:\s*(null|'[^']*')\s*\}/g;
+
+export function extractClientDefaultSections(text) {
+  const block = /export const NO_PACK_SECTIONS[^=]*=([\s\S]*?)\n\];/.exec(text);
+  if (!block) {
+    return { findings: [`${SECTIONS_FILE}: NO_PACK_SECTIONS is not an exported array literal`], rows: [] };
+  }
+  const rows = [...block[1].matchAll(CLIENT_SECTION_ENTRY)].map((m) => ({
+    position: Number(m[2]),
+    key: m[1],
+    kind: m[3],
+    hostField: m[4] === "null" ? null : m[4].slice(1, -1),
+    headingEnglish: m[5] === "null" ? null : m[5].slice(1, -1),
+    path: `${SECTIONS_FILE} ${m[1]}`,
+  }));
+  const declared = (block[1].match(/\{\s*key:/g) ?? []).length;
+  if (rows.length !== declared) {
+    return {
+      findings: [
+        `${SECTIONS_FILE}: NO_PACK_SECTIONS has ${declared} entries but only ${rows.length} match the documented field shape (key, position, kind, hostField, headingEnglish)`,
+      ],
+      rows,
+    };
+  }
+  if (rows.length === 0) {
+    return { findings: [`${SECTIONS_FILE}: NO_PACK_SECTIONS declares no sections`], rows };
+  }
+  return { findings: [], rows };
+}
+
+export function checkDefaultDefinitionMirror({ sql, client }) {
+  const findings = [...sql.findings, ...client.findings];
+  if (sql.findings.length || client.findings.length) return findings;
+  const label = (row) => `${row.position}|${row.key}|${row.kind}|${row.hostField ?? "-"}|${row.headingEnglish ?? "-"}`;
+  const a = sql.rows.map(label);
+  const b = client.rows.map(label);
+  if (a.join(",") === b.join(",")) return findings;
+  findings.push(
+    `${SECTIONS_FILE} NO_PACK_SECTIONS is not the database's default invitation definition. ` +
+      `database: [${a.join(", ")}]  client: [${b.join(", ")}]. ` +
+      `Both lists decide what a wedding with no tradition pack is drawn from — the SQL one for a ` +
+      `document frozen from today, the client one for a legacy document that carries no section list ` +
+      `— so they must be the same order, the same slots, the same kinds and the same host fields. ` +
+      `Change both, or change neither; do not make the client copy the SQL one's behaviour by adding ` +
+      `a branch to the renderer.`,
+  );
+  return findings;
+}
+
 function readDataLayerFiles(root) {
   return readdirSync(join(root, DATA_LAYER_DIR))
     .filter((name) => name.endsWith(".ts") && name !== "types.ts")
@@ -483,10 +815,38 @@ export function readDomain(root = REPO_ROOT) {
 }
 
 export function runChecks(root = REPO_ROOT) {
-  const sources = readMigrationSources(root);  const { tables, unparsed } = parseMigrations(sources);
-  const typeTables = parseGeneratedTypes(readFileSync(join(root, TYPES_FILE), "utf8"));
+  const sources = readMigrationSources(root);
+  const { tables, unparsed } = parseMigrations(sources);
+  const typesText = readFileSync(join(root, TYPES_FILE), "utf8");
+  const typeTables = parseGeneratedTypes(typesText);
   const queries = readDataLayerFiles(root).flatMap(([, text]) => extractDataLayerQueries(text));
-  const findings = [...unparsed, ...checkContract({ schemaTables: tables, typeTables, queries })];
+  const guard = extractGuardVocabulary(sources);
+  let contractText = "";
+  let contractMissing = null;
+  try {
+    contractText = readFileSync(join(root, CONTRACT_FILE), "utf8");
+  } catch {
+    contractMissing = [`${CONTRACT_FILE} does not exist, so the guard's section vocabulary has no client counterpart to compare with`];
+  }
+  const client = extractClientVocabulary(contractText);
+  const defaultSql = extractDefaultDefinition(sources);
+  let sectionsText = "";
+  let sectionsMissing = null;
+  try {
+    sectionsText = readFileSync(join(root, SECTIONS_FILE), "utf8");
+  } catch {
+    sectionsMissing = [`${SECTIONS_FILE} does not exist, so the database's default invitation definition has no client counterpart to compare with`];
+  }
+  const defaultClient = extractClientDefaultSections(sectionsText);
+  const findings = [
+    ...unparsed,
+    ...checkContract({ schemaTables: tables, typeTables, queries }),
+    ...checkGeneratedTypesEof(typesText),
+    ...(contractMissing ?? []),
+    ...(sectionsMissing ?? []),
+    ...checkTraditionPackVocabulary({ guard, client }),
+    ...checkDefaultDefinitionMirror({ sql: defaultSql, client: defaultClient }),
+  ];
   const publicCount = [...tables.keys()].filter((k) => k.startsWith("public.")).length;
   return {
     findings,
@@ -567,22 +927,80 @@ export function selfTest() {
   }
   const drifted = parseMigrations({
     "0004_d.sql": [
-      "CREATE TABLE public.weddings (id uuid);",
+      "CREATE TABLE public.weddings (id uuid, tradition_pack_id uuid);",
       "ALTER TABLE public.weddings ADD COLUMN paid_status text;",
+      "ALTER TABLE public.weddings ADD COLUMN note text NOT NULL, ADD CONSTRAINT note_shape CHECK (length(note) > 0), DROP COLUMN tradition_pack_id;",
+      "ALTER TABLE public.weddings RENAME COLUMN note TO remark;",
       "ALTER TABLE public.weddings RENAME TO nuptials;",
+      "CREATE TABLE public.untouched (id uuid);",
+      "ALTER TABLE public.untouched ENABLE ROW LEVEL SECURITY;",
+      "ALTER TABLE public.untouched ALTER COLUMN id SET NOT NULL;",
+      "ALTER TABLE public.untouched OWNER TO postgres;",
       "CREATE TABLE legacy.payments (id uuid);",
       "ALTER TABLE legacy.payments ADD COLUMN refund_paise bigint;",
     ].join("\n"),
   });
   const driftReport = drifted.unparsed.join("\n");
-  if (!driftReport.includes("ADD COLUMN on public.weddings")) {
-    failures.push("negative control not caught: ADD COLUMN on a client-visible table");
+  // Every one of those edits is folded, so the inventory has to read as the database would:
+  // `paid_status` and `remark` present, `tradition_pack_id` and `note` gone, the table under
+  // its new name. A fold that got this wrong would report a types file as drifting when the
+  // schema and the types agree, which is how a gate like this gets disabled.
+  if (drifted.tables.get("public.nuptials")?.join(",") !== "id,paid_status,remark") {
+    failures.push(`ALTER fold wrong: ${drifted.tables.get("public.nuptials")?.join(",") ?? "(no public.nuptials)"}`);
   }
-  if (!driftReport.includes("RENAME on public.weddings")) {
-    failures.push("negative control not caught: RENAME of a client-visible table");
+  if (drifted.tables.has("public.weddings")) {
+    failures.push("a RENAME TO left the old table name in the inventory");
+  }
+  for (const absent of ["tradition_pack_id", "note"]) {
+    if (drifted.tables.get("public.nuptials")?.includes(absent)) {
+      failures.push(`ALTER fold kept ${absent} after it was dropped or renamed`);
+    }
+  }
+  if (drifted.tables.get("public.untouched")?.join(",") !== "id") {
+    failures.push(`an inventory-neutral ALTER changed columns: ${drifted.tables.get("public.untouched")?.join(",")}`);
+  }
+  // The controls that keep the fold honest: an edit the classifier does not know has to be
+  // loud, and an edit of a table the fold never saw must not be silently applied to nothing.
+  const unclassified = parseMigrations({
+    "0005_e.sql": [
+      "CREATE TABLE public.weddings (id uuid);",
+      "ALTER TABLE public.weddings ADD COLUMN paid_status text;",
+    ].join("\n"),
+  });
+  if (unclassified.unparsed.length !== 0) {
+    failures.push(`ADD COLUMN was still reported as unfodable drift: ${unclassified.unparsed[0]}`);
+  }
+  const nonsense = parseMigrations({
+    "0006_f.sql": [
+      "CREATE TABLE public.weddings (id uuid);",
+      "ALTER TABLE public.weddings SECRETS OF THE REALM id;",
+    ].join("\n"),
+  });
+  if (!nonsense.unparsed.some((f) => f.includes("cannot classify an ALTER TABLE public.weddings"))) {
+    failures.push("negative control not caught: an ALTER clause the reader cannot classify");
+  }
+  const orphan = parseMigrations({
+    "0007_g.sql": ["ALTER TABLE public.phantoms ADD COLUMN paid_status text;"].join("\n"),
+  });
+  if (!orphan.unparsed.some((f) => f.includes("no earlier statement created it"))) {
+    failures.push("negative control not caught: an inventory edit of a table the fold never saw");
   }
   if (driftReport.includes("legacy.payments")) {
     failures.push("a non-client table's column edit was reported as drift");
+  }
+  // Renaming a column the table does not have must not quietly succeed: the fold would be
+  // describing a schema that does not exist, and the types file would then be blamed.
+  const badRename = parseMigrations({
+    "0008_h.sql": [
+      "CREATE TABLE public.weddings (id uuid);",
+      "ALTER TABLE public.weddings RENAME COLUMN tradition_pack_id TO tradition_pack_release_id;",
+    ].join("\n"),
+  });
+  if (!badRename.unparsed.some((f) => f.includes("renames public.weddings.tradition_pack_id"))) {
+    failures.push("negative control not caught: a rename of a column the table never had");
+  }
+  if (badRename.tables.get("public.weddings")?.join(",") !== "id") {
+    failures.push("a refused rename still changed the inventory");
   }
 
   const typesText = [
@@ -678,6 +1096,60 @@ export function selfTest() {
   if (regenerated.has("resolve_public_invitation") || regenerated.has("app_role")) {
     failures.push("brace reader treated a function or an enum as a table");
   }
+
+  // CLI 2.118.0 quotes every identifier it emits and separates a collapsed Row's columns
+  // with commas on one line: `"weddings": {` / `"id": string,"title": string`. That layout
+  // is the one a regeneration actually produces, and the reader used to see none of it —
+  // every table of a freshly generated file read as missing, which is a blind spot of the
+  // worst kind because the report is confident and wrong.
+  const quotedStyle = [
+    "export type Database = {",
+    '  "api": {',
+    "          Tables: {",
+    "            [_ in never]: never",
+    "          }",
+    "          Functions: {",
+    '            "resolve_public_invitation":',
+    '{ Args: Record<PropertyKey, never>; Returns: Json',
+    "                           }",
+    "          }",
+    '        },"public": {',
+    "          Tables: {",
+    '            "weddings": {',
+    "                  Row: {",
+    '                    "id": string,"title": string | null,"venue_ok": boolean',
+    "                  }",
+    "                  Insert: {",
+    '                    "id"?: string,"not_a_row_column"?: string',
+    "                  }",
+    "                  Relationships: [",
+    "                    {",
+    '      foreignKeyName: "weddings_design_template_id_fkey"',
+    '      columns: ["design_template_id"]',
+    "    }",
+    "                  ]",
+    '                },"venues": {',
+    "                  Row: {",
+    '                    "id": string,"wedding_id": string',
+    "                  }",
+    "                }",
+    "          }",
+    "          Enums: {",
+    '            "app_role": ("admin" | "user")',
+    "          }",
+    "        }",
+    "}",
+  ].join("\n");
+  const quoted = parseGeneratedTypes(quotedStyle);
+  if ((quoted.get("weddings") || []).join(",") !== "id,title,venue_ok") {
+    failures.push(`quoted-key reader missed columns: ${JSON.stringify(quoted.get("weddings") ?? null)}`);
+  }
+  if ((quoted.get("venues") || []).join(",") !== "id,wedding_id") {
+    failures.push("quoted-key reader could not read a quoted one-line Row");
+  }
+  if (quoted.has("resolve_public_invitation") || quoted.has("app_role") || quoted.has("not_a_row_column")) {
+    failures.push("quoted-key reader treated a function, an enum or an Insert key as a table or column");
+  }
   if (JSON.stringify([...goodTypes.keys()]) !== '["weddings"]') {
     failures.push(`old-layout fixture parsed as ${JSON.stringify([...goodTypes.keys()])}, expected only weddings`);
   }
@@ -728,6 +1200,185 @@ export function selfTest() {
     ["made_up_column", "a column the data layer invented"],
   ]) {
     if (!broken.some((f) => f.includes(needle))) failures.push(`negative control not caught: ${label}`);
+  }
+
+  // The vocabulary parity rule reads two files it does not own, so its own parsers are
+  // pinned here: which shape the guard's lists have to take to be read at all, and what
+  // the checker does when a site it depends on disappears.
+  const guardFixture = {
+    "0001_guard.sql": [
+      "CREATE FUNCTION private.guard_tradition_pack_release() RETURNS trigger AS $$",
+      "BEGIN",
+      "  IF EXISTS (SELECT 1 FROM jsonb_object_keys(NEW.definition) k WHERE k NOT IN ('sections', 'event_vocabulary', 'design_guidance')) THEN",
+      "    RAISE EXCEPTION 'unknown definition key';",
+      "  END IF;",
+      "  IF EXISTS (SELECT 1 FROM jsonb_object_keys(v_section) k WHERE k NOT IN ('section_key', 'position', 'kind')) THEN",
+      "    RAISE EXCEPTION 'unknown section field';",
+      "  END IF;",
+      "  IF (v_section ->> 'section_key') NOT IN ('opening', 'welcome') THEN",
+      "    RAISE EXCEPTION 'unknown section slot';",
+      "  END IF;",
+      "  IF v_kind IS NULL OR v_kind NOT IN ('text', 'people_list', 'event_list') THEN",
+      "    RAISE EXCEPTION 'unknown kind';",
+      "  END IF;",
+      "  IF v_bad NOT IN ('welcome', 'closing') THEN",
+      "    RAISE EXCEPTION 'unknown host field';",
+      "  END IF;",
+      "  IF EXISTS (SELECT 1 FROM jsonb_object_keys(ev) k WHERE k NOT IN ('event_key', 'labels')) THEN",
+      "    RAISE EXCEPTION 'unknown event entry key';",
+      "  END IF;",
+      "  IF EXISTS (SELECT 1 FROM jsonb_object_keys(NEW.definition -> 'design_guidance') k WHERE k NOT IN ('lead_size', 'motif_reference')) THEN",
+      "    RAISE EXCEPTION 'unknown design guidance key';",
+      "  END IF;",
+      "END;",
+      "$$ LANGUAGE plpgsql;",
+    ].join("\n"),
+  };
+  const clientFixture = [
+    "export const PACK_DEFINITION_KEYS = ['sections', 'event_vocabulary', 'design_guidance'] as const",
+    "export const PACK_SECTION_FIELD_KEYS = ['section_key', 'position', 'kind'] as const",
+    "export const PACK_SECTION_KEYS = ['opening', 'welcome'] as const",
+    "export const PACK_SECTION_KINDS = ['text', 'people_list', 'event_list'] as const",
+    "export const PACK_HOST_FIELDS = ['welcome', 'closing'] as const",
+    "export const PACK_EVENT_ENTRY_KEYS = ['event_key', 'labels'] as const",
+    "export const PACK_DESIGN_GUIDANCE_KEYS = ['lead_size', 'motif_reference'] as const",
+  ].join("\n");
+  const readGuard = extractGuardVocabulary(guardFixture);
+  if (readGuard.findings.length !== 0) {
+    failures.push(`guard fixture could not be read: ${readGuard.findings[0]}`);
+  }
+  if ((readGuard.lists.PACK_SECTION_KEYS || []).join(",") !== "opening,welcome") {
+    failures.push(`guard section slots read as ${(readGuard.lists.PACK_SECTION_KEYS || []).join(",")}`);
+  }
+  if ((readGuard.lists.PACK_EVENT_ENTRY_KEYS || []).join(",") !== "event_key,labels") {
+    failures.push(`guard event entry keys read as ${(readGuard.lists.PACK_EVENT_ENTRY_KEYS || []).join(",")}`);
+  }
+  if (checkTraditionPackVocabulary({ guard: readGuard, client: extractClientVocabulary(clientFixture) }).length !== 0) {
+    failures.push("negative control failed: two identical vocabularies reported drift");
+  }
+
+  const shortClient = extractClientVocabulary(clientFixture.replace("'opening', 'welcome'", "'welcome'"));
+  const drift = checkTraditionPackVocabulary({ guard: readGuard, client: shortClient });
+  if (drift.length !== 1 || !drift[0].includes("client is missing [opening]")) {
+    failures.push(`a client list missing one guard name was not reported: ${drift.join(" | ") || "(nothing)"}`);
+  }
+  const longClient = extractClientVocabulary(clientFixture.replace("['text', 'people_list'", "['text', 'caste_list', 'people_list'"));
+  const extraDrift = checkTraditionPackVocabulary({ guard: readGuard, client: longClient });
+  if (extraDrift.length !== 1 || !extraDrift[0].includes("client names what the guard does not [caste_list]")) {
+    failures.push(`a client list naming an unknown kind was not reported: ${extraDrift.join(" | ") || "(nothing)"}`);
+  }
+
+  // A site the checker depends on must announce its own disappearance. Silence here is the
+  // failure mode: a parser that stopped finding an anchor would report parity forever.
+  const lostSite = extractGuardVocabulary({ "0001_guard.sql": guardFixture["0001_guard.sql"].replace(/v_bad NOT IN \([^)]*\)/, "v_bad <> 'x'") });
+  if (lostSite.findings.length !== 1 || !lostSite.findings[0].includes("host fields")) {
+    failures.push(`a vanished guard site read as ${JSON.stringify(lostSite.findings)}`);
+  }
+  const blindGuard = extractGuardVocabulary({
+    "0001_guard.sql": "CREATE FUNCTION private.guard_tradition_pack_release() RETURNS trigger AS $$ BEGIN NULL; END; $$ LANGUAGE plpgsql;",
+  });
+  if (blindGuard.findings.length !== VOCABULARY_SITES.length) {
+    failures.push(`a guard with no readable lists reported ${blindGuard.findings.length}, expected ${VOCABULARY_SITES.length}`);
+  }
+  if (extractGuardVocabulary({}).findings.length !== 1) {
+    failures.push("a schema with no guard function at all did not report itself");
+  }
+  if (extractGuardVocabulary({
+    "0001_a.sql": guardFixture["0001_guard.sql"],
+    "0002_b.sql": guardFixture["0001_guard.sql"],
+  }).findings.length !== 1) {
+    failures.push("two migrations defining the same guard did not report themselves");
+  }
+  const emptyClient = extractClientVocabulary("");
+  if (emptyClient.findings.length !== VOCABULARY_SITES.length) {
+    failures.push(`a contract file with none of the lists reported ${emptyClient.findings.length}, expected ${VOCABULARY_SITES.length}`);
+  }
+
+  // The default-invitation-definition mirror reads a JSON literal out of a migration and a
+  // TS array out of a source file, so both readers are pinned here — including the shapes
+  // that would otherwise read as "nothing to compare" and pass forever.
+  const sqlFixture = {
+    "0002_def.sql": [
+      "CREATE FUNCTION private.default_invitation_definition() RETURNS jsonb LANGUAGE sql AS $$",
+      "BEGIN",
+      "  RETURN '{\"schema_version\": 1, \"sections\": [",
+      "    {\"section_key\": \"welcome\", \"position\": 1, \"kind\": \"text\", \"host_field\": \"welcome\", \"required\": false},",
+      "    {\"section_key\": \"ceremonies\", \"position\": 2, \"kind\": \"event_list\", \"required\": false, \"heading\": {\"en\": \"The ceremonies\"}}",
+      "  ]}'::jsonb;",
+      "END;",
+      "$$;",
+    ].join("\n"),
+  };
+  const clientSource = [
+    "export const NO_PACK_SECTIONS: ReadonlyArray<X> = [",
+    "  { key: 'welcome', position: 1, kind: 'text', hostField: 'welcome', headingEnglish: null },",
+    "  { key: 'ceremonies', position: 2, kind: 'event_list', hostField: null, headingEnglish: 'The ceremonies' },",
+    "];",
+  ].join("\n");
+  const readSql = extractDefaultDefinition(sqlFixture);
+  if (readSql.findings.length !== 0) failures.push(`definition SQL fixture unreadable: ${readSql.findings[0]}`);
+  if (readSql.rows.length !== 2) failures.push(`definition SQL fixture read ${readSql.rows.length} rows, expected 2`);
+  const readClient = extractClientDefaultSections(clientSource);
+  if (readClient.findings.length !== 0) failures.push(`definition client fixture unreadable: ${readClient.findings[0]}`);
+  if (checkDefaultDefinitionMirror({ sql: readSql, client: readClient }).length !== 0) {
+    failures.push(
+      `negative control failed: a matching definition and client copy reported drift (${checkDefaultDefinitionMirror({ sql: readSql, client: readClient }).join(" | ")})`,
+    );
+  }
+  // A heading the database does not have, and a swapped order, are the two drifts this check
+  // exists for: each would draw a legacy page differently from a page frozen today.
+  const headingDrift = extractClientDefaultSections(clientSource.replace("'The ceremonies'", "'Ceremonies'"));
+  if (!checkDefaultDefinitionMirror({ sql: readSql, client: headingDrift }).some((f) => f.includes("is not the database's default"))) {
+    failures.push("negative control not caught: a client heading the database never wrote");
+  }
+  // Same slots, same positions, listed in the other order — the client array's order is the
+  // sequence a legacy page is drawn in, so a list that only agrees as a set is not a copy.
+  const orderDrift = extractClientDefaultSections([
+    "export const NO_PACK_SECTIONS = [",
+    "  { key: 'ceremonies', position: 2, kind: 'event_list', hostField: null, headingEnglish: 'The ceremonies' },",
+    "  { key: 'welcome', position: 1, kind: 'text', hostField: 'welcome', headingEnglish: null },",
+    "];",
+  ].join("\n"));
+  if (!checkDefaultDefinitionMirror({ sql: readSql, client: orderDrift }).some((f) => f.includes("is not the database's default"))) {
+    failures.push("negative control not caught: a client list in a different order");
+  }
+  // Silence is the failure mode for every one of these: a reader that found no anchor would
+  // compare two empty lists and report parity forever.
+  const noAnchor = extractDefaultDefinition({ "0001_a.sql": "CREATE TABLE public.weddings (id uuid);" });
+  if (noAnchor.findings.length !== 1 || !noAnchor.findings[0].includes("no single migration defines")) {
+    failures.push(`a schema with no default definition reported ${JSON.stringify(noAnchor.findings)}`);
+  }
+  if (checkDefaultDefinitionMirror({ sql: noAnchor, client: readClient }).length !== 1) {
+    failures.push("a missing definition anchor did not reach the report through the checker");
+  }
+  const twoAnchors = extractDefaultDefinition({ "0001.sql": sqlFixture["0002_def.sql"], "0002.sql": sqlFixture["0002_def.sql"] });
+  if (twoAnchors.findings.length !== 1 || !twoAnchors.findings[0].includes("(found 2)")) {
+    failures.push(`two migrations defining the default definition reported ${JSON.stringify(twoAnchors.findings)}`);
+  }
+  const unquotedLiteral = extractDefaultDefinition({
+    "0002_def.sql": sqlFixture["0002_def.sql"].replace("'::jsonb", "jsonb_build_object()"),
+  });
+  if (unquotedLiteral.findings.length !== 1 || !unquotedLiteral.findings[0].includes("not a single quoted JSON literal")) {
+    failures.push(`a definition built at runtime reported ${JSON.stringify(unquotedLiteral.findings)}`);
+  }
+  const brokenJson = extractDefaultDefinition({ "0002_def.sql": sqlFixture["0002_def.sql"].replace("\"required\": false}", "\"required\": false,}") });
+  if (brokenJson.findings.length !== 1 || !brokenJson.findings[0].includes("not valid JSON")) {
+    failures.push(`a malformed definition JSON reported ${JSON.stringify(brokenJson.findings)}`);
+  }
+  const noSections = extractDefaultDefinition({
+    "0002_def.sql": sqlFixture["0002_def.sql"].replace(/\{\"schema_version\": 1, "sections": /, '{"schema_version": 1, "not_sections": '),
+  });
+  if (noSections.findings.length !== 1 || !noSections.findings[0].includes("declares no sections array")) {
+    failures.push(`a definition with no sections array reported ${JSON.stringify(noSections.findings)}`);
+  }
+  if (extractClientDefaultSections("export const SOMETHING_ELSE = 1;").findings.length !== 1) {
+    failures.push("a source file with NO_PACK_SECTIONS removed did not report itself");
+  }
+  if (extractClientDefaultSections("export const NO_PACK_SECTIONS = [\n  { key: 'welcome', position: 1 },\n];").findings.length !== 1) {
+    failures.push("an entry that abandoned the documented field shape was counted as parity");
+  }
+  if (extractClientDefaultSections("export const NO_PACK_SECTIONS = [\n];").findings.length !== 1) {
+    failures.push("an empty NO_PACK_SECTIONS list did not report itself");
   }
 
   return failures;
