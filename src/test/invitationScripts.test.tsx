@@ -8,9 +8,10 @@
 // It does not say the sample sentences are good Tamil, Telugu, Malayalam or Kannada, and
 // it must not be cited as if it did. Nobody who reads those languages as a first language
 // has reviewed them; they are strings long enough to exercise combining marks and a full
-// line, chosen from ordinary greetings. Native-reader review is a Stage 4 activity, once
-// the tradition packs that would supply this wording exist — see
-// docs/audits/stage-3-public-invitation.md.
+// line, chosen from ordinary greetings. Stage 4 did not change that: the draft tradition
+// pack it added is recorded `human_reviewed: false` and `machine_assisted: true` for exactly
+// this reason, and the Tamil line below is a rendering probe rather than that pack's wording.
+// See docs/audits/stage-3-public-invitation.md and docs/audits/stage-4-tradition-pack-foundation.md.
 
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
@@ -56,16 +57,22 @@ const SAMPLES = [
   },
 ];
 
+// What the builder is asked for, not what the object is poked with afterwards: a v2 document
+// holds a host's prose twice, once in the flat `welcome` key and once as the `host` body of the
+// section whose `host_field` names that slot, because both are read out of the same `draft`
+// block at freeze time. `invitationFixture.ts` writes the two together, so every line below is
+// a document the projection could actually answer with — and the assertion proves the
+// characters survive parser → normalizer → JSX, not just parser → JSX. The title and the style
+// are still set here, because the projection writes each of those once.
 const rendered = (sample: (typeof SAMPLES)[number]): PublicInvitation => {
-  const invitation = parsePublicInvitation(guestPayload());
+  const invitation = parsePublicInvitation(
+    guestPayload({ language: sample.code, draft: { welcome: sample.welcome, closing: sample.closing } }),
+  );
   if (invitation === null) throw new Error("the fixture no longer parses");
   return {
     ...invitation,
     title: sample.title,
-    language: { primary: sample.code, additional: ["en"] },
     style: { ...invitation.style, font: sample.font, fontSize: "26", color: "#6b1e2a" },
-    welcome: sample.welcome,
-    closing: sample.closing,
   };
 };
 

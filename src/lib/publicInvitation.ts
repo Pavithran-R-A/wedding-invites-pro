@@ -17,8 +17,18 @@
 // https is dropped to null and the venue stays. `private.map_link_or_null` treats an
 // unsafe link as "no link", not as "no invitation", and a guest who can read an address
 // but not tap a map is still holding a correct document.
+//
+// `sections` is the part that grew in Stage 4, and it is read with one further
+// distinction. A *shape* that is wrong — a number where the projection promised text — is
+// still refused wholesale, because that document is not the one the database wrote. A
+// *vocabulary* this build has not been taught is not: `kind` and `body.source` are kept as
+// plain text here, because a guest page frozen by a newer migration must keep rendering for
+// an older bundle, and the refusal of an unknown kind belongs to the reader that can say why
+// (`invitationSections.ts`, which skips it and records an issue). Refusing the whole payload
+// for a word this parser has not seen would turn a forward-compatible addition into a blank
+// page for the one reader who cannot be updated — the visitor holding a link.
 
-import { asObject, isNumberValue, isText, numberValue, text } from './jsonShape';
+import { asObject, booleanValue, isBooleanValue, isNumberValue, isText, numberValue, text } from './jsonShape';
 
 const ALIGNMENTS = ['left', 'center', 'right'] as const;
 
@@ -41,6 +51,9 @@ export interface InvitationStyle {
 export interface InvitationCredit {
   displayName: string | null;
   key: string | null;
+  /** A template's revision, or a pack's release number — whichever number the projection
+   *  wrote for that credit (see `parseCredit`). Null for a legacy document whose pack block
+   *  recorded no release. Never drawn: see `InvitationRenderer`. */
   revision: number | null;
 }
 
@@ -70,6 +83,47 @@ export interface InvitationEvent {
   venue: InvitationVenue | null;
 }
 
+/** One of the two maps a section's wording can come from, as the projection flattens it.
+ *  `fallbackUsed` is the release's own record that the requested language was not available
+ *  and `en` was used with its permission; a host body carries neither field. */
+export interface InvitationSectionHeading {
+  text: string | null;
+  language: string | null;
+  fallbackUsed: boolean | null;
+}
+
+export interface InvitationSectionBody {
+  /** `'host'`, `'reviewed_pack'`, or a word this build has not been taught — see the header. */
+  source: string | null;
+  /** For a host body, the projection resolved it from the snapshot's `draft` block, so the
+   *  words live in one place in the frozen document rather than twice. */
+  text: string | null;
+  language: string | null;
+  fallbackUsed: boolean | null;
+  overrodePackText: boolean | null;
+}
+
+/** One entry of the ordered list a release resolved into. Every field is read by name; the
+ *  three that could be *renamed* by a later migration (`section_key`, `kind`,
+ *  `body.source`) stay as plain text so an older bundle can skip one rather than refuse a
+ *  guest's page. */
+export interface InvitationSection {
+  sectionKey: string | null;
+  position: number | null;
+  kind: string | null;
+  required: boolean | null;
+  /** Already whitelisted to the four host fields by the projection; read as text here. */
+  hostField: string | null;
+  heading: InvitationSectionHeading | null;
+  body: InvitationSectionBody | null;
+}
+
+export interface InvitationSections {
+  /** The language the frozen wedding asked for, so a host preview can explain a substitution. */
+  requested: string | null;
+  items: InvitationSection[];
+}
+
 /** Everything a guest may learn about one invitation. Fourteen text slots and lists; no
  *  identifier of any kind, because nothing in the renderer should need one. */
 export interface PublicInvitation {
@@ -80,6 +134,10 @@ export interface PublicInvitation {
   traditionPack: InvitationCredit | null;
   people: InvitationPerson[];
   events: InvitationEvent[];
+  /** Null for a document frozen before Stage 4, which carries no section list at all. The
+   *  flat four slots below are what such a document has; a v2 projection writes both, and
+   *  `invitationSections.ts` decides which one a renderer draws from. */
+  sections: InvitationSections | null;
   welcome: string | null;
   familyIntroduction: string | null;
   eventNotes: string | null;
@@ -120,15 +178,27 @@ const parseStyle = (value: unknown): InvitationStyle | null => {
   };
 };
 
-const parseCredit = (value: unknown, keyName: string): InvitationCredit | null => {
+/**
+ * A credit line: platform content the document names. The number's *key* differs by credit
+ * because the projection renamed it — `design_template.revision` is a template revision,
+ * while a pack block on a v2 document carries `release_number`, the number that answers
+ * "which reviewed release did this guest read". Naming both keys here rather than reading
+ * `revision` from everything is what stops a pack credit from silently parsing as
+ * `{ revision: null }` on the one shape that has a real number to report.
+ */
+const parseCredit = (
+  value: unknown,
+  keyName: string,
+  numberName: string,
+): InvitationCredit | null => {
   if (value === null || value === undefined) return { displayName: null, key: null, revision: null };
   const raw = asObject(value);
-  if (!raw || !isText(raw.display_name) || !isNumberValue(raw.revision)) return null;
+  if (!raw || !isText(raw.display_name) || !isNumberValue(raw[numberName])) return null;
   if (!isText(raw[keyName])) return null;
   return {
     displayName: text(raw.display_name),
     key: text(raw[keyName]),
-    revision: numberValue(raw.revision),
+    revision: numberValue(raw[numberName]),
   };
 };
 
@@ -177,6 +247,72 @@ const parseEvent = (value: unknown): InvitationEvent | null => {
   };
 };
 
+const parseSectionHeading = (value: unknown): InvitationSectionHeading | null => {
+  const raw = asObject(value);
+  if (!raw || !isText(raw.text) || !isText(raw.language)) return null;
+  if (!isBooleanValue(raw.fallback_used)) return null;
+  return {
+    text: text(raw.text),
+    language: text(raw.language),
+    fallbackUsed: booleanValue(raw.fallback_used),
+  };
+};
+
+const parseSectionBody = (value: unknown): InvitationSectionBody | null => {
+  const raw = asObject(value);
+  if (!raw || !isText(raw.source) || !isText(raw.text) || !isText(raw.language)) return null;
+  if (!isBooleanValue(raw.fallback_used) || !isBooleanValue(raw.overrode_pack_text)) return null;
+  return {
+    source: text(raw.source),
+    text: text(raw.text),
+    language: text(raw.language),
+    fallbackUsed: booleanValue(raw.fallback_used),
+    overrodePackText: booleanValue(raw.overrode_pack_text),
+  };
+};
+
+/**
+ * One section, read the way the rest of this file reads: a wrong *kind* of value refuses
+ * the payload, an unfamiliar *word* (`kind`, `body.source`, `section_key`) is kept as text
+ * for `invitationSections.ts` to skip with a named issue. `position` is required to be a
+ * number because the projection casts it and a document that lost that is not this
+ * document; the array's own order is what the renderer is given, not a re-sort.
+ */
+const parseSection = (value: unknown): InvitationSection | null => {
+  const raw = asObject(value);
+  if (!raw || !isText(raw.section_key) || !isText(raw.kind)) return null;
+  if (!isText(raw.host_field) || !isBooleanValue(raw.required)) return null;
+  if (typeof raw.position !== 'number' || !Number.isFinite(raw.position)) return null;
+  const heading = raw.heading === null || raw.heading === undefined
+    ? null
+    : parseSectionHeading(raw.heading);
+  if (heading === null && raw.heading !== null && raw.heading !== undefined) return null;
+  const body = raw.body === null || raw.body === undefined ? null : parseSectionBody(raw.body);
+  if (body === null && raw.body !== null && raw.body !== undefined) return null;
+  return {
+    sectionKey: text(raw.section_key),
+    position: raw.position,
+    kind: text(raw.kind),
+    required: booleanValue(raw.required),
+    hostField: text(raw.host_field),
+    heading,
+    body,
+  };
+};
+
+/** Null means the document has no section list — a version frozen before Stage 4. An object
+ *  that is half-written is refused rather than read as "no sections", because a v2
+ *  projection that stopped writing its items would otherwise render as a v1 document and
+ *  silently lose the ordering its host chose. */
+const parseSections = (value: unknown): InvitationSections | null => {
+  if (value === null || value === undefined) return null;
+  const raw = asObject(value);
+  if (!raw || !isText(raw.requested)) return null;
+  const items = parseList(raw.items, parseSection);
+  if (items === null) return null;
+  return { requested: text(raw.requested), items };
+};
+
 const parseList = <T>(value: unknown, parse: (entry: unknown) => T | null): T[] | null => {
   if (!Array.isArray(value)) return null;
   const out: T[] = [];
@@ -202,11 +338,13 @@ export function parsePublicInvitation(payload: unknown): PublicInvitation | null
 
   const language = parseLanguage(raw.language);
   const style = parseStyle(raw.style);
-  const designTemplate = parseCredit(raw.design_template, 'template_key');
-  const traditionPack = parseCredit(raw.tradition_pack, 'pack_key');
+  const designTemplate = parseCredit(raw.design_template, 'template_key', 'revision');
+  const traditionPack = parseCredit(raw.tradition_pack, 'pack_key', 'release_number');
   const people = parseList(raw.people, parsePerson);
   const events = parseList(raw.events, parseEvent);
   const slots = [raw.welcome, raw.family_introduction, raw.event_notes, raw.closing];
+  const hasSections = raw.sections !== null && raw.sections !== undefined;
+  const sections = hasSections ? parseSections(raw.sections) : null;
 
   if (
     typeof raw.title !== 'string' ||
@@ -216,17 +354,24 @@ export function parsePublicInvitation(payload: unknown): PublicInvitation | null
     traditionPack === null ||
     people === null ||
     events === null ||
+    (hasSections && sections === null) ||
     !slots.every(isText)
   ) {
     return null;
   }
 
+  // `sections` is read apart from that chain because it is the one part a document may
+  // legitimately not have: a version frozen before Stage 4 carries no section list, and
+  // refusing it would blank a guest page that was correct the day it was published. A
+  // *present but half-written* sections block does go through the chain — it is a v2
+  // projection that stopped meaning what it says, and that is the refusal case.
   return {
     title: raw.title,
     language,
     style,
     designTemplate,
     traditionPack,
+    sections,
     people,
     events,
     welcome: text(raw.welcome),

@@ -68,7 +68,7 @@ const weddingRow = (overrides: Partial<WeddingRow> = {}): WeddingRow => ({
   additional_languages: [],
   estimated_guest_count: 120,
   lifecycle_status: "draft",
-  tradition_pack_id: null,
+  tradition_pack_release_id: null,
   design_template_id: DESIGN,
   style_settings: { font: "Playfair Display" },
   created_at: "2026-09-25T09:00:00+00:00",

@@ -9,6 +9,14 @@
 // `20260926130000_stage3_publication_resolution_boundary.sql` says the same thing from
 // the other side.
 //
+// What it draws is a list, not a template. `normalizeInvitationSections` hands this file the
+// ordered sections to render — a release's own list for a document that froze one, or Stage
+// 3's neutral ordering expressed as that same list for a document that froze none — and the
+// only decisions made here are which of three kinds a section is (`kind`, which says what to
+// draw) and which part of the paper it sits on (`region`, which says how much air it gets).
+// There is no branch for "has a pack", none for a language, and none that looks at who the
+// wedding is; see the normalizer's header for why that is the whole of §13.
+//
 // What it undertakes not to do:
 //   * It puts no markup in the page. Every host-authored string is a JSX text child, so
 //     React escapes it; this file injects no HTML, and a guest's browser is never asked
@@ -35,6 +43,8 @@
 // `prefers-reduced-motion` block flattens that one to 0.01ms.
 
 import type { PublicInvitation, InvitationEvent, InvitationPerson } from '@/lib/publicInvitation';
+import type { RenderSection } from '@/lib/invitationSections';
+import { normalizeInvitationSections } from '@/lib/invitationSections';
 
 const FONT_NAME = /^[A-Za-z ]{1,40}$/;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -192,20 +202,41 @@ const Paragraph = ({ children }: { children: string }) => (
   <p className={`${PROSE} text-[1em] leading-relaxed`}>{children}</p>
 );
 
-/**
- * The whole invitation, as one article. `lang` is set from the language the host chose
- * so a screen reader pronounces the words in that language and a browser can hyphenate
- * and translate sensibly; a missing language leaves the document inheriting the page's.
- */
-export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
-  const size = leadSize(invitation.style.fontSize);
-  const color = safeColor(invitation.style.color);
-  const fontFamily = safeFont(invitation.style.font);
-  const textAlign = invitation.style.alignment ?? 'center';
+/** A section's heading: the release's label for that slot, or the platform's own neutral word
+ *  for a document drawn with no pack. Nothing here decides which tradition a heading
+ *  belongs to — the string arrived in the frozen document. */
+const SectionHeading = ({ children }: { children: string }) => (
+  <h2 className="font-display text-[1.2em] font-semibold">{children}</h2>
+);
 
-  // A group's identity: the platform key when a row carries one, otherwise the host's own
-  // label. The heading printed below is only ever the label — `group_key` keeps rows of one
-  // group together, it is not a word to set over a family's names.
+/**
+ * Whether a section has anything a guest could read, and so whether opening its wrapper is
+ * worth it. This is the one place that answer is computed: the components below assume it,
+ * and a prose block that says nothing is dropped before it can leave an empty ruled box
+ * standing in for information.
+ */
+const sectionDrawsSomething = (section: RenderSection, invitation: PublicInvitation): boolean => {
+  switch (section.kind) {
+    case 'text':
+      return section.heading !== null || section.content !== null;
+    case 'people_list':
+      return invitation.people.length > 0;
+    case 'event_list':
+      return invitation.events.some(hasEventContent);
+  }
+};
+
+/** The people this document froze, in the groups their own rows name. A group's identity is
+ *  the platform key when a row carries one, otherwise the host's label; the heading printed
+ *  over it is only ever the label, because `group_key` keeps rows of one group together and
+ *  is not a word to set over a family's names. */
+const RosterSection = ({
+  section,
+  invitation,
+}: {
+  section: RenderSection;
+  invitation: PublicInvitation;
+}) => {
   const groupedPeople = invitation.people.reduce<Record<string, InvitationPerson[]>>((groups, person) => {
     const key = hostText(person.groupKey) ?? hostText(person.groupLabel) ?? '';
     const bucket = groups[key];
@@ -215,11 +246,120 @@ export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
   }, {});
   const groups = Object.entries(groupedPeople);
 
-  // Index in the key, not the name: two people can be called the same thing, and a
-  // list keyed by a display name would silently merge or reorder them.
+  return (
+    <section className="pt-7" aria-label={section.heading ?? 'Family and blessings'}>
+      {section.heading !== null ? <SectionHeading>{section.heading}</SectionHeading> : null}
+      {groups.map(([bucket, members]) => {
+        const label = members.reduce<string | null>(
+          (found, person) => found ?? hostText(person.groupLabel),
+          null,
+        );
+        return (
+          <div key={bucket || 'unlabelled'} className="pb-4">
+            {label !== null ? (
+              <h2 className="font-display text-[1.05em] font-medium text-ink-muted">{label}</h2>
+            ) : null}
+            <ul className="mt-1 space-y-1">
+              {members.map((person, index) => (
+                <PersonLine key={`${person.displayName ?? 'person'}-${index}`} person={person} />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </section>
+  );
+};
+
+/** Every ceremony the snapshot froze, listed under the one heading the section carries. The
+ *  heading is a slot label, not an interpretation of the rites: a name for what a wedding's
+ *  events *are* would be a claim about someone's tradition, and this file makes none. */
+const CeremonySection = ({
+  section,
+  invitation,
+}: {
+  section: RenderSection;
+  invitation: PublicInvitation;
+}) => {
+  // Index in the key, not the name: two events can be called the same thing, and a list
+  // keyed by a display name would silently merge or reorder them.
   const events = invitation.events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => hasEventContent(event));
+
+  return (
+    <section className="pt-4" aria-label={section.heading ?? 'Ceremonies'}>
+      {section.heading !== null ? <SectionHeading>{section.heading}</SectionHeading> : null}
+      <div className="mt-3 space-y-4">
+        {events.map(({ event, index }) => (
+          <EventBlock key={`${event.eventKey ?? 'event'}-${index}`} event={event} />
+        ))}
+      </div>
+    </section>
+  );
+};
+
+/** One section, drawn. `kind` decides what is put on the page and the section's own `region`
+ *  decides how much air it gets: an `opening` section is a child of the header, whose
+ * `space-y-3` already sets the rhythm, and a `closing` section is a child of the footer. */
+const SectionBlock = ({
+  section,
+  invitation,
+}: {
+  section: RenderSection;
+  invitation: PublicInvitation;
+}) => {
+  const bare = section.region !== 'body';
+  switch (section.kind) {
+    case 'text': {
+      const content = (
+        <>
+          {section.heading !== null ? <SectionHeading>{section.heading}</SectionHeading> : null}
+          {section.content !== null ? <Paragraph>{section.content}</Paragraph> : null}
+        </>
+      );
+      return bare ? content : <div className="pt-7">{content}</div>;
+    }
+    case 'people_list':
+      return <RosterSection section={section} invitation={invitation} />;
+    case 'event_list':
+      return <CeremonySection section={section} invitation={invitation} />;
+  }
+};
+
+/**
+ * The whole invitation, as one article. `lang` is set from the language the host chose
+ * so a screen reader pronounces the words in that language and a browser can hyphenate
+ * and translate sensibly; a missing language leaves the document inheriting the page's.
+ *
+ * What the article draws is `normalizeInvitationSections(...)` — one ordered list, whether
+ * the document arrived with a release's sections or as a Stage 3 page that had none. There is
+ * no branch here for "a wedding with a pack" versus "a wedding without one", and none for a
+ * language, a pack key, a religion, a community or a name: the only decisions are which of
+ * three kinds each section is and which region of the paper it sits on (§13). A section this
+ * build cannot place is already gone from the list, named in the normalizer's issues for the
+ * host's preview to show rather than drawn as a blank card to a guest.
+ *
+ * Provenance is deliberately not drawn. `RenderSection` carries who supplied its wording so
+ * the host's own editor can say so; a guest's document prints no reviewer label, no release
+ * number and no "edited" marker, because §12's honesty is about what the platform records,
+ * not about annotating someone's invitation.
+ */
+export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
+  const size = leadSize(invitation.style.fontSize);
+  const color = safeColor(invitation.style.color);
+  const fontFamily = safeFont(invitation.style.font);
+  const textAlign = invitation.style.alignment ?? 'center';
+
+  const normalized = normalizeInvitationSections(invitation);
+  const drawn = normalized.sections.filter((section) => sectionDrawsSomething(section, invitation));
+  const opening = drawn.filter((section) => section.region === 'opening');
+  const body = drawn.filter((section) => section.region === 'body');
+  const closing = drawn.filter((section) => section.region === 'closing');
+
+  // The frozen list's own order, indexed: a section's key is a platform identifier and two
+  // sections can share one heading, so neither is a React key.
+  const keyFor = (section: RenderSection, index: number) => `${section.key ?? 'section'}-${index}`;
 
   return (
     <article
@@ -246,61 +386,20 @@ export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
 
       <header className="space-y-3">
         <h1 className="font-display text-[1.6em] font-semibold leading-tight">{invitation.title}</h1>
-        {invitation.welcome !== null ? <Paragraph>{invitation.welcome}</Paragraph> : null}
-        {invitation.familyIntroduction !== null ? (
-          <Paragraph>{invitation.familyIntroduction}</Paragraph>
-        ) : null}
+        {opening.map((section, index) => (
+          <SectionBlock key={keyFor(section, index)} section={section} invitation={invitation} />
+        ))}
       </header>
 
-      {groups.length > 0 ? (
-        <section className="pt-7" aria-label="Family and blessings">
-          {groups.map(([bucket, members]) => {
-            const heading = members.reduce<string | null>(
-              (found, person) => found ?? hostText(person.groupLabel),
-              null,
-            );
-            return (
-              <div key={bucket || 'unlabelled'} className="pb-4">
-                {heading !== null ? (
-                  <h2 className="font-display text-[1.05em] font-medium text-ink-muted">{heading}</h2>
-                ) : null}
-                <ul className="mt-1 space-y-1">
-                  {members.map((person, index) => (
-                    <PersonLine key={`${person.displayName ?? 'person'}-${index}`} person={person} />
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </section>
-      ) : null}
+      {body.map((section, index) => (
+        <SectionBlock key={keyFor(section, index)} section={section} invitation={invitation} />
+      ))}
 
-      {events.length > 0 ? (
-        <section className="pt-4" aria-label="Ceremonies">
-          {/* "The ceremonies" is our word, not a fact about the wedding. Every event the
-              snapshot froze is listed under this one label; a heading that named the rite
-              or counted them would be an interpretation of someone's invitation. */}
-          <h2 className="font-display text-[1.2em] font-semibold">The ceremonies</h2>
-          <div className="mt-3 space-y-4">
-            {events.map(({ event, index }) => (
-              <EventBlock key={`${event.eventKey ?? 'event'}-${index}`} event={event} />
-            ))}
-          </div>
-          {invitation.eventNotes !== null ? (
-            <div className="border-t border-gold/40 pt-3">
-              <Paragraph>{invitation.eventNotes}</Paragraph>
-            </div>
-          ) : null}
-        </section>
-      ) : invitation.eventNotes !== null ? (
-        <section className="pt-7" aria-label="Note from the family">
-          <Paragraph>{invitation.eventNotes}</Paragraph>
-        </section>
-      ) : null}
-
-      {invitation.closing !== null ? (
+      {closing.length > 0 ? (
         <footer className="pt-7">
-          <Paragraph>{invitation.closing}</Paragraph>
+          {closing.map((section, index) => (
+            <SectionBlock key={keyFor(section, index)} section={section} invitation={invitation} />
+          ))}
         </footer>
       ) : null}
 

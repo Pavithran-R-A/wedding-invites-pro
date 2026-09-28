@@ -64,7 +64,11 @@ describe("a guest arriving on a working link", () => {
   it("titles the tab with the family's names, and puts it back on leaving", async () => {
     const { unmount } = visit();
     await waitFor(() => expect(screen.getByText('Arun weds Deepa')).toBeInTheDocument());
-    expect(document.title).toBe('Arun weds Deepa — wedding invitation');
+    // The title is set by a passive effect, which React may flush after the commit that
+    // put the names in the DOM — and under a loaded test runner that gap is real. Waiting
+    // on the document, rather than the screen, is the same assertion with the effect's own
+    // timing respected; it still fails if the title is never set.
+    await waitFor(() => expect(document.title).toBe('Arun weds Deepa — wedding invitation'));
     unmount();
     expect(document.title).toBe(defaultTitle);
   });

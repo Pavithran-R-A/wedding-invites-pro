@@ -40,6 +40,8 @@ import {
   type PublicationState,
 } from '@/integrations/supabase/publication';
 import type { PublicInvitation } from '@/lib/publicInvitation';
+import type { PackHostField } from '@/lib/traditionPackContract';
+import { PACK_HOST_FIELDS } from '@/lib/traditionPackContract';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,9 +56,12 @@ import {
 } from '@/components/ui/select';
 import { ArrowLeft, Save } from 'lucide-react';
 import { sanitizeSvg } from '@/lib/sanitizeSvg';
+import { normalizeInvitationSections } from '@/lib/invitationSections';
+import { DRAFT_SLOT_LABELS, HOST_FIELD_OF_SLOT } from '@/lib/invitationDraftSlots';
 import InvitationRenderer from '@/components/invitation/InvitationRenderer';
 import DraftTextEditor from '@/components/invitation/DraftTextEditor';
 import ContentEditor from '@/components/invitation/ContentEditor';
+import TraditionPackPanel from '@/components/invitation/TraditionPackPanel';
 import PublicationPanel from '@/components/invitation/PublicationPanel';
 
 interface EditorState {
@@ -127,12 +132,92 @@ const EMPTY_BASE: PublicInvitation = {
   style: { font: null, fontSize: null, color: null, alignment: null },
   designTemplate: null,
   traditionPack: null,
+  sections: null,
   people: [],
   events: [],
   welcome: null,
   familyIntroduction: null,
   eventNotes: null,
   closing: null,
+};
+
+/**
+ * Put the host's unsaved words where the canvas will draw them.
+ *
+ * `api.preview_invitation` resolves sections from the *saved* draft row, so a section whose
+ * body is the host's carries the text as it was last saved. The canvas shows what is on the
+ * screen instead, and §13 moved the prose into the section list: a section that reads one of
+ * the four host fields is rewritten here, in the one place that knows what the host has typed
+ * and not yet saved.
+ *
+ * The rewrite mirrors `private.resolve_invitation_sections`
+ * (`supabase/migrations/20260927120000_stage4_tradition_pack_releases.sql:913-933`) rather
+ * than inventing a rule of its own, because a preview that disagreed with the next save would
+ * be a lie told right before the host shares a link:
+ *
+ *   * Typed text wins, and winning over wording the release supplied is exactly what
+ *     `overrode_pack_text` records. A section the projection returned as `reviewed_pack`
+ *     therefore becomes `host` the moment the host types over it — never "reviewed_pack, but
+ *     the host edited it", which §12 refuses because it would credit a review with words no
+ *     reviewer saw. A body the projection left empty is written one, which is what saving
+ *     typed text does: with the words invisible until Save, a host who chose "no tradition
+ *     pack" would watch this canvas refuse to show anything they typed into a blank field.
+ *   * `language` and `fallback_used` go null on a host body, as the projection nulls them:
+ *     the platform does not know what language a person typed in.
+ *   * Cleared text drops the body. The release's line would resolve again server-side, and a
+ *     host body never carried that wording across the wire, so the honest answer on screen is
+ *     "nothing here yet" — and the panel beside the field says what Save brings back.
+ */
+const withLocalProse = (invitation: PublicInvitation, draft: InvitationDraftContent): PublicInvitation => {
+  const flat = {
+    welcome: draft.welcome,
+    familyIntroduction: draft.familyIntroduction,
+    eventNotes: draft.eventNotes,
+    closing: draft.closing,
+  };
+  if (invitation.sections === null) return { ...invitation, ...flat };
+
+  const items = invitation.sections.items.map((item) => {
+    const field = item.hostField;
+    // A field name this build has no editor for is left exactly as the projection wrote it:
+    // inventing a mapping would draw the wrong paragraph under someone's heading.
+    if (field === null || !PACK_HOST_FIELDS.includes(field as PackHostField)) return item;
+    const value = draft[HOST_FIELD_OF_SLOT[field as PackHostField]];
+    const typed = value !== null && value.trim() !== '' ? value : null;
+    if (typed === null) {
+      // Only a body that *was* the host's has anything to remove; wording the host never
+      // overwrote stays exactly as the release supplied it.
+      if (item.body === null || item.body.source !== 'host') return item;
+      return { ...item, body: null };
+    }
+    const overrodePackText =
+      item.body === null ? false
+        : item.body.source === 'reviewed_pack' ? true
+          : item.body.overrodePackText === true;
+    return {
+      ...item,
+      body: { source: 'host', text: typed, language: null, fallbackUsed: null, overrodePackText },
+    };
+  });
+
+  return { ...invitation, ...flat, sections: { ...invitation.sections, items } };
+};
+
+/** The lines the chosen release is currently supplying wording for, named in the host's own
+ *  field labels. Read off the server's projection rather than re-resolved from the pinned
+ *  definition here, so the panel can only name wording the document actually carries — and
+ *  once the host has replaced a line with their own, that line leaves the list. */
+const suppliedSlotLabels = (projection: PublicInvitation | null): string[] => {
+  const items = projection?.sections?.items;
+  if (items === undefined) return [];
+  const labels: string[] = [];
+  for (const item of items) {
+    const field = item.hostField;
+    if (item.body === null || item.body.source !== 'reviewed_pack' || field === null) continue;
+    if (!PACK_HOST_FIELDS.includes(field as PackHostField)) continue;
+    labels.push(DRAFT_SLOT_LABELS[HOST_FIELD_OF_SLOT[field as PackHostField]]);
+  }
+  return labels;
 };
 
 /**
@@ -155,14 +240,13 @@ const composedInvitation = (
       title: design.title,
       language: { primary: design.primaryLanguage, additional: [] },
     } satisfies PublicInvitation);
-  return {
-    ...source,
-    style: { font: editor.font, fontSize: editor.fontSize, color: editor.color, alignment: editor.alignment },
-    welcome: draft.welcome,
-    familyIntroduction: draft.familyIntroduction,
-    eventNotes: draft.eventNotes,
-    closing: draft.closing,
-  };
+  return withLocalProse(
+    {
+      ...source,
+      style: { font: editor.font, fontSize: editor.fontSize, color: editor.color, alignment: editor.alignment },
+    },
+    draft,
+  );
 };
 
 const FieldLabel = ({ id, children }: { id: string; children: React.ReactNode }) => (
@@ -370,6 +454,11 @@ const EditProject = () => {
 
   const invitation = composedInvitation(serverPreview, design, editor, draft);
   const artwork = design.previewSvg === null ? null : sanitizeSvg(design.previewSvg);
+  // The same normalizer the guest's renderer runs, on the same composed document, so what is
+  // listed below the canvas is exactly what the canvas could not place — not a second opinion
+  // computed from a different reading of the page.
+  const previewIssues = normalizeInvitationSections(invitation).issues;
+  const suppliedLabels = suppliedSlotLabels(serverPreview);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -409,6 +498,23 @@ const EditProject = () => {
               Draft preview{dirty ? ' — unsaved changes shown' : ''}
             </p>
             <InvitationRenderer invitation={invitation} />
+            {previewIssues.length > 0 ? (
+              <div className="space-y-2 rounded-lg border border-warning/60 bg-card p-3">
+                <h3 id="preview-issues-heading" className="text-xs font-semibold">
+                  What this preview could not draw
+                </h3>
+                <ul className="list-disc space-y-1 pl-4 text-[11px] leading-snug text-muted-foreground">
+                  {previewIssues.map((issue, index) => (
+                    <li key={`${issue.code}-${issue.path}-${index}`}>{issue.message}</li>
+                  ))}
+                </ul>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  A note for you, the host. Your guests see none of this list — the sections it
+                  names are simply absent from their page, which is why they are named here
+                  rather than drawn as empty boxes.
+                </p>
+              </div>
+            ) : null}
             <p className="text-xs leading-snug text-muted-foreground">
               This is the layout your guests get, drawn by the same code that renders their
               page. Your words and styling change as you type and reach the document when you
@@ -419,6 +525,19 @@ const EditProject = () => {
         </section>
 
         <aside className="lg:w-96 bg-card border-l border-border p-4 space-y-6 overflow-y-auto lg:max-h-[calc(100vh-3.5rem)]">
+          {user !== null ? (
+            <>
+              <TraditionPackPanel
+                userId={user.id}
+                weddingId={id}
+                suppliedSlotLabels={suppliedLabels}
+                onSelectionChanged={() => { void refreshPreview(id); }}
+              />
+
+              <Separator />
+            </>
+          ) : null}
+
           <section className="space-y-3" aria-labelledby="words-heading">
             <h2 id="words-heading" className="font-display font-semibold text-sm">
               Your words

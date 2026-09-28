@@ -13,6 +13,7 @@
 
 import { useId } from 'react';
 import { Label } from '@/components/ui/label';
+import { DRAFT_SLOT_LABELS } from '@/lib/invitationDraftSlots';
 import type { InvitationDraftContent } from '@/integrations/supabase/weddings';
 
 interface Slot {
@@ -25,25 +26,25 @@ interface Slot {
 const SLOTS: Slot[] = [
   {
     key: 'welcome',
-    label: 'The opening',
+    label: DRAFT_SLOT_LABELS.welcome,
     hint: 'First thing a guest reads. Names, a greeting, a blessing — as you would write it.',
     rows: 4,
   },
   {
     key: 'familyIntroduction',
-    label: 'Who is inviting',
+    label: DRAFT_SLOT_LABELS.familyIntroduction,
     hint: 'The families and elders whose names appear with the invitation.',
     rows: 4,
   },
   {
     key: 'eventNotes',
-    label: 'A note about the ceremonies',
+    label: DRAFT_SLOT_LABELS.eventNotes,
     hint: 'Anything guests should know about the gatherings — dress, timings, whom to greet.',
     rows: 3,
   },
   {
     key: 'closing',
-    label: 'The last words',
+    label: DRAFT_SLOT_LABELS.closing,
     hint: 'How the invitation ends.',
     rows: 3,
   },
