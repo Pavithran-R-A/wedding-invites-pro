@@ -10,18 +10,39 @@
 > [`stage-2-migration-plan.md`](stage-2-migration-plan.md); the pre-implementation design it grew out
 > of is [`stage-2-domain-blueprint.md`](stage-2-domain-blueprint.md), whose "Stage 2 outcome" section
 > lists what was built, deferred and refused.
+>
+> **Stage 3 added the publication boundary and Stage 4 the tradition-pack release model, so the
+> counts below are re-read at this branch's head, not copied forward from Stage 2's audit.** Where a
+> number moved, the sentence that carries it says what moved it. The Stage 4 tables' own guarantee —
+> that a lifecycle cannot be written backwards, that content freezes on approval, and that a
+> selection must name an approved release — is executed in
+> [`../audits/stage-4-tradition-pack-foundation.md`](../audits/stage-4-tradition-pack-foundation.md)
+> and in `supabase/tests/stage4/`, which prints its totals separately rather than folding them into
+> Stage 2's.
 
 ## 1. The four zones
 
 Counts below are base tables, read from the catalogue at this branch's schema head (after the Stage 2
-forward migrations and Stage 3's publication boundary):
+forward migrations, Stage 3's publication boundary and Stage 4's release model):
 
 | Schema | Tables | Reachable by `anon` | Reachable by `authenticated` | Reachable by `service_role` | Purpose |
 | --- | --- | --- | --- | --- | --- |
-| `public` | 18 | no `USAGE`-granted table: zero table privileges | SELECT on all 18; INSERT/UPDATE/DELETE on the customer-owned tables (the draft lost its INSERT/DELETE in Stage 3 §3) | full privileges | the canonical domain, plus the platform catalogue and the retained account tables |
+| `public` | 19 | no `USAGE`-granted table: zero table privileges | SELECT on 18 of the 19; **column**-level SELECT on `tradition_pack_releases`, seven columns only (see §2); INSERT/UPDATE/DELETE on the customer-owned tables (the draft lost its INSERT/DELETE in Stage 3 §3) | full privileges | the canonical domain, plus the platform catalogue and the retained account tables |
 | `api` | 0 | `USAGE`, and `EXECUTE` on exactly one function: the guest resolver | `USAGE`, and `EXECUTE` on the six host verbs | none — no `USAGE`, no `EXECUTE` | the callable surface: functions only, no table, no view, no sequence |
 | `private` | 2 | no `USAGE` | no `USAGE` | `USAGE` + privileges on both | server-only history and credentials |
 | `legacy` | 8 | no `USAGE` | no `USAGE` | **no `USAGE`** | archived scaffold: rows kept, no live reader |
+
+The one exception in the first row is the point of Stage 4's privilege design. `40_catalog.sql` C12
+asserts that table-level SELECT is held on exactly the canonical nineteen *minus*
+`tradition_pack_releases`, and C12b asserts that its column projection is exactly
+`id, pack_id, release_number, status, definition_schema_version, definition, languages` — read out of
+the catalogue rather than out of a list this document keeps, so a column granted later shows up as a
+set difference. That leaves `author_label`, `machine_assisted`, `machine_assistance_notes`,
+`source_reference`, `changelog`, every `review_*` column, `approved_at`, `deprecated_at`,
+`created_at` and `updated_at` invisible to a browser role at the grant layer, before any policy or
+column list is consulted. A query that cannot name a column is stronger evidence than a UI that hides
+one, and it is why the readiness matrix can say the picker shows no reviewer identity without relying
+on the picker.
 
 `api` is the one zone PostgREST was given alongside `public`, which makes it the only way a browser can
 ask the database to *do* something. What lives there, who may call each function and why the set is
@@ -44,7 +65,7 @@ attempt even if a future grant mistake let it through.
 
 | Table | Why it exists | Key shape | Write path |
 | --- | --- | --- | --- |
-| `weddings` | The product's aggregate: one family's invitation, named by its owner. Replaces the scaffold's `projects`. | `id` PK; `UNIQUE (wedding_id, id)`-style children target `(id)`; `owner_user_id → auth.users` `ON DELETE CASCADE`; `design_template_id`/`tradition_pack_id` `RESTRICT` | owner (create/update/delete); `style_settings` is the only free-shaped column and is CHECKed to be a JSON object |
+| `weddings` | The product's aggregate: one family's invitation, named by its owner. Replaces the scaffold's `projects`. | `id` PK; `UNIQUE (wedding_id, id)`-style children target `(id)`; `owner_user_id → auth.users` `ON DELETE CASCADE`; `design_template_id`/`tradition_pack_release_id` `RESTRICT` | owner (create/update/delete); `style_settings` is the only free-shaped column and is CHECKed to be a JSON object. `tradition_pack_release_id` is nullable, and NULL is a supported product state ("no pack — the host writes every word"), not an absent row |
 | `wedding_people` | Couple, hosts and family members as ordered rows, because ordered attribution is a query, not a paragraph. | `wedding_id` FK `CASCADE`; `role_key`/`role_label`, `group_key`/`group_label` are free labels | owner |
 | `venues` | A place that more than one event can share, with coordinates as `numeric`. | `UNIQUE (wedding_id, id)` so an event can be pinned to *this wedding's* venue | owner |
 | `wedding_events` | The functions themselves: order, enable/disable, local wall-clock times, timezone, optional venue. | `UNIQUE (wedding_id, id)`; `(wedding_id, venue_id) → venues(wedding_id, id)`; no CHECK on `event_key` (see §7) | owner |
@@ -55,7 +76,7 @@ attempt even if a future grant mistake let it through.
 
 | Table | Why it exists | Key shape | Write path |
 | --- | --- | --- | --- |
-| `invitation_versions` | An immutable statement of what was sent, so a claim on a card can be reconciled later. | `UNIQUE (wedding_id, id)`, `UNIQUE (wedding_id, version_number)`, self-FK on `(wedding_id, supersedes_version_id)`; `snapshot jsonb` object; `snapshot_schema_version` | **trusted only**; `versions_immutable_no_update/_no_delete` guards; `wedding_id` FK is `NO ACTION` so a frozen row pins its wedding |
+| `invitation_versions` | An immutable statement of what was sent, so a claim on a card can be reconciled later. | `UNIQUE (wedding_id, id)`, `UNIQUE (wedding_id, version_number)`, self-FK on `(wedding_id, supersedes_version_id)`; `snapshot jsonb` object; `snapshot_schema_version`; and since Stage 4 a `tradition_pack_release_id` `RESTRICT` pin, so a frozen document names the release its wording came from | **trusted only**; `versions_immutable_no_update/_no_delete` guards; `wedding_id` FK is `NO ACTION` so a frozen row pins its wedding; `versions_pack_release_gate` refuses a freeze that names anything other than the release its wedding currently selects, and refuses one that is not approved at that moment |
 | `publications` | The lifecycle of "this version is the live one", with at most one live link per wedding. | `UNIQUE (wedding_id, id)`; partial `UNIQUE (wedding_id) WHERE status = 'active'`; `(wedding_id, version_id)` FK `NO ACTION` | trusted only; `publications_no_client_write` |
 | `entitlements` | Server-authoritative rights, the only place a paid state may exist. | `wedding_id` FK with **no cascade clause** (`NO ACTION`); partial `UNIQUE (wedding_id, package_code) WHERE status = 'active'`; `package_code` is a code, not a price | trusted only; write and delete guards |
 | `approval_requests` | A recorded ask to a named family reviewer, and its answer. | `UNIQUE (wedding_id, id, version_id)` so a credential can pin request *and* wedding *and* version | trusted only; `approval_requests_no_client_write` |
@@ -73,13 +94,23 @@ attempt even if a future grant mistake let it through.
 
 | Table | Why it exists | Key shape | Write path |
 | --- | --- | --- | --- |
-| `tradition_packs` | Tradition as a reviewable, versioned *behaviour pack* the host selects — never as an attribute of a person (ADR 0003). | `UNIQUE (pack_key, revision)`; `status` drives visibility; `reviewed_by → auth.users` `SET NULL` | **admin/service only** |
+| `tradition_packs` | The *concept* a host recognises — "this family's invitation is built from this pack". Stage 4 deliberately removed every content and lifecycle column from it (the old `structure`, `status`, `revision` and `reviewed_by`) because a pack that is both a concept and a document cannot be retired without breaking the concept, which is ADR 0007's whole argument. | `UNIQUE (pack_key)` — one row per concept, no revision column; `scope_statement` is required, 20–2000 characters after trimming, and is the sentence that says what the pack is for and what it does not claim | **no client write of any kind**: no policy, no table INSERT/UPDATE/DELETE privilege, and `no_client_write_tradition_packs` refuses even a deliberately granted write |
+| `tradition_pack_releases` | One frozen content document of a concept: section order, labels, reviewed wording, event vocabulary, language coverage, and the provenance of who looked at it. This is the review unit, the selection target and the thing a version pins. | `UNIQUE (pack_id, release_number)`; `release_number > 0`; `status IN ('draft','reviewed','approved','deprecated')` with no other value reachable; `definition_schema_version > 0`; `languages` non-empty and inside the supported set; four *named* constraints binding status to provenance — `draft_carries_no_review_metadata`, `review_metadata_is_mandatory`, `approved_at_matches_status`, `deprecated_at_matches_status` — the last two as biconditionals, because `approved` with no `approved_at` and `draft` with a reviewer's name are the same lie in opposite directions | **no client write**; `private.guard_tradition_pack_release()` (`SECURITY INVOKER`, self-contained by design) enforces the forward-only lifecycle, freezes the content the moment a release leaves `draft`, refuses `DELETE` of a release that has left `draft`, and walks the `definition` key by key against the contract vocabulary |
+
 | `design_templates` | Reviewed artwork catalogue rows. | `UNIQUE (template_key, revision)`; `preview_svg` is server-authored and is sanitised again in the browser before insertion | **admin/service only** |
 
-Both are readable by a signed-in user **only** while `status IN ('draft','approved')`
-(`40_catalog.sql` C25 names these as the only two policies that are not owner-scoped; C09/C10 prove
-the deprecated rows stay invisible). A customer cannot write either catalogue: `no_client_write_*`
-triggers refuse it, and `20_attacks.sql` group 7 executes the refusal.
+`40_catalog.sql` C25 keeps "policies with no `auth.uid()` predicate" as an enumerated set rather than
+a count, so Stage 4's replacement of the pack read (`users_read_packs_with_approved_releases`) and its
+new release read (`users_read_approved_and_own_retired_pack_releases`) are checked by identity. The
+second one is the only place in the schema where a read is deliberately wider than "approved": a host
+must still be able to see the deprecated release their own wedding points at (the policy's own name
+says *retired*; the status vocabulary has no such value, only `deprecated`), because §6 requires that
+selection to survive for historical visibility. A customer cannot write either catalogue:
+`no_client_write_*` triggers refuse it, and `20_attacks.sql` group 7 executes the refusal. **Creating
+or approving a release is therefore not something this build offers anyone** — no `api` wrapper
+exists, and what the local qualification runs use is hand-written SQL executed by a privileged role
+against a test database, documented in
+[`../content-review/tamil-english-foundation-v1.md`](../content-review/tamil-english-foundation-v1.md).
 
 ### Retained account tables
 
@@ -89,8 +120,12 @@ user, writable by no client role; group 7 proves a user cannot self-grant `admin
 
 ## 3. Relational guarantees, measured
 
-* **36 foreign keys in the canonical schemas** (`public` 30, `private` 6): 13 `CASCADE`,
-  15 `NO ACTION`, 4 `RESTRICT`, 4 `SET NULL`. Every one is named in `40_catalog.sql`'s `fk_actions`
+* **37 foreign keys in the canonical schemas** (`public` 31, `private` 6): 13 `CASCADE`,
+  15 `NO ACTION`, 5 `RESTRICT`, 4 `SET NULL`. Stage 2 measured 36 (4 `RESTRICT`); the fifth is
+  `tradition_pack_releases(pack_id) → tradition_packs(id)`, and `weddings`' and
+  `invitation_versions`' `RESTRICT` edges now point at releases rather than at the pack row, so
+  retiring content cannot strand the documents that pinned it. Every one is named in
+  `40_catalog.sql`'s `fk_actions`
   array and C46 compares that array with `pg_constraint` in both directions, so **the schema cannot
   drift from the list without a red test**. The reasoning behind each choice is grouped by family in
   [`stage-2-migration-plan.md`](stage-2-migration-plan.md) §7; that prose is kept in step by hand and
@@ -101,25 +136,35 @@ user, writable by no client role; group 7 proves a user cannot self-grant `admin
   `household_event_scopes`, `invitation_versions`, `publications`, `approval_requests`,
   `private.access_tokens`). `20_attacks.sql` group 12 executes 12 cross-wedding insertions and all
   12 are refused with `23503`.
-* **72 CHECK constraints** (62 in `public`, 10 in `private`) — the invalid states (negative guest
+* **88 CHECK constraints** (78 in `public`, 10 in `private`) — the invalid states (negative guest
   counts, an active
   entitlement with a revocation timestamp, a response without an attending decision, a token kind
-  with no scope, and so on) are refused at the constraint layer; group 13 executes 71 of them.
+  with no scope, a release that calls itself approved without an `approved_at`, a draft that carries
+  a reviewer's name, and so on) are refused at the constraint layer. `20_attacks.sql` group 13
+  executed **71** of the 72 that existed when Stage 2 was qualified; the 16 `public` constraints
+  Stage 4 added are refused inside its own battery, where **67** expected-error patterns name a
+  `23514` check violation. That battery prints its totals separately, so neither stage's
+  count is read as the other's.
 * **One active publication per wedding**, **one active entitlement per wedding+package**, both as
   partial unique indexes rather than application discipline.
-* **`updated_at` is centralised**: 13 tables have the column and exactly those 13 carry a
+* **`updated_at` is centralised**: 14 tables have the column and exactly those 14 carry a
   `set_updated_at` trigger executing the single function `private.touch_updated_at()`
-  (`40_catalog.sql` C31, C37); no table keeps its own copy of that logic (C38). The
+  (`40_catalog.sql` C31, C37); no table keeps its own copy of that logic (C38). The one that joined
+  the set in Stage 4 is `tradition_pack_releases`. The
   immutable tables — `invitation_versions`,
   `approval_feedback`, `private.audit_events`, `private.access_tokens` — deliberately have **no**
   `updated_at` at all (C36), because a timestamp that can never legally change is a lie waiting to
   happen.
-* **RLS is enabled and not FORCEd** on all 20 canonical tables, `private` included. "Not forced" is a
+* **RLS is enabled and not FORCEd** on all 21 canonical tables, `private` included. "Not forced" is a
   choice: table owners and the trusted maintenance path must still be able to perform a repair, and
   the alternative is proven not to weaken a client, because a client role has no bypass (C02, group 5).
-* **46 policies**, every one granted to `authenticated` alone (C18), every one `PERMISSIVE` (C19),
-  exactly one SELECT per table (C20), write policies only on the customer set (C21), and **no** write
-  policy at all on the trusted-authored tables (C22).
+* **45 policies**, every one granted to `authenticated` alone (C18), every one `PERMISSIVE` (C19),
+  exactly one SELECT per table across the 19 (C20), write policies only on the customer set (C21), and
+  **no** write policy at all on the trusted-authored tables (C22). Stage 2 closed at 46; Stage 3's
+  draft-invariant repair removed two write policies on `invitation_drafts` to reach 44, and Stage 4
+  dropped `users_read_platform_packs` while adding the pack and release reads to reach 45. The
+  movement is arithmetic over committed migrations, and the arithmetic is in the battery, not only
+  here.
 
 ## 4. Where JSON is the right tool
 
@@ -130,7 +175,7 @@ so no shape can arrive as a bare string or an array:
 | --- | --- | --- |
 | `weddings.style_settings` | the design editor's font/size/colour/alignment choices | the renderer's vocabulary is a Stage 3 decision; the key set is already fixed by the editor UI and is recorded in the migration's findings rather than guessed at in SQL |
 | `invitation_drafts.content` | the invitation's editable text blocks | a draft is written as one unit by one author; nothing queries inside it yet |
-| `tradition_packs.structure` | what a pack recommends (sections, order, wording scaffolding) | packs are authored, not parsed by the database; a table per recommendation would be a schema change per pack |
+| `tradition_pack_releases.definition` | one release's whole document: section order, labels, reviewed wording, event vocabulary, design guidance | it is read as one document and frozen as one document, and the *vocabulary inside it* is what a contract governs — so the guard trigger walks it key by key rather than the schema growing a table per section. Stage 2 kept this shape on `tradition_packs.structure`; Stage 4 moved it to the release, because a concept cannot have two contents at once. `definition_schema_version` beside it is what lets a build that does not understand a definition refuse it by name instead of rendering it partially |
 | `design_templates.layout_settings` | placement metadata for the artwork | same authoring story as above |
 | `invitation_versions.snapshot` | the frozen document a publication points at | the whole purpose is a payload that is *not* reinterpreted later; `snapshot_schema_version` makes the shape evolvable |
 | `rsvp_responses.answers` | free-form answers beyond attendance and party size | question sets differ per wedding; the two answers anything must query (`attending`, `party_size`) **are** columns |
@@ -161,9 +206,42 @@ Trusted helpers live beside them: `private.handle_new_user` and
 `search_path`-pinned, both revoked from every API role (C26/C27/C28; the draft trigger had to change
 privilege when its caller lost the right to insert the row) — plus `private.reject_client_write`,
 `private.reject_client_delete` and `private.touch_updated_at`, all `SECURITY INVOKER` so they cannot
-be pointed at a row by someone else's privileges. The seven `api` functions are the third and only
-other definer population, and their inventory is asserted, not described: see
+be pointed at a row by someone else's privileges. The other seven definers are the
+`internal_api` bodies behind the `api` wrappers — the wrappers themselves are `SECURITY INVOKER`
+one-liners, which is what C26b ("nothing exposed through the Data API acts above its caller")
+holds — and that inventory is asserted, not described: see
 [`public-invitation-security.md`](public-invitation-security.md) §2.
+
+Stage 4 created **seven** more `private` functions — `guard_tradition_pack_release()` (the lifecycle
+and vocabulary guard), `require_approved_pack_release()` and `require_frozen_pack_release()` (the two
+write gates), `default_invitation_definition()` (the definition a wedding with **no** pack resolves
+against, written in the same shape as a release's so the pack path and the no-pack path are one code
+path), `pack_text_for()` (one language map, three outcomes: the requested language, an English text
+the *release* declared as a fallback, or nothing — with the middle case recorded rather than
+silently returned), `resolve_invitation_sections()` (wording resolution at freeze time) and
+`invitation_freeze_issues()` (the reasons a candidate snapshot may not be frozen, collected as a list
+so a refusal can name all of them at once). — and rewrote four that already existed
+(`build_invitation_snapshot`, `public_invitation_dto`, `internal_api.create_invitation_version`,
+`internal_api.preview_invitation`). **None of the nine `private` functions Stage 4 created or
+rewrote is a definer**: each one carries `SECURITY INVOKER` and `SET search_path = ''` in its own
+definition (`20260927120000_stage4_tradition_pack_releases.sql:201, 704, 753, 813, 847, 893, 987,
+1074, 1176`), and sixteen of the eighteen `private` functions at this head are invokers — the two
+exceptions are the trigger definers named in the paragraph above, and the count was read from
+`pg_proc.prosecdef` on the running local database, not inferred from the migration text. The two
+`internal_api` rewrites are definers, as they were before this stage, and remain inside the seven
+verbs the `api` wrappers delegate to. That choice is load-bearing
+rather than stylistic. A `SECURITY DEFINER` release guard would read a release the caller cannot see
+and then decide from it, which turns a content-maintenance function into a read path with privileges
+of its own; an invoker guard answers the same question with whatever the caller could already name,
+so "not readable" *is* the refusal a customer gets — measured in
+`supabase/tests/api/stage4_tradition_packs.test.mjs` SEL-03, where a draft, a reviewed and a
+deprecated release, another pack's retired release, a uuid that is not a release at all and the zero
+uuid all come back as HTTP 403 with code `42501`, a null hint and the gate's own sentence. The
+catalogue's definer population is asserted by identity in C26 and each one's `search_path` is
+pinned by C27, so a tenth definer — or a name swapped into that set — is a red test rather than a
+review finding; the count measured at this head is
+**nine** `SECURITY DEFINER` functions outside `pg_catalog` — the seven `internal_api` verbs plus the
+two trigger helpers above.
 
 ## 6. What was archived, and what happened to it
 
@@ -200,8 +278,15 @@ Encoded:
 * **Ceremony vocabulary is the customer's.** `wedding_events.event_key`,
   `wedding_people.role_key`/`group_key` and `approval_feedback.section_key` are free `text` with no
   CHECK enumerating ritual names, because hard-coding Tamil or Telugu ceremony labels in SQL would be
-  a cultural claim disguised as a constraint (directive §13). A tradition pack may *recommend*
-  vocabulary in a later stage; the database will not decide it.
+  a cultural claim disguised as a constraint (directive §13). Stage 4 is the "later stage" that
+  blueprint sentence pointed at, and it kept that rule: a release *may* carry an
+  `event_vocabulary` array inside its `definition`, which the guard validates as a shape (at most 50
+  entries, slug keys, label strings, no unknown keys) and never as a set of permitted ceremonies. The
+  vocabulary is a recommendation a host can decline, `wedding_events` still accepts any key, and —
+  measured rather than assumed — **nothing in a frozen snapshot or in the guest's document is drawn
+  from `event_vocabulary` today**; it is parsed by `src/lib/traditionPackDefinition.ts` and validated,
+  and no renderer reads it. Saying so matters, because "the pack supplies the ceremony names" is the
+  kind of sentence that would make the mechanism sound like a claim about culture.
 
 Refused: **no column expresses cultural identity.** `40_catalog.sql` C43/C44 scan every `public`,
 `private` and `legacy` column, table and constraint name for
@@ -209,10 +294,13 @@ caste/community/religion/ethnicity/sect vocabulary
 and find zero matches. The same rule runs without a database in
 `scripts/domain-contract.test.mjs`, including a control set of hostile names it must catch
 (`wedding_people.caste`, `weddings.inferred_religion`) and near misses it must leave alone
-(`approval_feedback.section_key`, `weddings.tradition_pack_id`) — the second pair matters because a
-matcher that treats `sect` as a substring of `section` reports a violation that does not exist.
-`tradition_pack_id` is a *selected behaviour pack*, which is a product feature, not an attribute of a
-person or a family.
+(`approval_feedback.section_key`, `weddings.tradition_pack_release_id`,
+`invitation_versions.tradition_pack_release_id`, `tradition_pack_releases.definition`,
+`tradition_packs.pack_key`) — the matcher that treats `sect` as a substring of `section` reports a
+violation that does not exist, and that failure mode is why the near-miss list is a test.
+`tradition_pack_release_id` is a *selected, reviewed document version*, which is a product feature,
+not an attribute of a person or a family; the same file asserts in the other direction that
+`weddings` no longer contains `tradition_pack_id`, so the retired shape cannot come back unnoticed.
 
 Money: **no monetary column exists in `public` or `private`** (C41). `numeric` appears only as venue
 coordinates (C40) and there is no `real`/`double precision` anywhere (C39). The integer-paise columns
@@ -220,11 +308,12 @@ that do exist are archived ones. No price, no GST, no package amount was invente
 
 ## 8. Deferred, on purpose
 
-| Concept | Status at this branch's head (schema: Stage 2 + Stage 3) | What would promote it |
+| Concept | Status at this branch's head (schema: Stage 2 + Stage 3 + Stage 4) | What would promote it |
 | --- | --- | --- |
 | Recipients / individual guests inside a household | **no table, no JSON column** | a per-recipient credential, or an RSVP that records one named person |
-| Pack × template compatibility | no join table | the first real pack pairing that needs one (Stage 4) |
-| Guest links | Stage 3 built the whole read path: mint, resolve, rotate, revoke, and a `/i/:token` route | what is still deferred is a guest *doing* anything — RSVP, approvals, a reply of any kind |
+| Pack × template compatibility | still **no join table**. Stage 4 reached the pack model, not this one: a release's `design_guidance` is validated as a shape and nothing pairs a release with a `design_templates` row | the first real pairing a customer can choose, rather than two catalogues that happen to exist |
+| Content authoring for a release | **no surface at all** — no write policy, no `api` wrapper, no admin console. Creating or approving a release means a privileged role and hand-written SQL | Stage 7's review workflow, or a maintenance tool with its own audit trail |
+| Guest links | Stage 3 built the whole read path: mint, resolve, rotate, revoke, and a `/i/:token` route; Stage 4 re-qualified it with a pack block in the DTO | what is still deferred is a guest *doing* anything — RSVP, approvals, a reply of any kind |
 | Family approval UX | schema only | Stage 7 |
 | Event / venue / family editors | schema only | Stage 5 |
 | Uploads and Storage policies | registry table only, no Storage integration | Stage 6 |
@@ -257,7 +346,7 @@ number written here would be invented.
 | Financial history | `legacy.payments`, `legacy.orders` (archived) | high — real historical money claims that were **not** reinterpreted; archived and unreachable to every API role | a maintenance session only |
 | Credentials | `private.access_tokens.token_hash` | **highest — and by construction a leak is not a credential leak**: only a digest is stored, and no browser role can read the table or even name its schema | minted by `api.publish_invitation_version`/`api.rotate_invitation_token`, hashed and compared inside `private.invitation_for_token`; no product code path reads the table |
 | Audit trail | `private.audit_events` | high — it describes actions, including destructive ones, whose subjects may no longer exist | server roles only |
-| Platform content | `tradition_packs`, `design_templates` | low personal sensitivity, high **reputational** sensitivity: an unreviewed pack or template becoming customer-visible is a cultural claim made by the platform | signed-in users see `draft` and `approved` rows only, and cannot write any |
+| Platform content | `tradition_packs`, `tradition_pack_releases`, `design_templates` | low personal sensitivity, high **reputational** sensitivity: an unreviewed pack or template becoming customer-visible is a cultural claim made by the platform | a signed-in user reads a pack only when it has an approved release, and reads a release only when it is approved *or* it is the retired one their own wedding points at — and can name only seven of its twenty-two columns, so the reviewer's identity, stated qualification and machine-assistance notes are not merely hidden but ungrantable. No client writes any of it |
 
 Two consequences worth stating plainly: the product holds third-party data (guests, reviewers) about
 people who never signed up, and Stage 8/Stage 7 must design that person's view and objection path
@@ -268,8 +357,11 @@ Stage 13 problem, named here rather than left implicit.
 ## 10. Vocabulary, and the compatibility names kept
 
 The domain word is **wedding**. `weddings`, `wedding_people`, `wedding_events`, `wedding_assets` are
-the canonical names, and the only module in the app that names a table is
-`src/integrations/supabase/weddings.ts`. The word "project" survives in exactly three places, all of
+the canonical names, and the only modules in the app that name a table are the five under
+`src/integrations/supabase/` — `weddings.ts`, `weddingContent.ts`, `traditionReleases.ts` (which is
+where `tradition_packs` and `tradition_pack_releases` are allowed to appear), `publication.ts` and
+`publicInvitation.ts`, the last two reaching only `api` functions. The word "project" survives in
+exactly three places, all of
 them deliberate and none of them a data-model statement:
 
 | Kept name | Why kept | What it now refers to |
@@ -293,7 +385,10 @@ erDiagram
     auth_users ||--o{ weddings : "owns (CASCADE)"
     auth_users ||--o| profiles : "one profile (CASCADE)"
     auth_users ||--o{ user_roles : "holds (CASCADE)"
-    tradition_packs ||--o{ weddings : "selected (RESTRICT)"
+    auth_users ||--o{ tradition_pack_releases : "credited for a review (SET NULL)"
+    tradition_packs ||--o{ tradition_pack_releases : "releases (RESTRICT)"
+    tradition_pack_releases ||--o{ weddings : "selected (RESTRICT)"
+    tradition_pack_releases ||--o{ invitation_versions : "pinned by (RESTRICT)"
     design_templates ||--o{ weddings : "styled by (RESTRICT)"
     weddings ||--o{ wedding_people : "names (CASCADE)"
     weddings ||--o{ venues : "holds (CASCADE)"
@@ -329,7 +424,13 @@ A guest can now be given a link and nothing else: there is no guest, RSVP or app
 upload path, no payment provider, no price, no admin console and no deployed schema. The editor does
 now write the rows this domain owns: `ContentEditor` on the workbench adds, edits, reorders and
 removes `wedding_people`, `venues` and `wedding_events` rows, which is how the Stage 3 host-to-guest
-run got its content — by being typed into the product, not by seeded SQL. `npm run product:check` and the
-readiness matrix
+run got its content — by being typed into the product, not by seeded SQL. Stage 4 added one more
+customer-visible write to that list: the "Tradition & wording" panel sets or clears
+`weddings.tradition_pack_release_id`, and nothing else — a browser has never written a pack or a
+release row, and cannot (no policy, no table privilege, and a `reject_client_write` trigger behind
+each). What Stage 4 did **not** add is a customer-visible content catalogue: the approved releases
+that exist are the ones its own test batteries created in test databases, each marked `TEST ONLY`, so
+on a real database today the panel's honest state is "no pack, write your own words". `npm run
+product:check` and the readiness matrix
 ([`../product/feature-readiness.md`](../product/feature-readiness.md)) are the mechanisms that keep
 this document from being read as a feature list.

@@ -66,6 +66,45 @@ The database layer, exercised against throwaway local Postgres containers only:
 - The public and unauthenticated screens again in a browser afterwards: `/`, sign-in, sign-up, the
   three policy pages, and the protected-route redirect
 
+Every number in the two sections above is that stage's own measurement, printed in its audit. The
+totals at this branch's head — and the movement between them, suite by suite — are in
+[`docs/product/feature-readiness.md`](docs/product/feature-readiness.md) and
+[`docs/audits/stage-4-tradition-pack-foundation.md`](docs/audits/stage-4-tradition-pack-foundation.md);
+the older documents are not rewritten when a count moves.
+
+## Verified in Stage 4
+
+The tradition-pack mechanism, exercised against throwaway local databases and the **local** Supabase
+stack only — no hosted project, and no customer-visible pack content:
+
+- 18 forward migrations apply in order on both chains, with 42 / 76 outcome assertions, 46 / 49
+  draft-invariant, 284 publication-boundary, 464 privilege and RLS attacks and 103 catalogue
+  assertions per chain
+- Stage 4's own document battery — **426 assertions per chain**, plus **57** for its fixture tooling,
+  printed separately so no stage's total is read as another's — pins the release lifecycle: content
+  freezes when a release leaves draft, the lifecycle only moves forward, a release that has left
+  draft cannot be deleted, and the definition vocabulary is refused key by key rather than by
+  convention
+- **28 HTTP tests** against the running local stack with real JWTs, covering what a signed-in host may
+  read (seven columns of the release table; the reviewer's identity, stated qualification and
+  machine-assistance notes are ungrantable, not merely hidden) and what a selection may name: every
+  release that is not approved is refused with the same sentence, whether it is a draft, a reviewed,
+  a deprecated, another pack's retired release or a uuid that does not exist
+- The freeze-time path from a chosen release to the guest's document, re-qualified on the
+  **production bundle** served to a headless browser: the two-document comparison (no pack versus a
+  synthetic approved pack), the retire-after-freeze walk, every network destination the bundle
+  reaches, and a 10-shape × 4-viewport render sweep — 143 checks, 33 measurements, 0 findings
+- Six new `product:check` rules that fail the build if application code ever branches on a pack key,
+  infers a tradition from a name or a community, gates a rite on a language, claims ceremonial
+  authority, or presents the unreviewed draft candidate as shippable — each with a self-test and the
+  near-miss controls beside it
+- What is **not** demonstrated, and the most important line in this section: no reviewed customer
+  content exists. The only approved releases in any database are the batteries' own rows, each marked
+  `TEST ONLY`, and the Tamil/English candidate that `content/tradition-packs/` carries is draft,
+  machine-assisted and `human_reviewed: false`
+  ([`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md)).
+  A host choosing no pack and writing every word is still the only path a real family can take
+
 ## Implemented foundations requiring a configured backend
 
 Real code paths that compile and ship in this build. Stage 3 exercised the host-to-guest loop
@@ -83,6 +122,16 @@ through the product's own screens against a **local** Supabase stack (see
   checkout, so it affects nothing commercial)
 - The workbench editor: the four prose passages, the styling of the paper (font, size, colour,
   alignment and a **simulated** foil overlay), and the people, venues and ceremonies as rows
+- A "Tradition & wording" panel that lists the approved releases a host may choose, offers "No
+  tradition pack" as a first-class choice, and writes exactly one column of the host's own wedding.
+  It shows no reviewer identity, qualification or machine-assistance note — those columns are not
+  grantable to a browser role — and nothing is ever inferred from a name, a community, a language or
+  a location. **On a real database the list is empty**, because no reviewed customer content exists
+  yet, so what a host sees today is the no-pack state
+- Freeze-time resolution: when a version is frozen, the chosen release's wording (or the host's own,
+  against the same default shape) is resolved by the database and stored inside the frozen snapshot
+  with its provenance, so a guest's document is explained by the row it came from rather than by a
+  lookup that has to succeed later
 
 No **production** Supabase environment was validated: a deployed project, its gateway configuration
 and its transport security are all still unproven here. What Stage 3 did close is the layer Stages 1
@@ -185,11 +234,13 @@ No secret belongs in this repository. The app only ever reads a browser-public p
 - [`docs/product/invitation-semantics.md`](docs/product/invitation-semantics.md) — the patrika model
 - [`docs/product/structured-creator.md`](docs/product/structured-creator.md) — the creation flow
 - [`docs/product/content-governance.md`](docs/product/content-governance.md) — how tradition-pack wording becomes trustworthy
+- [`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md) — the one drafted pack definition, reviewed by nobody, and what a reviewer would need to answer
+- [`docs/architecture/decisions/0007-versioned-reviewed-tradition-pack-releases.md`](docs/architecture/decisions/0007-versioned-reviewed-tradition-pack-releases.md) — why a pack is a concept and a release is the document
 - [`docs/product/commercial-model.md`](docs/product/commercial-model.md) — target pricing, pilot-validated, not live prices
 - [`docs/product/brand-clearance.md`](docs/product/brand-clearance.md) — brand status and remaining clearance work
 - [`docs/product/design-principles.md`](docs/product/design-principles.md) — visual and editorial rules
 - [`docs/product/feature-readiness.md`](docs/product/feature-readiness.md) — IMPLEMENTED / FOUNDATION / PLANNED V1 / LATER / EXCLUDED
-- [`docs/architecture/decisions/`](docs/architecture/decisions/) — ADRs 0001–0006
+- [`docs/architecture/decisions/`](docs/architecture/decisions/) — ADRs 0001–0007
 - [`docs/architecture/stage-2-domain-blueprint.md`](docs/architecture/stage-2-domain-blueprint.md) — documentation-only domain design
 
 ## Local development
@@ -205,21 +256,28 @@ Environment: copy `.env.example` to `.env` and point `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` at a Supabase project you own. Never commit `.env`, never use a
 service-role key in this app, and never connect an unrelated or production project for local work.
 
-Every gate, in the order CI runs them:
+Every gate, in the order CI runs the five it runs (CI's own `security` job then does the credential
+scan and `npm audit --omit=dev --audit-level=high`; the plain `npm audit` below is run locally, not in
+CI, and its advisories are reported rather than blocking):
 
 ```bash
 npm run lint
 npm run typecheck
-npm test
+npm run dbtypes:check
 npm run product:check
+npm test
 npm run build
 npm audit
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run product:check` is the contract guard: it scans active source surfaces for retired brand
-names, fabricated social proof and per-guest pricing language. It intentionally ignores
-`docs/audits/**`, which records historical evidence verbatim.
+`npm run product:check` is the contract guard: **23 rules** over the active surfaces this tree scans —
+retired brand names, fabricated social proof and per-guest pricing language, the retired scaffold
+vocabulary, which tables may be named outside the data adapter, and the six Stage 4 cultural-safety
+rules that refuse a tradition inferred from a name, a community or a language, or a pack key branched
+on in application code. It intentionally ignores `docs/audits/**`, which records historical evidence
+verbatim, and the cultural-safety rules scan only `src/` and `content/`, so a governance document that
+*quotes* a forbidden shape stays a document rather than becoming a finding.
 
 ## Database testing
 
@@ -244,6 +302,24 @@ published migrations alone, and the migrations plus a synthetic legacy history �
 draft-invariant, publication-boundary, attack and catalogue suites on each. It is named for the stage
 that wrote it and now carries Stage 3's files too.
 
+`bash supabase/tests/stage4/run.sh` runs Stage 4's own document battery over the same two chains
+(426 lifecycle, freeze, resolution and provenance assertions per chain, plus 57 for its fixture
+tooling) and starts its own container. Its totals print apart from the other suites and are never
+added to them, which is deliberate: a runner that folds counts makes a regression in one suite look
+like growth in another. Both runners are informational about their boundary too — plain Postgres plus a
+role/auth shim, so REST-level behaviour is claimed only by the HTTP suites below.
+
+`node scripts/stage4-render-qualification.mjs` is the browser instrument: it drives a real Chromium
+over the DevTools protocol against the production bundle, and measures the rendered invitation
+(10 content shapes × 4 viewports), the freeze-to-guest provenance walk and every network destination
+the bundle reaches (143 checks, 33 measurements, 0 findings at this head). It checks rather than
+assumes its three prerequisites — this repository's local stack running, `npm run build` having
+produced `dist`, and `npm run preview -- --host 127.0.0.1 --port 4173 --strictPort` serving it — and
+it refuses any target that is not loopback. Note what it does to get there: it writes wedding, release
+and credential rows into the **local** database for the duration of a run and deletes them in its
+teardown, so a run interrupted before teardown leaves synthetic rows behind; screenshots go to the OS
+temp directory, not into the repository.
+
 ## API testing against the local stack
 
 The suites above play database roles inside psql; they cannot prove what PostgREST, a JWT or a browser
@@ -258,10 +334,12 @@ bash supabase/tests/api/run.sh
 `run.sh` reads `.env.local` (gitignored) and **refuses to run at all** unless `SUPABASE_LOCAL_URL` is a
 loopback host *and* its port matches the `[api]` port in this repository's `supabase/config.toml` — a
 mistaken pointer at someone else's stack fails both gates. It issues real sign-ups, real tokens and one
-tampered JWT, and asserts what comes back through HTTP. Two files, two concerns:
-`stage3_security.test.mjs` (isolation, the anonymous surface, what a customer may never do) and
-`stage3_publication.test.mjs` (the `api` surface, versions, credentials, the guest door, rotation and
-revocation). `--local` is always explicit: `supabase link`, `db push`, `db pull` and
+tampered JWT, and asserts what comes back through HTTP. Three files, three concerns:
+`stage3_security.test.mjs` (56 tests — isolation, the anonymous surface, what a customer may never
+do), `stage3_publication.test.mjs` (37 — the `api` surface, versions, credentials, the guest door,
+rotation and revocation) and `stage4_tradition_packs.test.mjs` (28 — what a signed-in role may read of
+the catalogue, which release a selection may name, and that a browser has no way to author or approve
+a release). `--local` is always explicit: `supabase link`, `db push`, `db pull` and
 `db reset --linked` are not part of this project's workflow and are never run.
 
 See [`docs/architecture/public-invitation-security.md`](docs/architecture/public-invitation-security.md)

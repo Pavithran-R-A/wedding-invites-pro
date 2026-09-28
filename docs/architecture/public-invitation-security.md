@@ -19,7 +19,7 @@ and pays for it by making the link unguessable, revocable, and worth nothing bey
 
 | Who is asking | What they can learn | What they cannot do |
 | --- | --- | --- |
-| anonymous, no credential | that `/i/<anything>` answers `{"available": false}` — the same bytes for a wrong, revoked, expired and never-existing address | enumerate; tell a bad address from a taken-down one; read any table (`SELECT` on all 18 `public` tables is refused by the grant layer, `PGRST*`/42501 for the unexposed ones) |
+| anonymous, no credential | that `/i/<anything>` answers `{"available": false}` — the same bytes for a wrong, revoked, expired and never-existing address | enumerate; tell a bad address from a taken-down one; read any table (`SELECT` on all 19 `public` tables is refused by the grant layer, `PGRST*`/42501 for the unexposed ones) |
 | a signed-in host, about someone else's wedding | nothing, and no signal that it exists: `[]` for a hidden row, one SQLSTATE and one message shared by "not yours" and "not there" | freeze, preview, publish, rotate or revoke it; write `invitation_versions`, `publications` or `private.access_tokens` at all |
 | a host, about their own | everything the DTO carries, plus their version history and whether a link is live | mint an entitlement, grant itself a role, insert a frozen version by hand, read `access_tokens` / `audit_events` / `projects` / `guests` / `payments` / `templates` (not REST-addressable at all) |
 | a guest holding a live link | one invitation document, 11 named fields | learn an identifier of any kind; receive markup; get a non-`https` link; get a second invitation |
