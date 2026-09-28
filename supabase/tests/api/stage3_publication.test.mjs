@@ -677,11 +677,13 @@ describe('§6.3 publishing mints a link and freezes a version', () => {
 describe('§6.4 the guest door', () => {
   const GUEST_KEYS = ['available', 'invitation'];
 
-  // The same eleven names `supabase/tests/stage3/30_publication.sql` pins against the
-  // projection function itself, asserted here over HTTP: a guest gets the whitelist,
-  // the transport, and nothing that identifies a row.
+  // The same twelve names `supabase/tests/stage3/30_publication.sql` pins against the
+  // projection function itself (its D9, D40 and F6c), asserted here over HTTP: a guest
+  // gets the whitelist, the transport, and nothing that identifies a row. Stage 4 added
+  // the twelfth, `sections`, and the SQL battery counted it then; this list is the HTTP
+  // half of the same contract, so it counts it the same way.
   const DTO_KEYS = ['title', 'language', 'style', 'design_template', 'tradition_pack',
-    'people', 'events', 'welcome', 'family_introduction', 'event_notes', 'closing'];
+    'sections', 'people', 'events', 'welcome', 'family_introduction', 'event_notes', 'closing'];
 
   test('API21 a successful resolution is the flag plus one whitelisted object', async () => {
     const r = await resolveAs(hosts.hostA.token);
@@ -694,6 +696,12 @@ describe('§6.4 the guest door', () => {
     // writes. `foilEnabled` is absent on purpose (see the projection's comment).
     assert.deepEqual(Object.keys(dto.language).sort(), ['additional', 'primary']);
     assert.deepEqual(Object.keys(dto.style).sort(), ['alignment', 'color', 'font', 'fontSize']);
+    // The section block, likewise, because the renderer walks it: the request the freeze
+    // was resolved against, and the ordered items — and one item is the seven keys the
+    // projection builds, no release identifier among them.
+    assert.deepEqual(Object.keys(dto.sections).sort(), ['items', 'requested']);
+    assert.deepEqual(Object.keys(dto.sections.items[0]).sort(),
+      ['body', 'heading', 'host_field', 'kind', 'position', 'required', 'section_key']);
     // Absent by design, and worth naming rather than leaving to inference: a version
     // counter is a fact about the database, not about the wedding.
     assert.equal(dto.version_number, undefined);

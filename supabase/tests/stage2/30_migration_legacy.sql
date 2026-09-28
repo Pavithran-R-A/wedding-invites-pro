@@ -153,11 +153,15 @@ BEGIN
     'public.weddings w WHERE coalesce(array_length(w.additional_languages, 1), 0) > 0', 0);
 
   -- Tradition packs are a reviewed, authored artefact. Nothing in the legacy schema
-  -- named one, so nothing may claim a wedding belongs to one.
+  -- named one, so nothing may claim a wedding belongs to one. Stage 4 moved the
+  -- reference from a pack to a pack *release*; the guarantee is the same sentence about
+  -- a narrower thing, so it is restated rather than dropped.
   PERFORM pg_temp.st2_count('M14 no tradition pack inferred from a language or a template name',
-    'public.weddings w WHERE w.tradition_pack_id IS NOT NULL', 0);
+    'public.weddings w WHERE w.tradition_pack_release_id IS NOT NULL', 0);
   PERFORM pg_temp.st2_count('M15 the migration created no tradition pack',
     'public.tradition_packs', 0);
+  PERFORM pg_temp.st2_count('M15b the migration created no tradition pack release either',
+    'public.tradition_pack_releases', 0);
 
   -- Template link: kept only when that template itself arrived.
   PERFORM pg_temp.st2_set('M16 design_template link per wedding',
@@ -440,13 +444,14 @@ END
 $MIGRATION$;
 
 -- A suite that can be emptied one assertion at a time still prints "PASSED", so the
--- floor is checked before the word is used.
+-- floor is checked before the word is used. Stage 4 raised this from 75 to 76 by adding
+-- M15b; the number tracks the assertions in this file and must move with them.
 DO $FLOOR$
 DECLARE n int;
 BEGIN
   n := coalesce(current_setting('st2.passed', true), '0')::int;
-  IF n < 75 THEN
-    RAISE EXCEPTION 'Stage 2 legacy-migration suite ran only % assertions (floor 75)', n;
+  IF n < 76 THEN
+    RAISE EXCEPTION 'Stage 2 legacy-migration suite ran only % assertions (floor 76)', n;
   END IF;
 END
 $FLOOR$;

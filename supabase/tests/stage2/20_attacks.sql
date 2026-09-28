@@ -71,6 +71,9 @@ SELECT
   gen_random_uuid() AS owner_a,        gen_random_uuid() AS owner_b,
   gen_random_uuid() AS outsider,       gen_random_uuid() AS wedding_a,
   gen_random_uuid() AS wedding_b,      gen_random_uuid() AS pack,
+  gen_random_uuid() AS pack_unshipped, gen_random_uuid() AS release_ok,
+  gen_random_uuid() AS release_dep,    gen_random_uuid() AS release_draft,
+  gen_random_uuid() AS release_reviewed,
   gen_random_uuid() AS template,       gen_random_uuid() AS template_dep,
   gen_random_uuid() AS person_a,       gen_random_uuid() AS venue_a,
   gen_random_uuid() AS venue_b,        gen_random_uuid() AS event_a1,
@@ -94,14 +97,117 @@ SELECT s.owner_a, 'owner-a@example.test', jsonb_build_object('name', 'Asha') FRO
 UNION ALL SELECT s.owner_b, 'owner-b@example.test', '{}'::jsonb FROM seed s
 UNION ALL SELECT s.outsider, 'outsider@example.test', '{}'::jsonb FROM seed s;
 
--- Platform content in every catalogue state. `deprecated` must vanish from a
--- customer's read; `draft` must stay readable, because a migrated legacy template
--- has never been reviewed and the picker would otherwise go blank.
-INSERT INTO public.tradition_packs (id, pack_key, revision, display_name, status,
-                                    supported_languages, structure, reviewed_by, reviewed_at, review_notes)
-SELECT s.pack, 'tamil-vaasthu', 1, 'Tamil Vaasthu', 'approved',
-       ARRAY['ta', 'en'], '{"rituals": ["haathi_puja"]}'::jsonb, s.owner_a, now(),
-       'seeded by the Stage 2 suite' FROM seed s;
+-- Platform content in every catalogue state, which since Stage 4 spans two levels: the
+-- pack is the concept a host chooses, and a *release* is the frozen definition a document
+-- can pin. `deprecated` must vanish from a customer's read; a template's `draft` must
+-- stay readable, because a migrated legacy template has never been reviewed and the
+-- picker would otherwise go blank — while a *release* draft must NOT be readable, which
+-- is the asymmetry §9 asks for and group 9 measures.
+--
+-- Everything here is TEST ONLY. The review record beside it is synthetic: no Tamil
+-- reader has reviewed these strings, `machine_assisted` is true, the wording is product
+-- structure rather than religious text, and the Tamil below is present so that a
+-- language-resolution path has two languages to resolve — no assertion in this file
+-- measures how a string is spelled.
+INSERT INTO public.tradition_packs (id, pack_key, display_name, scope_statement)
+SELECT s.pack, 'tamil_vaasthu', 'TEST ONLY — Tamil Vaasthu',
+       'TEST ONLY — a synthetic bilingual pack shape used by the Stage 2 attack battery. '
+       'It claims no tradition, reviews no religious text, and is never shipped.'
+  FROM seed s
+UNION ALL
+SELECT s.pack_unshipped, 'unshipped_pack', 'TEST ONLY — unshipped candidate',
+       'TEST ONLY — a pack whose every release is still unapproved, so neither the '
+       'concept nor its wording may reach a customer at all.' FROM seed s;
+
+-- The lifecycle (§6 of the Stage 4 migration) makes an approved release unrepresentable
+-- in one statement: the guard refuses a row born as anything but draft, and freezes its
+-- content the moment it stops being one. So the trusted path walks the legal steps
+-- instead of writing an end state — which is also what makes "approval cannot be faked
+-- by an INSERT" a measured fact rather than a documented claim.
+--
+-- `reviewed_by` stays NULL on purpose. §18 asks for a label and a stated qualification,
+-- not a reviewer account, and inventing a row in `auth.users` to credit would be exactly
+-- the fabricated-human-review this stage is not allowed to produce.
+-- The small definition, reused by three releases. A pg_temp function rather than a
+-- repeated literal, because a dollar-quoted body cannot be referenced twice.
+CREATE FUNCTION pg_temp.st2_def_small() RETURNS jsonb
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT '{
+    "sections": [
+      {"section_key": "opening", "position": 1, "kind": "text", "required": true,
+       "host_field": "welcome", "heading": {"en": "Opening"}},
+      {"section_key": "family", "position": 2, "kind": "people_list", "required": false,
+       "heading": {"en": "Our families"}}
+    ]
+  }'::jsonb;
+$$;
+
+INSERT INTO public.tradition_pack_releases
+  (id, pack_id, release_number, definition_schema_version, languages, definition,
+   author_label, machine_assisted, machine_assistance_notes, source_reference, changelog)
+SELECT s.release_ok, s.pack, 1, 1, ARRAY['en', 'ta'], $def1${
+  "sections": [
+    {"section_key": "opening", "position": 1, "kind": "text", "required": true,
+     "host_field": "welcome", "allow_english_fallback": true,
+     "heading": {"en": "Opening", "ta": "தொடக்கம்"},
+     "pack_text": {"en": "With the goodwill of both families.", "ta": "வணக்கம்"}},
+    {"section_key": "family", "position": 2, "kind": "people_list", "required": true,
+     "heading": {"en": "Our families", "ta": "குடும்பம்"}},
+    {"section_key": "ceremonies", "position": 3, "kind": "event_list", "required": true,
+     "heading": {"en": "The ceremonies", "ta": "நிகழ்ச்சிகள்"}},
+    {"section_key": "event_notes", "position": 4, "kind": "text", "required": false,
+     "host_field": "event_notes", "allow_english_fallback": true},
+    {"section_key": "blessing", "position": 5, "kind": "text", "required": false,
+     "allow_english_fallback": true,
+     "pack_text": {"en": "A line the pack offers, which the host may replace.",
+                   "ta": "நன்றி"}}
+  ],
+  "event_vocabulary": [
+    {"event_key": "muhurtham", "labels": {"en": "Muhurtham"}},
+    {"event_key": "reception", "labels": {"en": "Reception"}}
+  ],
+  "design_guidance": {"lead_size": 32, "motif_reference": "TEST ONLY — no motif ships"}
+}$def1$::jsonb,
+  'TEST ONLY — synthetic authored fixture', true,
+  'TEST ONLY — drafted by a model from product structure, checked for shape and language '
+  'coverage only. No human reader of Tamil reviewed these strings.',
+  'TEST ONLY — no external source', 'Stage 2 battery fixture' FROM seed s
+UNION ALL
+SELECT s.release_dep, s.pack, 2, 1, ARRAY['en', 'ta'], pg_temp.st2_def_small(),
+  'TEST ONLY — synthetic authored fixture', true,
+  'TEST ONLY — drafted by a model from product structure, checked for shape and language '
+  'coverage only. No human reader of Tamil reviewed these strings.',
+  NULL, 'Second release, retired after approval' FROM seed s
+UNION ALL
+SELECT s.release_draft, s.pack_unshipped, 1, 1, ARRAY['en', 'ta'], pg_temp.st2_def_small(),
+  'TEST ONLY — unreviewed draft candidate', true,
+  'TEST ONLY — drafted by a model. Nobody has reviewed this one at all, which is what '
+  'draft means.', NULL, NULL FROM seed s
+UNION ALL
+SELECT s.release_reviewed, s.pack_unshipped, 2, 1, ARRAY['en', 'ta'], pg_temp.st2_def_small(),
+  'TEST ONLY — reviewed but never approved', true,
+  'TEST ONLY — drafted by a model. A synthetic review record was written against it; no '
+  'human reader of Tamil has reviewed these strings.', NULL, NULL FROM seed s;
+
+-- draft → reviewed. `reviewed` is still not selectable; it only says a record exists.
+UPDATE public.tradition_pack_releases r
+   SET status = 'reviewed', reviewed_at = now(),
+       review_label = 'TEST ONLY — REVIEWED FIXTURE',
+       review_basis = 'TEST ONLY — a synthetic record written by the Stage 2 battery. '
+                      'No human reader of Tamil reviewed these strings.',
+       review_scope = 'TEST ONLY — section order and structure only. No language review, '
+                      'no religious or community endorsement, no customer validation.',
+       reviewed_languages = ARRAY['en', 'ta']
+  FROM seed s
+ WHERE r.id IN (s.release_ok, s.release_dep, s.release_reviewed);
+
+-- reviewed → approved, carrying the record it was reviewed under forward untouched.
+UPDATE public.tradition_pack_releases r SET status = 'approved'
+  FROM seed s WHERE r.id IN (s.release_ok, s.release_dep);
+
+-- approved → deprecated: the only step out of `approved`, and the row stays forever.
+UPDATE public.tradition_pack_releases r SET status = 'deprecated'
+  FROM seed s WHERE r.id = s.release_dep;
 
 INSERT INTO public.design_templates (id, template_key, revision, display_name, status,
                                      supported_languages, preview_svg, layout_settings, reviewed_by, reviewed_at)
@@ -115,9 +221,9 @@ SELECT s.template_dep, 'old-layout', 1, 'Old Layout', 'deprecated', ARRAY['en']:
 FROM seed s;
 
 INSERT INTO public.weddings (id, owner_user_id, title, primary_language, additional_languages,
-                             tradition_pack_id, design_template_id, style_settings,
+                             tradition_pack_release_id, design_template_id, style_settings,
                              estimated_guest_count)
-SELECT s.wedding_a, s.owner_a, 'Asha Canonical', 'ta', ARRAY['en'], s.pack, s.template,
+SELECT s.wedding_a, s.owner_a, 'Asha Canonical', 'ta', ARRAY['en'], s.release_ok, s.template,
        '{"font": "Playfair Display"}'::jsonb, 120 FROM seed s
 UNION ALL
 SELECT s.wedding_b, s.owner_b, 'Bala Canonical', 'en', '{}'::text[], NULL, NULL,
@@ -168,8 +274,8 @@ BEGIN
 END $seed_draft$;
 
 INSERT INTO public.invitation_versions (id, wedding_id, version_number, snapshot,
-                                        tradition_pack_id, design_template_id, created_by)
-SELECT s.version_a1, s.wedding_a, 1, '{"heading": "Asha weds Bala"}'::jsonb, s.pack,
+                                        tradition_pack_release_id, design_template_id, created_by)
+SELECT s.version_a1, s.wedding_a, 1, '{"heading": "Asha weds Bala"}'::jsonb, s.release_ok,
        s.template, s.owner_a FROM seed s
 UNION ALL
 SELECT s.version_b1, s.wedding_b, 1, '{"heading": "Bala weds Divya"}'::jsonb, NULL,
@@ -316,6 +422,34 @@ INSERT INTO probes_privileged (label, stmt) VALUES
    $t$UPDATE public.design_templates SET display_name = 'Free for everyone'$t$),
   ('remove a tradition pack',
    $t$DELETE FROM public.tradition_packs$t$),
+  -- Stage 4 §9: "RLS and grants must make pack administration impossible through a
+  -- user JWT". The three rows above reach the catalogue concept; the five below reach
+  -- the release, which is where the authority actually lives — content, lifecycle and
+  -- the review record.
+  ('add a tradition pack to the catalogue',
+   $t$INSERT INTO public.tradition_packs (pack_key, display_name, scope_statement)
+      VALUES ('my_own_pack', 'Mine', 'A pack a customer wrote, which is not a thing they do')$t$),
+  ('retitle a tradition pack',
+   $t$UPDATE public.tradition_packs SET display_name = 'Free for everyone'
+      WHERE pack_key = 'tamil_vaasthu'$t$),
+  ('write a tradition pack release',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 99, 1, ARRAY['en'],
+              pg_temp.st2_def_small(), 'Mine')$t$),
+  ('promote a release to approved myself',
+   $t$UPDATE public.tradition_pack_releases SET status = 'approved'
+      WHERE pack_id = current_setting('probe.pack')::uuid$t$),
+  ('sign a release as its own reviewer',
+   $t$UPDATE public.tradition_pack_releases
+         SET review_label = 'Reviewed by me', reviewed_at = now(),
+             review_basis = 'I read it, which is the whole point of this probe',
+             review_scope = 'Everything, claimed by the customer who may not claim it',
+             reviewed_languages = ARRAY['en', 'ta']
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('delete an approved release',
+   $t$DELETE FROM public.tradition_pack_releases
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
   ('write the audit trail',
    $t$INSERT INTO private.audit_events (subject_type, action) VALUES ('wedding', 'forged')$t$),
   ('read the audit trail',
@@ -483,16 +617,482 @@ INSERT INTO probes_state (label, expect, stmt) VALUES
   ('two revisions claiming the same slot', '23505',
    $t$INSERT INTO public.design_templates (template_key, revision, display_name)
       VALUES ('maroon-heritage', 1, 'Maroon Heritage copy')$t$),
-  ('pack structure that is not an object', '23514',
-   $t$INSERT INTO public.tradition_packs (pack_key, revision, display_name, structure)
-      VALUES ('broken', 1, 'Broken pack', '[]'::jsonb)$t$),
+  -- The catalogue concept: identity only, since Stage 4 moved content and lifecycle onto
+  -- releases. A slug is a slug, a scope statement has to be long enough to be a scope
+  -- statement, and two concepts cannot share a key.
+  ('pack slug with a hyphen in it', '23514',
+   $t$INSERT INTO public.tradition_packs (pack_key, display_name, scope_statement)
+      VALUES ('tamil-vaasthu-again', 'Hyphen', 'A scope statement long enough to be legal here')$t$),
+  ('pack whose scope statement is a shrug', '23514',
+   $t$INSERT INTO public.tradition_packs (pack_key, display_name, scope_statement)
+      VALUES ('shrug_pack', 'Shrug', 'n/a')$t$),
+  ('two packs claiming the same key', '23505',
+   $t$INSERT INTO public.tradition_packs (pack_key, display_name, scope_statement)
+      VALUES ('tamil_vaasthu', 'Duplicate', 'A scope statement long enough to be legal here')$t$),
+  -- A release definition is not free-form JSON, and a release lifecycle is not a suggestion.
+  -- Each row below is refused by the rule its label names, which is *measured* by the
+  -- expected message in `probe_msgs` rather than by the label alone: the first version of
+  -- this block asserted only the SQLSTATE, and because 23514 is what every CHECK and every
+  -- guard-RAISE in this schema reports, six of those rows were being refused by the pinned
+  -- section vocabulary instead of by the rule they claimed to test (`section_key: 'a'` is
+  -- not a slot the build renders, so it was refused as an unknown slot and the gap-ordering
+  -- rule underneath was never reached). Every section_key below is therefore inside the
+  -- vocabulary, and the message is part of the expectation.
+  ('release with no sections at all', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 50, 1, ARRAY['en', 'ta'],
+              '{"sections": []}'::jsonb, 'TEST ONLY — probe')$t$),
+  ('release whose sections key is absent rather than empty', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 61, 1, ARRAY['en', 'ta'],
+              '{"design_guidance": {"lead_size": 20}}'::jsonb, 'TEST ONLY — probe')$t$),
+  ('release whose sections key is not an array', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 63, 1, ARRAY['en', 'ta'],
+              '{"sections": {"section_key": "opening"}}'::jsonb, 'TEST ONLY — probe')$t$),
+  ('release whose section names a kind no renderer knows', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 51, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "blessing", "position": 1, "kind": "temple_hymn",
+                              "required": false, "heading": {"en": "Blessing"}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose section omits the kind entirely', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 64, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "blessing", "position": 1,
+                              "required": false, "heading": {"en": "Blessing"}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release naming a slot this build has nowhere to render', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 65, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "unknown_slot", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release repeating one section slot twice', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 66, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"},
+                             {"section_key": "opening", "position": 2, "kind": "text",
+                              "required": false, "host_field": "closing"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose section order leaves a gap', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 52, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"},
+                             {"section_key": "closing", "position": 3, "kind": "text",
+                              "required": false, "host_field": "closing"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release with two sections in one position', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 53, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"},
+                             {"section_key": "closing", "position": 1, "kind": "text",
+                              "required": false, "host_field": "closing"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose section has no numeric position', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 67, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "kind": "text",
+                              "required": false, "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose position is a string, not a number', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 68, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": "1", "kind": "text",
+                              "required": false, "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose text section says nothing', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 54, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "blessing", "position": 1, "kind": "text",
+                              "required": false}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose list section reads a host field', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 55, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "family", "position": 1, "kind": "people_list",
+                              "required": false, "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release declaring two people lists', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 69, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "family", "position": 1, "kind": "people_list",
+                              "required": false},
+                             {"section_key": "couple", "position": 2, "kind": "people_list",
+                              "required": false}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release declaring two event lists', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 70, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "ceremonies", "position": 1, "kind": "event_list",
+                              "required": false},
+                             {"section_key": "venue", "position": 2, "kind": "event_list",
+                              "required": false}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  -- One people list *and* one event list is legal — the rule is per kind, and it used to be
+  -- written as a single counter over both, which refused the second of one kind only by
+  -- accident and let two people lists through. This row is that mistake's control.
+  ('release with one people list and one event list', 'no-error',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 71, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "family", "position": 1, "kind": "people_list",
+                              "required": false},
+                             {"section_key": "ceremonies", "position": 2, "kind": "event_list",
+                              "required": false}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release reading a host field that does not exist', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 56, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "guest_phone_numbers"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release with two sections reading one host field', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 72, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"},
+                             {"section_key": "closing", "position": 2, "kind": "text",
+                              "required": false, "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release carrying an unknown key in a section', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 57, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome",
+                              "css": "body {display: none}"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose section omits the required flag', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 73, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose required flag is a string', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 74, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": "yes", "host_field": "welcome"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose list section carries reviewed wording', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 75, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "family", "position": 1, "kind": "people_list",
+                              "required": false,
+                              "pack_text": {"en": "A list draws rows, not sentences."}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose heading is a bare string', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 76, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome",
+                              "heading": "Opening"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose heading is blank after trimming', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 78, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome",
+                              "heading": {"en": "   "}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose wording is blank after trimming', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 79, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "blessing", "position": 1, "kind": "text",
+                              "required": false, "pack_text": {"en": "  "}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  -- Directive §14: an unsupported locale has to be unrepresentable rather than quietly
+  -- ignored. A string in a language the release never claims, and a fallback to a
+  -- language it never claims, are the two shapes that mistake takes.
+  ('release declaring a heading in a language it does not cover', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 58, 1, ARRAY['en'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome",
+                              "heading": {"en": "Opening", "ta": "தொடக்கம்"}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release declaring wording in a language it does not cover', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 80, 1, ARRAY['en'],
+              '{"sections": [{"section_key": "blessing", "position": 1, "kind": "text",
+                              "required": false,
+                              "pack_text": {"en": "Fine.", "ta": "சரி"}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release allowing an English fallback it never declared', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 59, 1, ARRAY['ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome",
+                              "allow_english_fallback": true,
+                              "heading": {"ta": "தொடக்கம்"}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release claiming a language outside the product set', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 60, 1, ARRAY['en', 'hi'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('release whose language list is unsorted', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 81, 1, ARRAY['ta', 'en'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('release whose language list repeats a language', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 82, 1, ARRAY['en', 'en'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('release whose definition carries a key this build does not understand', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 83, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"}],
+                "caste_rules": {"by_surname": "assign"}}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose event vocabulary entry carries an unknown key', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 84, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"}],
+                "event_vocabulary": [{"event_key": "muhurtham",
+                                      "labels": {"en": "Muhurtham"}, "religion": "hindu"}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose event vocabulary key is not a slug', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 85, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"}],
+                "event_vocabulary": [{"event_key": "Muhurtham Ceremony",
+                                      "labels": {"en": "Muhurtham"}}]}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose design guidance is out of range', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 86, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"}],
+                "design_guidance": {"lead_size": 400}}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose design guidance carries an unknown key', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 87, 1, ARRAY['en', 'ta'],
+              '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                              "required": false, "host_field": "welcome"}],
+                "design_guidance": {"temple_gopuram_svg": "<svg/>"}}'::jsonb,
+              'TEST ONLY — probe')$t$),
+  ('release whose definition schema version this build cannot read', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 62, 99, ARRAY['en'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('release with no release number', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 0, 1, ARRAY['en'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('two releases of one pack in the same slot', '23505',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (current_setting('probe.pack')::uuid, 1, 1, ARRAY['en'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('release belonging to no pack', '23503',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label)
+      VALUES (gen_random_uuid(), 1, 1, ARRAY['en'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe')$t$),
+  ('release created already reviewed', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label, status,
+            reviewed_at, review_label, review_basis, review_scope, reviewed_languages)
+      VALUES (current_setting('probe.pack')::uuid, 88, 1, ARRAY['en', 'ta'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe', 'reviewed', now(),
+              'TEST ONLY — REVIEWED', 'TEST ONLY — synthetic record, nobody read the Tamil.',
+              'TEST ONLY — structure only.', ARRAY['en', 'ta'])$t$),
+  ('release created already approved', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label, status,
+            reviewed_at, approved_at, review_label, review_basis, review_scope,
+            reviewed_languages)
+      VALUES (current_setting('probe.pack')::uuid, 89, 1, ARRAY['en', 'ta'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe', 'approved', now(), now(),
+              'TEST ONLY — APPROVED', 'TEST ONLY — synthetic record, nobody read the Tamil.',
+              'TEST ONLY — structure only.', ARRAY['en', 'ta'])$t$),
+  -- Directive §B: machine assistance is disclosed or it is not representable. A release
+  -- that says a model drafted it has to say so in prose a reader sees; the control half
+  -- of this pair is group 16's, because a successful INSERT cannot live in a table whose
+  -- loop asserts refusal.
+  ('machine-assisted release with no disclosure', '23514',
+   $t$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+            definition_schema_version, languages, definition, author_label,
+            machine_assisted)
+      VALUES (current_setting('probe.pack')::uuid, 90, 1, ARRAY['en', 'ta'],
+              pg_temp.st2_def_small(), 'TEST ONLY — probe', true)$t$),
+  ('draft given a review label', '23514',
+   $t$UPDATE public.tradition_pack_releases SET review_label = 'TEST ONLY — REVIEWED'
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft given an approval timestamp', '23514',
+   $t$UPDATE public.tradition_pack_releases SET approved_at = now()
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft given a retirement timestamp', '23514',
+   $t$UPDATE public.tradition_pack_releases SET deprecated_at = now()
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  -- Each of these three is one statement that both moves the status and writes the
+  -- metadata the move requires — the review record has to arrive *with* the step, and the
+  -- rules below are the halves of "with" that a caller might leave out.
+  ('draft promoted without saying when it was reviewed', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', review_label = 'TEST ONLY — REVIEWED',
+            review_basis = 'TEST ONLY — synthetic record, nobody read the Tamil.',
+            review_scope = 'TEST ONLY — structure only.', reviewed_languages = ARRAY['en','ta']
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted with no basis for the review', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', reviewed_at = now(),
+            review_label = 'TEST ONLY — REVIEWED',
+            review_scope = 'TEST ONLY — structure only.', reviewed_languages = ARRAY['en','ta']
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted on a review too short to be a claim', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', reviewed_at = now(), review_label = 'TEST ONLY — REVIEWED',
+            review_basis = 'short', review_scope = 'TEST ONLY — structure only.',
+            reviewed_languages = ARRAY['en','ta']
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted on a language the release never covered', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', reviewed_at = now(), review_label = 'TEST ONLY — REVIEWED',
+            review_basis = 'TEST ONLY — synthetic record, nobody read the Tamil.',
+            review_scope = 'TEST ONLY — structure only.', reviewed_languages = ARRAY['en','ml']
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted on an empty reviewed-language list', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', reviewed_at = now(), review_label = 'TEST ONLY — REVIEWED',
+            review_basis = 'TEST ONLY — synthetic record, nobody read the Tamil.',
+            review_scope = 'TEST ONLY — structure only.', reviewed_languages = ARRAY[]::text[]
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted on an unsorted reviewed-language list', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', reviewed_at = now(), review_label = 'TEST ONLY — REVIEWED',
+            review_basis = 'TEST ONLY — synthetic record, nobody read the Tamil.',
+            review_scope = 'TEST ONLY — structure only.', reviewed_languages = ARRAY['ta','en']
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  -- §B: `reviewed_by` is optional, and where it points is a real account. A caller cannot
+  -- sign a review with an invented person.
+  ('review naming a reviewer who does not exist', '23503',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'reviewed', reviewed_at = now(), review_label = 'TEST ONLY — REVIEWED',
+            review_basis = 'TEST ONLY — synthetic record, nobody read the Tamil.',
+            review_scope = 'TEST ONLY — structure only.', reviewed_languages = ARRAY['en','ta'],
+            reviewed_by = gen_random_uuid()
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted straight to approved', '23514',
+   $t$UPDATE public.tradition_pack_releases SET status = 'approved'
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('draft promoted straight to deprecated', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'deprecated', deprecated_at = now()
+      WHERE id = current_setting('probe.release_draft')::uuid$t$),
+  ('reviewed release moved back to draft', '23514',
+   $t$UPDATE public.tradition_pack_releases SET status = 'draft'
+      WHERE id = current_setting('probe.release_reviewed')::uuid$t$),
+  ('reviewed release moved straight to deprecated', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'deprecated', deprecated_at = now()
+      WHERE id = current_setting('probe.release_reviewed')::uuid$t$),
+  ('approved release moved back to reviewed', '23514',
+   $t$UPDATE public.tradition_pack_releases SET status = 'reviewed', approved_at = NULL
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
+  ('deprecated release restored to approved', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'approved', deprecated_at = NULL
+      WHERE id = current_setting('probe.release_dep')::uuid$t$),
+  -- The review record arriving is the draft→reviewed step; after that it is part of the
+  -- frozen unit. Each row below is a different door on the same room: restating the review
+  -- *while* approving it, restating it while retiring it, and restating it later with the
+  -- status left exactly where it is.
+  ('approval restating the review it was based on', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'approved', review_scope = 'TEST ONLY — restated at approval'
+      WHERE id = current_setting('probe.release_reviewed')::uuid$t$),
+  ('approval attaching a reviewer it did not review with', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'approved', reviewed_by = current_setting('probe.owner_a')::uuid
+      WHERE id = current_setting('probe.release_reviewed')::uuid$t$),
+  ('retirement restating the review it was approved under', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET status = 'deprecated', review_scope = 'TEST ONLY — restated at retirement'
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
+  ('approved release''s review record rewritten', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET review_scope = 'TEST ONLY — rewritten after approval'
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
+  ('approved release''s review timestamp moved', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET reviewed_at = now() - interval '5 years'
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
+  ('approved release''s reviewer identity attached afterwards', '23514',
+   $t$UPDATE public.tradition_pack_releases
+        SET reviewed_by = current_setting('probe.owner_a')::uuid
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
+  ('approved release''s approval timestamp dropped', '23514',
+   $t$UPDATE public.tradition_pack_releases SET approved_at = NULL
+      WHERE id = current_setting('probe.release_ok')::uuid$t$),
+  -- Reviewed content is a review unit (ruling A2), so the wording beside that review record
+  -- freezes at the same moment. Group 15e measures the same rule on an *approved* release;
+  -- these two rows are the step before it, where the row already carries a review claim.
+  ('reviewed release''s wording edited after review', '23514',
+   $t$UPDATE public.tradition_pack_releases SET definition =
+        '{"sections": [{"section_key": "opening", "position": 1, "kind": "text",
+                        "required": false, "host_field": "welcome",
+                        "heading": {"en": "Opening"}},
+                       {"section_key": "family", "position": 2, "kind": "people_list",
+                        "required": false, "heading": {"en": "The families"}}]}'::jsonb
+      WHERE id = current_setting('probe.release_reviewed')::uuid$t$),
+  ('reviewed release''s language list edited after review', '23514',
+   $t$UPDATE public.tradition_pack_releases SET languages = ARRAY['en']
+      WHERE id = current_setting('probe.release_reviewed')::uuid$t$),
   -- Withdrawing platform content that a customer already relies on has to fail,
-  -- whatever role asks: a published invitation must not lose its template under the
-  -- customer's feet. This is the delete side of "admin/service write only".
+  -- whatever role asks: a published invitation must not lose its template or its pack
+  -- under the customer's feet. This is the delete side of "admin/service write only".
   ('withdraw a template a snapshot still points at', '23503',
    $t$DELETE FROM public.design_templates WHERE id = current_setting('probe.template')::uuid$t$),
-  ('withdraw a tradition pack in use', '23503',
+  ('withdraw a pack whose releases still exist', '23503',
    $t$DELETE FROM public.tradition_packs WHERE id = current_setting('probe.pack')::uuid$t$),
+  ('withdraw the unshipped pack while its candidate is still a release', '23503',
+   $t$DELETE FROM public.tradition_packs
+      WHERE id = current_setting('probe.pack_unshipped')::uuid$t$),
   -- guests and responses
   ('household with a blank name', '23514',
    $t$INSERT INTO public.guest_households (wedding_id, display_name)
@@ -664,6 +1264,166 @@ INSERT INTO probes_state (label, expect, stmt) VALUES
               current_setting('probe.publication_a1')::uuid,
               current_setting('probe.household_a')::uuid, 'no_expiry', 'postgres')$t$);
 
+-- An expected SQLSTATE alone cannot tell a good refusal from an accidental one, because
+-- 23514 is what every CHECK *and* every guard RAISE in this schema reports. Without the
+-- message, a probe can pass while being refused by an unrelated constraint — which is
+-- exactly what happened to six rows of the first version of the Stage 4 block below, where
+-- a `section_key` outside the pinned vocabulary was refused as an unknown slot rather than
+-- as the position-gap violation its label claimed. So each probe now carries the text of
+-- the refusal it expects, and a probe with no row here fails the run rather than letting
+-- the loop guess.
+--
+-- The one row whose expectation is '' is the 'no-error' control, for which there is no
+-- refusal to name. Where several probes share a table-level CHECK that Postgres reports
+-- by one unnamed constraint (`access_tokens_kind_shape`, `weddings_check`,
+-- `publications_check`, `design_templates_check`, `approval_feedback_check`), the
+-- constraint name is the finest discrimination the server offers; it is stated here rather
+-- than padded out into a claim the server never made.
+CREATE TEMP TABLE probe_msgs (label text, msg text) ON COMMIT DROP;
+INSERT INTO probe_msgs (label, msg) VALUES
+  ('a role the product does not have', 'violates check constraint "user_roles_role_no_vocabulary_lie"'),
+  ('active publication that is also revoked', 'violates check constraint "publications_check"'),
+  ('additional language outside the set', 'violates check constraint "weddings_check"'),
+  ('approval attaching a reviewer it did not review with', 'approving release 2 cannot change the review record it was reviewed under'),
+  ('approval credential with no version', 'violates check constraint "access_tokens_kind_shape"'),
+  ('approval invalidated without a status that says so', 'violates check constraint "approval_requests_check1"'),
+  ('approval marked decided with no decision time', 'violates check constraint "approval_requests_check"'),
+  ('approval request with an unnamed reviewer', 'violates check constraint "approval_requests_reviewer_display_name_check"'),
+  ('approval restating the review it was based on', 'approving release 2 cannot change the review record it was reviewed under'),
+  ('approval status outside the vocabulary', 'violates check constraint "approval_requests_status_check"'),
+  ('approved release moved back to reviewed', 'the only steps are'),
+  ('approved release''s approval timestamp dropped', 'is part of the frozen unit'),
+  ('approved release''s review record rewritten', 'is part of the frozen unit'),
+  ('approved release''s review timestamp moved', 'is part of the frozen unit'),
+  ('approved release''s reviewer identity attached afterwards', 'is part of the frozen unit'),
+  ('asset key that escapes its prefix', 'violates check constraint "wedding_assets_object_key_check"'),
+  ('asset key with a traversal segment', 'violates check constraint "wedding_assets_object_key_check"'),
+  ('asset kind outside the vocabulary', 'violates check constraint "wedding_assets_asset_kind_check"'),
+  ('asset with a negative size', 'violates check constraint "wedding_assets_size_bytes_check"'),
+  ('audit event with an empty action', 'violates check constraint "audit_events_action_check"'),
+  ('audit payload that is not an object', 'violates check constraint "audit_events_payload_check"'),
+  ('blank wedding title', 'violates check constraint "weddings_title_check"'),
+  ('comment feedback with no comment', 'violates check constraint "approval_feedback_check1"'),
+  ('credential digest in uppercase', 'violates check constraint "access_tokens_kind_shape"'),
+  ('credential expiring before it was created', 'violates check constraint "access_tokens_check1"'),
+  ('credential kind that does not exist', 'violates check constraint "access_tokens_token_kind_check"'),
+  ('credential that is not a 64-hex digest', 'violates check constraint "access_tokens_kind_shape"'),
+  ('decision feedback with no decision', 'violates check constraint "approval_feedback_check"'),
+  ('deprecated release restored to approved', 'the only steps are'),
+  ('draft given a retirement timestamp', 'violates check constraint "deprecated_at_matches_status"'),
+  ('draft given a review label', 'violates check constraint "draft_carries_no_review_metadata"'),
+  ('draft given an approval timestamp', 'violates check constraint "approved_at_matches_status"'),
+  ('draft promoted on a language the release never covered', 'violates check constraint "reviewed_languages_are_supported_ones"'),
+  ('draft promoted on a review too short to be a claim', 'violates check constraint "tradition_pack_releases_review_basis_check"'),
+  ('draft promoted on an empty reviewed-language list', 'reviewed_languages must be sorted and free of duplicates'),
+  ('draft promoted on an unsorted reviewed-language list', 'reviewed_languages must be sorted and free of duplicates'),
+  ('draft promoted straight to approved', 'the only steps are'),
+  ('draft promoted straight to deprecated', 'the only steps are'),
+  ('draft promoted with no basis for the review', 'violates check constraint "review_metadata_is_mandatory"'),
+  ('draft promoted without saying when it was reviewed', 'marking a release reviewed has to say when'),
+  ('entitlement metadata that is not an object', 'violates check constraint "entitlements_metadata_check"'),
+  ('entitlement source that is not a trusted path', 'violates check constraint "entitlements_source_check"'),
+  ('entitlement status outside the vocabulary', 'violates check constraint "entitlements_check"'),
+  ('entitlement with a blank package code', 'violates check constraint "entitlements_package_code_check"'),
+  ('event ending before it starts', 'violates check constraint "wedding_events_check"'),
+  ('event with a blank display name', 'violates check constraint "wedding_events_display_name_check"'),
+  ('event with no timezone named', 'violates check constraint "wedding_events_timezone_check"'),
+  ('feedback carrying a decision it should not have', 'violates check constraint "approval_feedback_check"'),
+  ('feedback kind outside the vocabulary', 'violates check constraint "approval_feedback_feedback_kind_check"'),
+  ('fixed-expiry credential with no expiry', 'violates check constraint "access_tokens_check"'),
+  ('household expecting nobody', 'violates check constraint "guest_households_expected_party_size_check"'),
+  ('household with a blank name', 'violates check constraint "guest_households_display_name_check"'),
+  ('language outside the first-release set', 'violates check constraint "weddings_primary_language_check"'),
+  ('lifecycle state that does not exist', 'violates check constraint "weddings_lifecycle_status_check"'),
+  ('machine-assisted release with no disclosure', 'violates check constraint "machine_assistance_disclosure_required"'),
+  ('negative guest estimate', 'violates check constraint "weddings_estimated_guest_count_check"'),
+  ('pack slug with a hyphen in it', 'violates check constraint "tradition_packs_pack_key_slug"'),
+  ('pack whose scope statement is a shrug', 'violates check constraint "tradition_packs_scope_statement_length"'),
+  ('person with a blank role key', 'violates check constraint "wedding_people_role_key_check"'),
+  ('person with a negative display order', 'violates check constraint "wedding_people_display_order_check"'),
+  ('primary language repeated in the additional list', 'violates check constraint "weddings_check"'),
+  ('publication status outside the vocabulary', 'violates check constraint "publications_check"'),
+  ('release allowing an English fallback it never declared', 'section opening allows an English fallback but this release does not cover en'),
+  ('release belonging to no pack', 'violates foreign key constraint "tradition_pack_releases_pack_id_fkey"'),
+  ('release carrying an unknown key in a section', 'section opening carries unknown keys: {css}'),
+  ('release claiming a language outside the product set', 'violates check constraint "tradition_pack_releases_languages_check"'),
+  ('release created already approved', 'a tradition pack release begins life as draft; it cannot be created already approved'),
+  ('release created already reviewed', 'a tradition pack release begins life as draft; it cannot be created already reviewed'),
+  ('release declaring a heading in a language it does not cover', 'section opening declares a heading in a language this release does not cover'),
+  ('release declaring two event lists', 'a release may declare at most one event list; section venue is a second'),
+  ('release declaring two people lists', 'a release may declare at most one people list; section couple is a second'),
+  ('release declaring wording in a language it does not cover', 'section blessing declares wording in a language this release does not cover'),
+  ('release naming a slot this build has nowhere to render', 'section unknown_slot is not one of the section slots this build renders'),
+  ('release reading a host field that does not exist', 'section opening reads unknown host field guest_phone_numbers'),
+  ('release repeating one section slot twice', 'section_key opening appears twice in one release'),
+  ('release whose definition carries a key this build does not understand', 'a release definition carries keys this build does not understand: {caste_rules}'),
+  ('release whose definition schema version this build cannot read', 'definition schema version 99 is not understood by this build, so it cannot be validated'),
+  ('release whose design guidance carries an unknown key', 'design_guidance carries a key this build does not understand'),
+  ('release whose design guidance is out of range', 'design_guidance is out of range: lead_size must be 8 to 72 and motif_reference a short string'),
+  ('release whose event vocabulary entry carries an unknown key', 'an event_vocabulary entry carries an unknown key'),
+  ('release whose event vocabulary key is not a slug', 'every event_vocabulary entry needs a slug event_key and label strings in languages this release covers'),
+  ('release whose heading is a bare string', 'section opening heading must be an object of language keys'),
+  ('release whose heading is blank after trimming', 'section opening has a heading that is empty, too long, or not a string'),
+  ('release whose language list is unsorted', ' languages must be sorted and free of duplicates'),
+  ('release whose language list repeats a language', ' languages must be sorted and free of duplicates'),
+  ('release whose list section carries reviewed wording', 'section family is a people_list and cannot carry reviewed wording'),
+  ('release whose list section reads a host field', 'section family is a people_list and may not read a host field'),
+  ('release whose position is a string, not a number', 'section opening has no numeric position'),
+  ('release whose required flag is a string', 'section opening must declare required as a boolean'),
+  ('release whose section has no numeric position', 'section opening has no numeric position'),
+  ('release whose section names a kind no renderer knows', 'section blessing claims kind temple_hymn that no renderer knows'),
+  ('release whose section omits the kind entirely', 'section blessing claims kind (none) that no renderer knows'),
+  ('release whose section omits the required flag', 'section opening must declare required as a boolean'),
+  ('release whose section order leaves a gap', 'section closing has position 3 outside 1..2'),
+  ('release whose sections key is absent rather than empty', 'a release must declare at least one section'),
+  ('release whose sections key is not an array', 'a release must declare at least one section'),
+  ('release whose text section says nothing', 'section blessing says nothing: no heading, no reviewed wording, no host field'),
+  ('release whose wording is blank after trimming', 'section blessing has wording that is empty, over 4000 characters, or not a string'),
+  ('release with no release number', 'violates check constraint "tradition_pack_releases_release_number_check"'),
+  ('release with no sections at all', 'a release must declare at least one section'),
+  ('release with one people list and one event list', ''),
+  ('release with two sections in one position', 'position 1 is claimed by two sections'),
+  ('release with two sections reading one host field', 'two sections read host field welcome'),
+  ('response answers that are not an object', 'violates check constraint "rsvp_responses_answers_check"'),
+  ('response attributed to a source that does not exist', 'violates check constraint "rsvp_responses_response_source_check"'),
+  ('response that is neither yes nor no', 'violates check constraint "rsvp_responses_attending_check"'),
+  ('response with a negative party size', 'violates check constraint "rsvp_responses_party_size_check"'),
+  ('retirement restating the review it was approved under', 'retiring release 1 cannot change the review it was approved under'),
+  ('review naming a reviewer who does not exist', 'violates foreign key constraint "tradition_pack_releases_reviewed_by_fkey"'),
+  ('reviewed release moved back to draft', 'the only steps are'),
+  ('reviewed release moved straight to deprecated', 'the only steps are'),
+  ('reviewed release''s language list edited after review', 'is frozen, so a change means a new release_number'),
+  ('reviewed release''s wording edited after review', 'is frozen, so a change means a new release_number'),
+  ('rsvp credential with no publication to belong to', 'violates check constraint "access_tokens_kind_shape"'),
+  ('second active publication for one wedding', 'violates unique constraint "one_active_publication_per_wedding"'),
+  ('second response for one household and event', 'violates unique constraint "rsvp_responses_wedding_id_household_id_event_id_key"'),
+  ('snapshot that is not an object', 'violates check constraint "invitation_versions_snapshot_check"'),
+  ('style settings that is not an object', 'violates check constraint "weddings_style_settings_check"'),
+  ('template approved with no reviewer', 'violates check constraint "design_templates_check"'),
+  ('template layout that is not an object', 'violates check constraint "design_templates_layout_settings_check"'),
+  ('template reviewed but not approved', 'violates check constraint "design_templates_check"'),
+  ('template revision zero', 'violates check constraint "design_templates_revision_check"'),
+  ('template status outside the vocabulary', 'violates check constraint "design_templates_status_check"'),
+  ('template supporting an unknown language', 'violates check constraint "design_templates_supported_languages_check"'),
+  ('template supporting no language', 'violates check constraint "design_templates_supported_languages_check"'),
+  ('template with a blank display name', 'violates check constraint "design_templates_display_name_check"'),
+  ('the same package granted active twice', 'violates unique constraint "one_active_entitlement_per_wedding_package"'),
+  ('two credentials sharing one digest', 'violates unique constraint "access_tokens_token_hash_key"'),
+  ('two drafts for one wedding', 'violates unique constraint "invitation_drafts_wedding_id_key"'),
+  ('two packs claiming the same key', 'violates unique constraint "tradition_packs_pack_key_unique"'),
+  ('two releases of one pack in the same slot', 'violates unique constraint "tradition_pack_releases_pack_id_release_number_key"'),
+  ('two revisions claiming the same slot', 'violates unique constraint "design_templates_template_key_revision_key"'),
+  ('two versions claiming the same number', 'violates unique constraint "invitation_versions_wedding_id_version_number_key"'),
+  ('venue latitude off the planet', 'violates check constraint "venues_latitude_check"'),
+  ('venue map link that is not https', 'violates check constraint "venues_map_url_check"'),
+  ('venue with a blank name', 'violates check constraint "venues_name_check"'),
+  ('version zero', 'violates check constraint "invitation_versions_version_number_check"'),
+  ('wedding owned by an account that does not exist', 'violates foreign key constraint "weddings_owner_user_id_fkey"'),
+  ('wedding with no owner', 'violates not-null constraint'),
+  ('withdraw a pack whose releases still exist', 'violates foreign key constraint "tradition_pack_releases_pack_id_fkey"'),
+  ('withdraw a template a snapshot still points at', 'violates foreign key constraint "weddings_design_template_id_fkey"'),
+  ('withdraw the unshipped pack while its candidate is still a release', 'violates foreign key constraint "tradition_pack_releases_pack_id_fkey"');
+
 -- ===========================================================================
 -- Assertions.
 --
@@ -690,6 +1450,7 @@ DECLARE
   labels        text[];
   stmts         text[];
   expects       text[];
+  msgs          text[];
   pre           bigint[];
   post          bigint[];
   fresh         uuid;
@@ -708,6 +1469,16 @@ DECLARE
   probe_owner   uuid;
   probe_project uuid;
   probe_order   uuid;
+  probe_statuses text[];
+  rel_scratch       uuid;
+  rel_reviewed_with_auditor uuid;
+  rel_draft_scratch uuid;
+  ver_scratch    uuid;
+  wedding_c      uuid;
+  control_rows   bigint;
+  rec            record;
+  g15_start      integer;
+  g15c_seen      integer;
 BEGIN
   SELECT * INTO s FROM seed;
 
@@ -715,7 +1486,8 @@ BEGIN
     'weddings','wedding_people','venues','wedding_events','invitation_drafts',
     'invitation_versions','publications','guest_households','household_event_scopes',
     'rsvp_responses','approval_requests','approval_feedback','wedding_assets',
-    'entitlements','design_templates','tradition_packs','profiles','user_roles'];
+    'entitlements','design_templates','tradition_packs','tradition_pack_releases',
+    'profiles','user_roles'];
   legacy_tbls := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
     'migration_findings'];
@@ -777,6 +1549,11 @@ BEGIN
   PERFORM set_config('probe.asset_a',       s.asset_a::text,       false);
   PERFORM set_config('probe.template',      s.template::text,      false);
   PERFORM set_config('probe.pack',          s.pack::text,          false);
+  PERFORM set_config('probe.pack_unshipped', s.pack_unshipped::text, false);
+  PERFORM set_config('probe.release_ok',    s.release_ok::text,    false);
+  PERFORM set_config('probe.release_dep',   s.release_dep::text,   false);
+  PERFORM set_config('probe.release_draft', s.release_draft::text, false);
+  PERFORM set_config('probe.release_reviewed', s.release_reviewed::text, false);
   PERFORM set_config('probe.token_a',       s.token_a::text,       false);
 
   -- Guard against a vacuous run: if the fixture is not there, nothing below means
@@ -789,6 +1566,24 @@ BEGIN
   END IF;
   passed := passed + 1;
   RAISE NOTICE 'PASS: fixture present (2 weddings)';
+
+  -- The release lifecycle is walked by four separate statements, so a seed that stops
+  -- halfway would otherwise leave a later "refused" looking like a pass. This checks the
+  -- end state of the walk, and that exactly one release is approved — the one thing every
+  -- visibility and selection assertion below is measured against.
+  SELECT array_agg(status ORDER BY status), count(*)
+    INTO probe_statuses, n
+    FROM public.tradition_pack_releases;
+  IF n <> 4 OR probe_statuses <> ARRAY['approved', 'deprecated', 'draft', 'reviewed']::text[] THEN
+    RAISE EXCEPTION 'FAIL: the release fixture is % rows in states %', n, probe_statuses;
+  END IF;
+  IF (SELECT count(*) FROM public.tradition_pack_releases
+       WHERE id = current_setting('probe.release_ok')::uuid
+         AND approved_at IS NOT NULL AND deprecated_at IS NULL) <> 1 THEN
+    RAISE EXCEPTION 'FAIL: release_ok is not the approved-and-current row the battery assumes';
+  END IF;
+  passed := passed + 2;
+  RAISE NOTICE 'PASS: release fixture walked to draft, reviewed, approved and deprecated';
 
   -- ----------------------------------------------------------------- group 1
   -- anon holds no table privilege anywhere in the canonical schema. This is the
@@ -1184,10 +1979,133 @@ BEGIN
   passed := passed + 1;
   RAISE NOTICE 'PASS 8: trigger backstop refuses a write that a granted privilege + permissive policy allow (entitlements, versions, feedback)';
 
+  -- -------------------------------------------------------------- group 8b
+  -- The same second-layer question for the Stage 4 boundary, which is the one a reader
+  -- can most plausibly get wrong in a later migration: §9 forbids a customer creating a
+  -- pack, creating a release, moving a lifecycle state or signing a review record, and
+  -- the honest proof is not "the GRANT is missing" (group 7 covers that) but "even with
+  -- the GRANT and a permissive POLICY, the guard still refuses and still refuses by
+  -- naming the role".
+  --
+  -- The read policy below is not decoration, and it is the part of this group that was
+  -- wrong when it was first written. A SELECT policy governs which rows an UPDATE or
+  -- DELETE scan can reach, not only which rows a query returns — measured on this schema
+  -- with INSERT/UPDATE/DELETE granted and a `FOR UPDATE USING (true) WITH CHECK (true)`
+  -- policy: `UPDATE ... SET status = 'approved'` against a *draft* release reported
+  -- `UPDATE 0` rather than a refusal, because the approved-only SELECT policy had already
+  -- hidden the row from the scan. A probe that "passes" there proves nothing about the
+  -- trigger. So the mistake this group imagines a future author making is the complete
+  -- one — writes *and* reads open — and visibility is asserted wide before the probes and
+  -- narrow again after them, so the refusal below can only have come from the guard.
+  EXECUTE 'GRANT INSERT, UPDATE, DELETE ON public.tradition_pack_releases TO authenticated';
+  EXECUTE 'CREATE POLICY zz_backstop_release_read ON public.tradition_pack_releases'
+       || ' FOR SELECT TO authenticated USING (true)';
+  EXECUTE 'CREATE POLICY zz_backstop_release_write ON public.tradition_pack_releases'
+       || ' FOR INSERT TO authenticated WITH CHECK (true)';
+  EXECUTE 'CREATE POLICY zz_backstop_release_update ON public.tradition_pack_releases'
+       || ' FOR UPDATE TO authenticated USING (true) WITH CHECK (true)';
+  EXECUTE 'CREATE POLICY zz_backstop_release_delete ON public.tradition_pack_releases'
+       || ' FOR DELETE TO authenticated USING (true)';
+  EXECUTE 'GRANT UPDATE ON public.tradition_packs TO authenticated';
+  EXECUTE 'CREATE POLICY zz_backstop_pack_update ON public.tradition_packs'
+       || ' FOR UPDATE TO authenticated USING (true) WITH CHECK (true)';
+
+  PERFORM set_config('test.uid', s.owner_a::text, false);
+  EXECUTE 'SET ROLE authenticated';
+  -- The opening measurement is of the *mistake*: all four releases are now reachable, so
+  -- none of the refusals below can be attributed to a row the caller could not see.
+  n := pg_temp.st2_visible('SELECT 1 FROM public.tradition_pack_releases');
+  IF n <> 4 THEN
+    RAISE EXCEPTION 'FAIL 8b: the backstop opened reads to % releases, not all 4 — the '
+                    'probes below would be measuring visibility instead of the guard', n;
+  END IF;
+  passed := passed + 1;
+  -- Which guard speaks is asserted, not merely that something did: a refusal that names
+  -- the role is the identity layer, and only a refusal that names the role proves *this*
+  -- table is server-authoritative rather than accidentally unwritable.
+  v := pg_temp.st2_err(
+    $t8b$INSERT INTO public.tradition_pack_releases (pack_id, release_number,
+              definition_schema_version, languages, definition, author_label, status)
+           VALUES (current_setting('probe.pack')::uuid, 77, 1, ARRAY['en'],
+                   pg_temp.st2_def_small(), 'Self minted', 'draft')$t8b$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%server-authoritative%' THEN
+    RAISE EXCEPTION 'FAIL 8b: with a grant and a policy, the release write guard did not speak: %', v;
+  END IF;
+  passed := passed + 1;
+  v := pg_temp.st2_err(
+    $t8b$UPDATE public.tradition_pack_releases SET status = 'approved'
+          WHERE id = current_setting('probe.release_draft')::uuid$t8b$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%server-authoritative%' THEN
+    RAISE EXCEPTION 'FAIL 8b: a customer promoted a release through a granted UPDATE: %', v;
+  END IF;
+  passed := passed + 1;
+  v := pg_temp.st2_err(
+    $t8b$UPDATE public.tradition_pack_releases
+            SET review_label = 'Reviewed by me', reviewed_at = now()
+          WHERE id = current_setting('probe.release_draft')::uuid$t8b$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%server-authoritative%' THEN
+    RAISE EXCEPTION 'FAIL 8b: a customer forged a review record: %', v;
+  END IF;
+  passed := passed + 1;
+  v := pg_temp.st2_err(
+    $t8b$DELETE FROM public.tradition_pack_releases
+          WHERE id = current_setting('probe.release_ok')::uuid$t8b$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%append-only%' THEN
+    RAISE EXCEPTION 'FAIL 8b: a customer deleted platform content through a granted DELETE: %', v;
+  END IF;
+  passed := passed + 1;
+  v := pg_temp.st2_err(
+    $t8b$UPDATE public.tradition_packs SET display_name = 'Free for everyone'
+          WHERE id = current_setting('probe.pack')::uuid$t8b$);
+  IF v NOT LIKE '42501%' OR v NOT LIKE '%server-authoritative%' THEN
+    RAISE EXCEPTION 'FAIL 8b: a customer retitled the catalogue concept: %', v;
+  END IF;
+  passed := passed + 1;
+  EXECUTE 'RESET ROLE';
+  -- Nothing was written by any of the five attempts above, in any state.
+  SELECT count(*) INTO n FROM public.tradition_pack_releases;
+  IF n <> 4 THEN
+    RAISE EXCEPTION 'FAIL 8b: the backstop probes left % releases where 4 were seeded', n;
+  END IF;
+  passed := passed + 1;
+
+  EXECUTE 'DROP POLICY zz_backstop_release_read ON public.tradition_pack_releases';
+  EXECUTE 'DROP POLICY zz_backstop_release_write ON public.tradition_pack_releases';
+  EXECUTE 'DROP POLICY zz_backstop_release_update ON public.tradition_pack_releases';
+  EXECUTE 'DROP POLICY zz_backstop_release_delete ON public.tradition_pack_releases';
+  EXECUTE 'DROP POLICY zz_backstop_pack_update ON public.tradition_packs';
+  EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON public.tradition_pack_releases FROM authenticated';
+  EXECUTE 'REVOKE UPDATE ON public.tradition_packs FROM authenticated';
+  IF has_table_privilege('authenticated', 'public.tradition_pack_releases', 'INSERT')
+     OR has_table_privilege('authenticated', 'public.tradition_pack_releases', 'UPDATE')
+     OR has_table_privilege('authenticated', 'public.tradition_pack_releases', 'DELETE')
+     OR has_table_privilege('authenticated', 'public.tradition_packs', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL 8b: the temporary backstop grants were not taken back';
+  END IF;
+  -- And the mistake is closed, not merely parked: the read policy that made the probes
+  -- honest is gone, so a customer is back to seeing the one approved release. Group 9
+  -- then measures the same fact from the other direction.
+  EXECUTE 'SET ROLE authenticated';
+  n := pg_temp.st2_visible('SELECT 1 FROM public.tradition_pack_releases');
+  EXECUTE 'RESET ROLE';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 8b: after dropping the backstop policies a customer still reads '
+                    '% releases (1 expected)', n;
+  END IF;
+  IF (SELECT count(*) FROM pg_policy
+       WHERE polrelid = 'public.tradition_pack_releases'::regclass) <> 1 THEN
+    RAISE EXCEPTION 'FAIL 8b: a temporary policy survived the cleanup';
+  END IF;
+  passed := passed + 2;
+  RAISE NOTICE 'PASS 8b: with reads *and* writes opened to a customer role, every pack write is still refused by the guard that names the role — and the opening is taken back (9 assertions)';
+
   -- ----------------------------------------------------------------- group 9
-  -- Platform catalogue: customers read what was reviewed or is still unreviewed, and
-  -- never what was withdrawn. Computed against the real table, so the assertion
-  -- cannot drift away from the seed.
+  -- Platform catalogue. Two tables, and since Stage 4 they do NOT share a visibility
+  -- rule: a template's `draft` stays readable (a migrated legacy template has never been
+  -- reviewed and a picker that hid drafts would go blank), while a *release* draft is
+  -- invisible, because unapproved wording about a tradition is the sensitive half of the
+  -- product. Computed against the real tables, so the assertions cannot drift away from
+  -- the seed.
   EXECUTE 'SET ROLE authenticated';
   n := pg_temp.st2_visible('SELECT 1 FROM public.design_templates');
   EXECUTE 'RESET ROLE';
@@ -1208,14 +2126,48 @@ BEGIN
     RAISE EXCEPTION 'FAIL 9: a deprecated template is still visible to customers (% rows)', n;
   END IF;
   passed := passed + 1;
+  -- The release table is where the wording lives, so this is the half §9 actually cares
+  -- about. The fixture guard proved all four lifecycle states exist as rows; one of them
+  -- is approved, so "exactly one row visible" is a statement about the policy rather
+  -- than about an empty table.
+  EXECUTE 'SET ROLE authenticated';
+  n := pg_temp.st2_visible('SELECT 1 FROM public.tradition_pack_releases');
+  m := pg_temp.st2_visible(
+    'SELECT 1 FROM public.tradition_pack_releases WHERE status <> ''approved''');
+  EXECUTE 'RESET ROLE';
+  IF n <> 1 OR m <> 0 THEN
+    RAISE EXCEPTION 'FAIL 9: release visibility is not approved-only (% visible, % of them '
+                    'non-approved)', n, m;
+  END IF;
+  IF (SELECT count(*) FROM public.tradition_pack_releases WHERE status = 'approved') <> 1 THEN
+    RAISE EXCEPTION 'FAIL 9: the seed stopped being a controlled fixture (more than one approved release)';
+  END IF;
+  passed := passed + 2;
   EXECUTE 'SET ROLE authenticated';
   n := pg_temp.st2_visible('SELECT 1 FROM public.tradition_packs');
   EXECUTE 'RESET ROLE';
-  IF n = 0 THEN
-    RAISE EXCEPTION 'FAIL 9: the approved tradition pack is invisible — the picker would be empty';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 9: a customer sees % tradition packs; exactly the 1 pack with an '
+                    'approved release may be visible (the fixture guard above proved the '
+                    'second pack exists with only unapproved releases)', n;
   END IF;
   passed := passed + 1;
-  RAISE NOTICE 'PASS 9: catalogue visibility matches status (deprecated hidden, draft and approved readable)';
+  -- Which one, not merely how many: the unshipped pack's name and scope statement are a
+  -- promise about wording nobody has approved, and a count alone would pass if the policy
+  -- happened to hide the wrong half of the catalogue.
+  EXECUTE 'SET ROLE authenticated';
+  n := pg_temp.st2_visible(format(
+    'SELECT 1 FROM public.tradition_packs WHERE id = current_setting(%L)::uuid',
+    'probe.pack'));
+  m := pg_temp.st2_visible(format(
+    'SELECT 1 FROM public.tradition_packs WHERE id = current_setting(%L)::uuid',
+    'probe.pack_unshipped'));
+  EXECUTE 'RESET ROLE';
+  IF n <> 1 OR m <> 0 THEN
+    RAISE EXCEPTION 'FAIL 9: pack visibility is on the wrong rows (shipped visible=%, unshipped visible=%)', n, m;
+  END IF;
+  passed := passed + 1;
+  RAISE NOTICE 'PASS 9: catalogue visibility matches status (templates: deprecated hidden; releases: approved only; an unshipped pack is invisible)';
 
   -- ----------------------------------------------------------------- group 10
   -- The customer's own working set has to be writable, or every refusal above is
@@ -1549,23 +2501,44 @@ BEGIN
     array_length(labels, 1);
 
   -- ----------------------------------------------------------------- group 13
-  -- Invalid states, each against the constraint that owns it. The expected SQLSTATE
-  -- is stored per row, so a probe cannot pass by failing for the wrong reason.
-  SELECT array_agg(label ORDER BY label), array_agg(expect ORDER BY label),
-         array_agg(stmt ORDER BY label)
-    INTO labels, expects, stmts
-    FROM probes_state;
+  -- Invalid states, each against the constraint that owns it. Both halves of the refusal
+  -- are stored per row — the SQLSTATE *and* the text the server produced — because a
+  -- bare SQLSTATE is satisfied by any constraint that happens to fire, and several of
+  -- these probes share a table with a dozen of them.
+  -- The aliases are `ps`/`pm` rather than the shorter `s`/`m`: `s` is this block's own
+  -- seed record, and PL/pgSQL resolves an unqualified `s.label` to the variable first.
+  SELECT array_agg(ps.label ORDER BY ps.label), array_agg(ps.expect ORDER BY ps.label),
+         array_agg(ps.stmt ORDER BY ps.label),
+         array_agg(coalesce(pm.msg, '<none>') ORDER BY ps.label)
+    INTO labels, expects, stmts, msgs
+    FROM probes_state ps LEFT JOIN probe_msgs pm ON pm.label = ps.label;
   IF labels IS NULL THEN
     RAISE EXCEPTION 'FAIL: the invalid-state probe set is empty';
   END IF;
+  -- A message row whose label has drifted away from the probe it belongs to would simply
+  -- stop being read, which is the quietest way for an assertion to disappear.
+  SELECT count(*) INTO n FROM probe_msgs pm
+    LEFT JOIN probes_state ps ON ps.label = pm.label WHERE ps.label IS NULL;
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 13: % expected-message rows name no probe', n;
+  END IF;
+  passed := passed + 1;
   FOR i IN 1 .. array_length(labels, 1) LOOP
     v := pg_temp.st2_err(stmts[i]);
+    IF msgs[i] = '<none>' THEN
+      RAISE EXCEPTION 'FAIL 13: probe "%" has no expected message recorded, so it could '
+                      'pass by being refused for an unrelated reason', labels[i];
+    END IF;
     IF v NOT LIKE (expects[i] || '%') THEN
       RAISE EXCEPTION 'FAIL 13: "%" expected SQLSTATE %, got %', labels[i], expects[i], v;
     END IF;
+    IF msgs[i] <> '' AND v NOT LIKE '%' || msgs[i] || '%' THEN
+      RAISE EXCEPTION 'FAIL 13: "%" expected the refusal "%", got %', labels[i], msgs[i], v;
+    END IF;
     passed := passed + 1;
   END LOOP;
-  RAISE NOTICE 'PASS 13: % invalid states refused by the constraint that governs them',
+  RAISE NOTICE 'PASS 13: % invalid states refused by the constraint that governs them, '
+               'each matched on its own message',
     array_length(labels, 1);
 
   -- ----------------------------------------------------------------- group 14
@@ -1628,7 +2601,471 @@ BEGIN
   passed := passed + 2;
   RAISE NOTICE 'PASS 14: archived payment rows pin their account; the pin is ordered, not permanent, and the probe cleaned up after itself';
 
-  IF passed < 100 THEN
+  -- ----------------------------------------------------------------- group 15
+  -- Stage 4's own attack surface: selecting a pack release, and what may happen to a
+  -- release once it has been approved. Directive §20 lists these cases, and each refusal
+  -- below is paired with a control that has to succeed — a table that refuses everything
+  -- would satisfy the refusals and still be a broken product.
+  --
+  -- Two roles carry the weight here, and they measure different things. The customer path
+  -- is the hole Stage 2 actually had: catalogue visibility lived in a *read* policy, so an
+  -- ordinary owner JWT could point a wedding at a draft. The trusted path is the only one
+  -- that can answer "was that refused because the row is invisible, or because the status
+  -- is wrong?" — a superuser bypasses row security, so what it reads is the real status.
+  g15_start := passed;
+
+  -- (a) A host may not select an unapproved release, and the refusal reaches it as an
+  -- ordinary update on its own wedding.
+  PERFORM set_config('test.uid', s.owner_a::text, false);
+  EXECUTE 'SET ROLE authenticated';
+  FOREACH r IN ARRAY ARRAY['probe.release_draft', 'probe.release_reviewed',
+                           'probe.release_dep'] LOOP
+    v := pg_temp.st2_err(format(
+      'UPDATE public.weddings SET tradition_pack_release_id = current_setting(%L)::uuid'
+      '  WHERE id = current_setting(%L)::uuid', r, 'probe.wedding_a'));
+    IF v NOT LIKE '42501%'
+       OR v NOT LIKE '%only select an approved tradition pack release%' THEN
+      RAISE EXCEPTION 'FAIL 15a: % became selectable through an owner JWT: %', r, v;
+    END IF;
+    passed := passed + 1;
+  END LOOP;
+  -- and the refusal wrote nothing: the wedding still pins the release it was seeded with.
+  SELECT count(*) INTO n FROM public.weddings
+    WHERE id = s.wedding_a AND tradition_pack_release_id = s.release_ok;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15a: the refused selections moved wedding_a off its approved release';
+  END IF;
+  passed := passed + 1;
+
+  -- (b) The two legal choices, measured as writes rather than asserted as comments: "no
+  -- tradition pack, I'll write my own" and "this approved one" both have to go through,
+  -- or §10's selection UX is a picture of a door that is not there.
+  n := pg_temp.st2_changed(format(
+    'UPDATE public.weddings SET tradition_pack_release_id = NULL'
+    '  WHERE id = current_setting(%L)::uuid', 'probe.wedding_a'));
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15b: a host could not choose to use no tradition pack (rows=%)', n;
+  END IF;
+  n := pg_temp.st2_changed(format(
+    'UPDATE public.weddings SET tradition_pack_release_id = current_setting(%L)::uuid'
+    '  WHERE id = current_setting(%L)::uuid', 'probe.release_ok', 'probe.wedding_a'));
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15b: an approved release was not selectable by a host (rows=%)', n;
+  END IF;
+  passed := passed + 2;
+  -- Born selection: the rule has to hold on INSERT too, because a wedding can be created
+  -- with its pack already chosen.
+  v := pg_temp.st2_err(format(
+    'INSERT INTO public.weddings (owner_user_id, title, primary_language,'
+    '                             tradition_pack_release_id) VALUES ('
+    '  current_setting(%L)::uuid, %L, %L, current_setting(%L)::uuid)',
+    'probe.owner_a', 'Stage 4 probe (born unapproved)', 'en', 'probe.release_draft'));
+  IF v NOT LIKE '42501%'
+     OR v NOT LIKE '%only select an approved tradition pack release%' THEN
+    RAISE EXCEPTION 'FAIL 15b: a wedding was created pointing at a draft release: %', v;
+  END IF;
+  passed := passed + 1;
+  EXECUTE 'RESET ROLE';
+
+  -- (c) The same three refusals as the maintenance role, which bypasses row security and
+  -- so reads the real status. This is the half that proves the gate is about the
+  -- lifecycle rather than about visibility: each refusal has to name its own state.
+  g15c_seen := 0;
+  FOR rec IN SELECT id, status FROM public.tradition_pack_releases
+              WHERE status <> 'approved' ORDER BY status LOOP
+    v := pg_temp.st2_err(format(
+      'UPDATE public.weddings SET tradition_pack_release_id = %L::uuid'
+      '  WHERE id = %L::uuid', rec.id::text, s.wedding_a::text));
+    IF v NOT LIKE '42501%' OR v NOT LIKE '%this one is ' || rec.status || '%' THEN
+      RAISE EXCEPTION 'FAIL 15c: a % release was selectable, or refused for the wrong '
+                      'reason: %', rec.status, v;
+    END IF;
+    g15c_seen := g15c_seen + 1;
+    passed := passed + 1;
+  END LOOP;
+  -- The loop walks the whole table rather than a hand-listed set, so its coverage is the
+  -- claim: every release that is not approved, wherever it came from. Three of the rows it
+  -- now sees are the fixture's draft / reviewed / deprecated releases; the fourth is the
+  -- draft that group 13's per-kind control released (number 71) had to become in order to
+  -- be inserted at all. Reaching it is not an accident to be worked around — a selection
+  -- gate that only held for the fixture would be no gate.
+  IF g15c_seen < 3 OR g15c_seen <> (SELECT count(*) FROM public.tradition_pack_releases
+                                     WHERE status <> 'approved') THEN
+    RAISE EXCEPTION 'FAIL 15c: the loop above ran over % releases where the table holds % '
+                    'unapproved ones, and never fewer than the 3 the fixture seeds',
+      g15c_seen, (SELECT count(*) FROM public.tradition_pack_releases
+                   WHERE status <> 'approved');
+  END IF;
+  passed := passed + 1;
+  SELECT count(*) INTO n FROM public.weddings
+    WHERE id = s.wedding_a AND tradition_pack_release_id = s.release_ok;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15c: wedding_a no longer pins its approved release';
+  END IF;
+  passed := passed + 1;
+
+  -- (d) A frozen invitation may only record the release its wedding actually selects.
+  -- On a scratch wedding with no history, so the only thing that can refuse is the gate.
+  wedding_c := gen_random_uuid();
+  INSERT INTO public.weddings (id, owner_user_id, title, primary_language)
+    VALUES (wedding_c, s.owner_a, 'Stage 4 selection probe', 'en');
+  -- control: a version of a wedding with no pack records no pack.
+  v := pg_temp.st2_err(format(
+    'INSERT INTO public.invitation_versions (wedding_id, version_number, snapshot, created_by)'
+    '  VALUES (%L::uuid, 1, %L::jsonb, %L::uuid)',
+    wedding_c::text, '{"heading": "written by hand"}', s.owner_a::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 15d: a pack-less wedding could not freeze a version: %', v;
+  END IF;
+  passed := passed + 1;
+  v := pg_temp.st2_err(format(
+    'UPDATE public.weddings SET tradition_pack_release_id = %L::uuid WHERE id = %L::uuid',
+    s.release_ok::text, wedding_c::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 15d: the scratch wedding could not select the approved release: %', v;
+  END IF;
+  -- control: the matching release is recordable.
+  v := pg_temp.st2_err(format(
+    'INSERT INTO public.invitation_versions (wedding_id, version_number, snapshot, created_by,'
+    '                                       tradition_pack_release_id)'
+    '  VALUES (%L::uuid, 2, %L::jsonb, %L::uuid, %L::uuid)',
+    wedding_c::text, '{"heading": "with the pack"}', s.owner_a::text, s.release_ok::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 15d: a version could not record the release its wedding selects: %', v;
+  END IF;
+  passed := passed + 1;
+  -- and two versions cannot claim one wedding's number, so the mismatch probes below need
+  -- their own slots rather than a rejected duplicate key.
+  FOREACH r IN ARRAY ARRAY['probe.release_dep', 'probe.release_draft',
+                           'probe.release_reviewed'] LOOP
+    v := pg_temp.st2_err(format(
+      'INSERT INTO public.invitation_versions (wedding_id, version_number, snapshot, created_by,'
+      '                                       tradition_pack_release_id)'
+      '  VALUES (%L::uuid, 3, %L::jsonb, %L::uuid, current_setting(%L)::uuid)',
+      wedding_c::text, '{"heading": "mismatch"}', s.owner_a::text, r));
+    IF v NOT LIKE '23514%' OR v NOT LIKE '%only record the release its wedding currently selects%' THEN
+      RAISE EXCEPTION 'FAIL 15d: a version credited % without its wedding selecting it: %', r, v;
+    END IF;
+    passed := passed + 1;
+  END LOOP;
+  SELECT count(*) INTO n FROM public.invitation_versions WHERE wedding_id = wedding_c;
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'FAIL 15d: the refused freezes left % versions on the scratch wedding (2 controls)', n;
+  END IF;
+  passed := passed + 1;
+
+  -- (e) An approved release is evidence, not a draft. Content is frozen, the lifecycle
+  -- cannot run backwards, and the row cannot be removed — with a never-approved release
+  -- beside it proving each of those refusals is about approval rather than about the
+  -- table being unwritable.
+  rel_scratch := gen_random_uuid();
+  INSERT INTO public.tradition_pack_releases
+    (id, pack_id, release_number, definition_schema_version, languages, definition,
+     author_label, machine_assisted, machine_assistance_notes)
+    VALUES (rel_scratch, s.pack_unshipped, 900, 1, ARRAY['en', 'ta'],
+            pg_temp.st2_def_small(), 'TEST ONLY — scratch release for the freeze probes',
+            true,
+            'TEST ONLY — drafted by a model from the fixture above. Nobody has reviewed '
+            || 'it, which is what makes it a draft.');
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET definition = %L::jsonb WHERE id = %L::uuid',
+    pg_temp.st2_def_small(), s.release_ok::text));
+  IF v NOT LIKE '23514%' OR v NOT LIKE '%content is frozen%' THEN
+    RAISE EXCEPTION 'FAIL 15e: an approved release''s wording was edited in place: %', v;
+  END IF;
+  passed := passed + 1;
+  -- the whole content record, not just the big column: a changelog that can be rewritten
+  -- after approval is a provenance claim nobody verified.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET changelog = %L WHERE id = %L::uuid',
+    'rewritten after approval', s.release_ok::text));
+  IF v NOT LIKE '23514%' OR v NOT LIKE '%content is frozen%' THEN
+    RAISE EXCEPTION 'FAIL 15e: an approved release''s changelog was rewritten: %', v;
+  END IF;
+  passed := passed + 1;
+  -- control: the same edits on a draft, which is what they are for.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET definition = %L::jsonb,'
+    '       changelog = %L WHERE id = %L::uuid',
+    pg_temp.st2_def_small(), 'still a draft, still editable', rel_scratch::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 15e: a draft release could not be edited: %', v;
+  END IF;
+  SELECT count(*) INTO n FROM public.tradition_pack_releases
+    WHERE id = rel_scratch AND changelog = 'still a draft, still editable';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15e: the draft edit reported success but did not land';
+  END IF;
+  passed := passed + 2;
+  -- lifecycle: approved cannot step back to draft; the legal step forward is deprecation.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET status = %L WHERE id = %L::uuid',
+    'draft', s.release_ok::text));
+  IF v NOT LIKE '23514%' OR v NOT LIKE '%cannot move from approved to draft%' THEN
+    RAISE EXCEPTION 'FAIL 15e: an approved release went back to draft: %', v;
+  END IF;
+  passed := passed + 1;
+  -- control for the same shape: the scratch release takes the one legal step open to it —
+  -- and *only* with a complete review record. The step below with a timestamp and nothing
+  -- else is the lie §18 exists to prevent, and the table refuses it by name.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET status = %L, reviewed_at = now()'
+    '  WHERE id = %L::uuid', 'reviewed', rel_scratch::text));
+  IF v NOT LIKE '23514%' OR v NOT LIKE '%review_metadata_is_mandatory%' THEN
+    RAISE EXCEPTION 'FAIL 15e: a release was marked reviewed with no review record behind '
+                    'it, or refused by something other than the metadata constraint: %', v;
+  END IF;
+  passed := passed + 1;
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET status = %L, reviewed_at = now(),'
+    '       review_label = %L, review_basis = %L, review_scope = %L,'
+    '       reviewed_languages = ARRAY[%L, %L]'
+    '  WHERE id = %L::uuid',
+    'reviewed', 'TEST ONLY — REVIEWED FIXTURE',
+    'TEST ONLY — a synthetic record written by the Stage 2 battery. No human reader of '
+    || 'Tamil reviewed these strings.',
+    'TEST ONLY — structure and language coverage only, no religious or cultural claim.',
+    'en', 'ta', rel_scratch::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 15e: the legal draft→reviewed step was refused for the scratch '
+                    'release: %', v;
+  END IF;
+  passed := passed + 1;
+  -- deletion: once a row *is* a review unit it cannot be erased, and reviewer ruling A2
+  -- says why — a reviewed release that can be deleted is a review that never happened.
+  v := pg_temp.st2_err(format(
+    'DELETE FROM public.tradition_pack_releases WHERE id = %L::uuid', rel_scratch::text));
+  IF v NOT LIKE '23001%' OR v NOT LIKE '%may not be deleted%' THEN
+    RAISE EXCEPTION 'FAIL 15e: a reviewed release was deleted: %', v;
+  END IF;
+  SELECT count(*) INTO n FROM public.tradition_pack_releases WHERE id = rel_scratch;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15e: the refused delete still removed the reviewed scratch release';
+  END IF;
+  passed := passed + 2;
+  -- deletion: an approved-once release is retired, never removed.
+  v := pg_temp.st2_err(format(
+    'DELETE FROM public.tradition_pack_releases WHERE id = %L::uuid', s.release_dep::text));
+  IF v NOT LIKE '23001%' OR v NOT LIKE '%may not be deleted%' THEN
+    RAISE EXCEPTION 'FAIL 15e: a release that had been approved was deleted: %', v;
+  END IF;
+  SELECT count(*) INTO n FROM public.tradition_pack_releases WHERE id = s.release_dep;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15e: the refused delete still removed the deprecated release';
+  END IF;
+  passed := passed + 2;
+  -- control: the guard above is about the review unit, not about the table being sealed —
+  -- a row that has never been reviewed or approved leaves freely.
+  rel_draft_scratch := gen_random_uuid();
+  INSERT INTO public.tradition_pack_releases
+    (id, pack_id, release_number, definition_schema_version, languages, definition,
+     author_label, machine_assisted, machine_assistance_notes)
+    VALUES (rel_draft_scratch, s.pack_unshipped, 901, 1, ARRAY['en', 'ta'],
+            pg_temp.st2_def_small(), 'TEST ONLY — scratch draft for the delete control',
+            true,
+            'TEST ONLY — drafted by a model, never reviewed, deleted by this probe.');
+  v := pg_temp.st2_err(format(
+    'DELETE FROM public.tradition_pack_releases WHERE id = %L::uuid',
+    rel_draft_scratch::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 15e: a never-reviewed draft release could not be removed: %', v;
+  END IF;
+  SELECT count(*) INTO n FROM public.tradition_pack_releases
+    WHERE id = rel_draft_scratch;
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 15e: the draft scratch row outlived its delete';
+  END IF;
+  passed := passed + 2;
+
+  -- (f) Nothing above disturbed a frozen invitation, which is the property the whole
+  -- lifecycle exists to protect: §11's promise is that a guest's document does not move
+  -- when the catalogue does.
+  SELECT count(*) INTO n FROM public.invitation_versions
+    WHERE id = s.version_a1 AND tradition_pack_release_id = s.release_ok
+      AND snapshot = '{"heading": "Asha weds Bala"}'::jsonb;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15f: version_a1''s frozen bytes or its pinned release changed '
+                    'while the catalogue was being probed';
+  END IF;
+  passed := passed + 1;
+
+  -- (g) Cross-account, §19's last bullet: selecting a platform release is not a relation
+  -- with anyone else's wedding. owner_b may choose the very same release owner_a chose —
+  -- it is catalogue content — and that choice must buy it nothing in wedding A.
+  PERFORM set_config('test.uid', s.owner_b::text, false);
+  EXECUTE 'SET ROLE authenticated';
+  n := pg_temp.st2_changed(format(
+    'UPDATE public.weddings SET tradition_pack_release_id = current_setting(%L)::uuid'
+    '  WHERE id = current_setting(%L)::uuid', 'probe.release_ok', 'probe.wedding_b'));
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15g: a second host could not select the approved release (rows=%)', n;
+  END IF;
+  passed := passed + 1;
+  EXECUTE 'RESET ROLE';
+  SELECT count(*) INTO control_rows FROM public.weddings
+    WHERE id = s.wedding_b AND tradition_pack_release_id = s.release_ok;
+  IF control_rows <> 1 THEN
+    RAISE EXCEPTION 'FAIL 15g: wedding_b did not keep the selection its owner made';
+  END IF;
+  passed := passed + 1;
+  EXECUTE 'SET ROLE authenticated';
+  n := pg_temp.st2_visible(
+    'SELECT 1 FROM public.invitation_versions'
+    '  WHERE wedding_id = current_setting(''probe.wedding_a'')::uuid');
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'FAIL 15g: after selecting the same release, host B reads % of host A''s '
+                    'frozen invitations', n;
+  END IF;
+  passed := passed + 1;
+
+  -- Cleanup, child before parent: the scratch wedding's two control versions, then the
+  -- wedding itself. The scratch *release* is left in place on purpose — it was walked to
+  -- `reviewed` by the probe above, and a reviewed release is undeletable by the same rule
+  -- the probe just measured. Nothing here needs it gone: run.sh drops this database.
+  EXECUTE 'RESET ROLE';
+  DELETE FROM public.invitation_versions WHERE wedding_id = wedding_c;
+  DELETE FROM public.weddings WHERE id = wedding_c;
+  SELECT count(*) INTO n FROM public.weddings WHERE id = wedding_c;
+  SELECT count(*) INTO m FROM public.invitation_versions WHERE wedding_id = wedding_c;
+  IF n <> 0 OR m <> 0 THEN
+    RAISE EXCEPTION 'FAIL 15: the probe left % weddings and % versions behind', n, m;
+  END IF;
+  passed := passed + 1;
+  SELECT count(*) INTO n FROM public.tradition_pack_releases;
+  IF n <> 6 THEN
+    RAISE EXCEPTION 'FAIL 15: the pack probes left % releases where the fixture seeded 4 '
+                    '(one approved, one deprecated, one draft, one reviewed), group 13''s '
+                    'per-kind control added a 5th draft that had to be insertable to prove '
+                    'the rule it tests is per kind, and the reviewed scratch release is the '
+                    '6th — undeletable on purpose, which is what group 15e just measured', n;
+  END IF;
+  passed := passed + 1;
+  RAISE NOTICE 'PASS 15: a release may be selected only when approved, only its owning '
+               'wedding may record it, an approved one is frozen and undeletable, and none '
+               'of it reaches across accounts (assertions since group 15: %)',
+    passed - g15_start;
+
+  -- ---------------------------------------------------------------- group 16
+  -- The successful half of the review-metadata rules, kept out of group 13 because a loop
+  -- that asserts refusal cannot host a write that is meant to land. Directive §20's "every
+  -- refusal gets a valid control" is unsatisfied by a comment saying the shape is legal:
+  -- an optional column that no row ever carries, and a promotion no row ever survives, are
+  -- both indistinguishable from a broken schema until something writes them.
+  --
+  -- Group 13 proves `reviewed_by` refuses an invented account (23503). This is the other
+  -- side: a real one is accepted, on the step where a reviewer may honestly be named.
+  rel_reviewed_with_auditor := gen_random_uuid();
+  INSERT INTO public.tradition_pack_releases
+    (id, pack_id, release_number, definition_schema_version, languages, definition,
+     author_label, machine_assisted, machine_assistance_notes)
+    VALUES (rel_reviewed_with_auditor, s.pack_unshipped, 902, 1, ARRAY['en', 'ta'],
+            pg_temp.st2_def_small(), 'TEST ONLY — scratch release for the metadata controls',
+            true,
+            'TEST ONLY — drafted by a model from the fixture above and disclosed as such, '
+            'which is the minimum prose the constraint asks for.');
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET status = %L, reviewed_at = now(),'
+    '       review_label = %L, review_basis = %L, review_scope = %L,'
+    '       reviewed_languages = ARRAY[%L], reviewed_by = %L::uuid'
+    '  WHERE id = %L::uuid',
+    'reviewed', 'TEST ONLY — REVIEWED CONTROL',
+    'TEST ONLY — a synthetic record written by the Stage 2 battery. No human reader of '
+    || 'Tamil reviewed these strings.',
+    'TEST ONLY — structure and language coverage only, no religious or cultural claim.',
+    'en', s.owner_a::text, rel_reviewed_with_auditor::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 16: a review could not name a real account, or name one language '
+                    'of a two-language release: %', v;
+  END IF;
+  -- Both halves of that write have to be visible afterwards, not merely un-refused.
+  SELECT count(*) INTO n FROM public.tradition_pack_releases
+    WHERE id = rel_reviewed_with_auditor AND status = 'reviewed'
+      AND reviewed_by = s.owner_a AND reviewed_languages = ARRAY['en']
+      AND machine_assisted AND length(btrim(machine_assistance_notes)) >= 20;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 16: the review write reported success but did not land intact';
+  END IF;
+  passed := passed + 2;
+  -- The optional reviewer stays optional: group 15e walked a release to `reviewed` with the
+  -- column left alone, and here that row is read back. A NOT NULL that crept in through a
+  -- later migration would fail this rather than quietly making every review anonymous.
+  SELECT count(*) INTO n FROM public.tradition_pack_releases
+    WHERE id = rel_scratch AND status = 'reviewed' AND reviewed_by IS NULL;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 16: the release reviewed without a named auditor no longer reads '
+                    'back that way';
+  END IF;
+  passed := passed + 1;
+  -- reviewed → approved is the one step every refusal in group 13 stands beside, and it has
+  -- to work: the fixture's approved release proves the schema can hold one, but the fixture
+  -- runs before the guard has been probed from either side. `approved_at` is written by the
+  -- trigger, not the caller, so the caller supplies nothing but the step.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.tradition_pack_releases SET status = %L WHERE id = %L::uuid',
+    'approved', rel_scratch::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 16: the legal reviewed→approved step was refused: %', v;
+  END IF;
+  SELECT count(*) INTO n FROM public.tradition_pack_releases
+    WHERE id = rel_scratch AND status = 'approved' AND approved_at IS NOT NULL
+      AND review_label = 'TEST ONLY — REVIEWED FIXTURE'
+      AND reviewed_languages = ARRAY['en', 'ta'];
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 16: approval did not stamp itself, or did not carry the review '
+                    'record it was granted under';
+  END IF;
+  passed := passed + 2;
+  -- An approved release is now the thing group 13 refused everywhere else: an approved row
+  -- that could not actually be *used* would mean the refusals were protecting nothing.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.weddings SET tradition_pack_release_id = %L::uuid WHERE id = %L::uuid',
+    rel_scratch::text, s.wedding_b::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 16: a release this run walked to approved could not be selected: %', v;
+  END IF;
+  passed := passed + 1;
+  -- Nothing above touched the fixture's own release, which is the point of doing this on
+  -- scratch rows: wedding B is left holding the release it was given, and can be moved back
+  -- because a selection is not a pin.
+  v := pg_temp.st2_err(format(
+    'UPDATE public.weddings SET tradition_pack_release_id = %L::uuid WHERE id = %L::uuid',
+    s.release_ok::text, s.wedding_b::text));
+  IF v <> 'no-error' THEN
+    RAISE EXCEPTION 'FAIL 16: wedding B could not be moved back onto its seeded release: %', v;
+  END IF;
+  passed := passed + 1;
+  -- The two scratch releases this group produced are both approved now, and approved rows
+  -- are undeletable by group 15e's own rule, so the table ends here rather than tidied.
+  -- Stated as an exact number on purpose: a probe that stopped running would change it, and
+  -- a smaller count in the log is a failure, not a cleaner database.
+  SELECT count(*) INTO n FROM public.tradition_pack_releases;
+  IF n <> 7 THEN
+    RAISE EXCEPTION 'FAIL 16: the battery ends with % releases: 4 fixture, 1 from group '
+                    '13''s per-kind control, 1 walked to reviewed by group 15e and 1 walked '
+                    'through the full lifecycle here — all of the last three undeletable on '
+                    'purpose', n;
+  END IF;
+  passed := passed + 1;
+  RAISE NOTICE 'PASS 16: a review may name a real auditor or name none, a single-language '
+               'review of a two-language release is legal, and the step the refusals stand '
+               'beside actually promotes a release and makes it selectable (8 assertions)';
+
+  -- A floor, not an expectation. Carried forward rather than replaced: this file printed
+  -- 322 at Stage 2's own commit (a51856f), 325 immediately before Stage 4 began, 399 with
+  -- the Stage 4 pack boundary in it (group 8b's opened-up backstop, group 9's
+  -- release/pack visibility, and group 15), 401 once §D's deletion matrix was measured
+  -- across three states instead of two, and 464 now. Most of what was added is not new
+  -- probes so much as existing ones being told to mean something: group 13's set grew from
+  -- the 71 rows Stage 3 left behind to 142 as the Stage 4 release contract was written out
+  -- slot by slot, and every one of those rows now carries an expected refusal *text* beside
+  -- its SQLSTATE — the repair for six rows that had been passing by being refused by the
+  -- pinned section vocabulary instead of by the position-ordering rule they claimed to
+  -- test. Group 16 adds the eight successful writes those refusals depend on: a review that
+  -- may name a real auditor or name none, a one-language review of a two-language release,
+  -- and the reviewed→approved step actually promoting a row and making it selectable.
+  -- The number below is a little under the last measurement, so an assertion that quietly
+  -- stops running is a failure rather than a smaller number in the log.
+  IF passed < 458 THEN
     RAISE EXCEPTION 'FAIL: only % assertions ran — the probe sets must not be empty', passed;
   END IF;
   RAISE NOTICE 'STAGE2 SECURITY TESTS PASSED (%)', passed;

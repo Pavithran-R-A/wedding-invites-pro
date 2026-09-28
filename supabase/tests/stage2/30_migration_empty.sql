@@ -88,9 +88,9 @@ DECLARE
     'public.approval_feedback', 'public.approval_requests', 'public.design_templates',
     'public.entitlements', 'public.guest_households', 'public.household_event_scopes',
     'public.invitation_drafts', 'public.invitation_versions', 'public.publications',
-    'public.rsvp_responses', 'public.tradition_packs', 'public.venues',
-    'public.wedding_assets', 'public.wedding_events', 'public.wedding_people',
-    'public.weddings',
+    'public.rsvp_responses', 'public.tradition_pack_releases', 'public.tradition_packs',
+    'public.venues', 'public.wedding_assets', 'public.wedding_events',
+    'public.wedding_people', 'public.weddings',
     'private.access_tokens', 'private.audit_events',
     'legacy.activity_logs', 'legacy.guests', 'legacy.migration_findings',
     'legacy.orders', 'legacy.payments', 'legacy.printers', 'legacy.projects',
@@ -141,9 +141,9 @@ BEGIN
 
   -- ==================================================== 3. the schema is still there
 
-  PERFORM pg_temp.st2_count('E09 every base table the chain owns exists (26 canonical + profiles + user_roles)',
+  PERFORM pg_temp.st2_count('E09 every base table the chain owns exists (27 canonical + profiles + user_roles)',
     'information_schema.tables WHERE table_schema IN (''public'',''private'',''legacy'')
-       AND table_type = ''BASE TABLE''', 28);
+       AND table_type = ''BASE TABLE''', 29);
 
   -- RLS state is identical whether or not rows arrived: an empty table with RLS off is
   -- still a hole waiting for its first INSERT.
@@ -152,8 +152,8 @@ BEGIN
      WHERE n.nspname = ''public'' AND c.relrowsecurity = false
        AND c.relname IN (''approval_feedback'',''approval_requests'',''design_templates'',
          ''entitlements'',''guest_households'',''household_event_scopes'',''invitation_drafts'',
-         ''invitation_versions'',''publications'',''rsvp_responses'',''tradition_packs'',''venues'',
-         ''wedding_assets'',''wedding_events'',''wedding_people'',''weddings'')', 0);
+         ''invitation_versions'',''publications'',''rsvp_responses'',''tradition_pack_releases'',
+         ''tradition_packs'',''venues'',''wedding_assets'',''wedding_events'',''wedding_people'',''weddings'')', 0);
 
   PERFORM pg_temp.st2_count('E11 the browser roles can name only the public schema',
     '(VALUES (''anon''),(''authenticated'')) x(rolname)
@@ -194,13 +194,16 @@ END
 $EMPTY$;
 
 -- A suite whose assertions can all be deleted one at a time still prints "PASSED", so
--- the floor is checked before that word is used.
+-- the floor is checked before that word is used. The floor is derived, not remembered:
+-- 1 inventory check (E01) + one emptiness check per canonical table (E02, 27 of them)
+-- + the 14 fixed probes (E03-E16) = 42, so declaring a new table must move this number
+-- and deleting an assertion must break it.
 DO $FLOOR$
 DECLARE n int;
 BEGIN
   n := coalesce(current_setting('st2.passed', true), '0')::int;
-  IF n < 41 THEN
-    RAISE EXCEPTION 'Stage 2 clean-chain suite ran only % assertions (floor 41)', n;
+  IF n < 42 THEN
+    RAISE EXCEPTION 'Stage 2 clean-chain suite ran only % assertions (floor 42)', n;
   END IF;
 END
 $FLOOR$;

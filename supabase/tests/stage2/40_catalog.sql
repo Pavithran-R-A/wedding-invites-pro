@@ -108,12 +108,22 @@ SELECT set_config('st2.passed', '0', false);
 DO $CATALOG$
 DECLARE
   -- The canonical surface, as a list rather than as a count: a count is satisfied by
-  -- any eighteen tables, which is not the claim being made.
+  -- any nineteen tables, which is not the claim being made.
   public_tbls     text[] := ARRAY[
     'weddings','wedding_people','venues','wedding_events','invitation_drafts',
     'invitation_versions','publications','guest_households','household_event_scopes',
     'rsvp_responses','approval_requests','approval_feedback','wedding_assets',
-    'entitlements','design_templates','tradition_packs','profiles','user_roles'];
+    'entitlements','design_templates','tradition_packs','tradition_pack_releases',
+    'profiles','user_roles'];
+  -- The one table on that list whose customer read path is a *column* projection rather than a
+  -- table grant, and the seven columns it opens. Stage 4 §9 narrowed it: the reviewer record,
+  -- the authorship and machine-assistance disclosure, the source reference, the changelog and
+  -- the lifecycle timestamps are columns a browser cannot even name. Under a column grant
+  -- `has_table_privilege(..., 'SELECT')` answers false while those seven still read, so C12
+  -- asks about table-level grants and C12b about this projection, separately and by name.
+  release_read_cols text[] := ARRAY[
+    'definition', 'definition_schema_version', 'id', 'languages', 'pack_id',
+    'release_number', 'status'];
   private_tbls    text[] := ARRAY['access_tokens','audit_events'];
   legacy_tbls     text[] := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
@@ -143,13 +153,25 @@ DECLARE
   -- signup trigger, edited by its owner, and never removed by either.
   server_only_tbls text[] := ARRAY[
     'invitation_versions','publications','approval_requests','approval_feedback',
-    'entitlements','design_templates','tradition_packs','user_roles'];
+    'entitlements','design_templates','tradition_packs','tradition_pack_releases',
+    'user_roles'];
   -- Rows that are never edited and never removed by a client.
   append_only_tbls text[] := ARRAY[
     'invitation_versions','approval_feedback','access_tokens','audit_events'];
   -- Every ON DELETE action in the canonical schema, chosen rather than inherited
   -- (Phase 63). The reasoning is in docs/architecture/stage-2-migration-plan.md
   -- section 7; the fact is here, because a comment cannot fail a build.
+  --
+  -- Stage 4 added three of these and they are the load-bearing ones for snapshot
+  -- pinning: a version's `tradition_pack_release_id`, a wedding's, and a release's
+  -- `pack_id` are all RESTRICT. A frozen invitation asks for the release it was
+  -- pinned to, so the schema has to make that release undiggable-from-under-it rather
+  -- than leaving it to a status flag — deprecation is a status change (and stays
+  -- renderable forever, §11), while the DELETE that would actually break an old guest
+  -- link is refused by the constraint. Cascade was the other candidate and is wrong
+  -- here twice over: it would delete a guest-visible artefact because of an upstream
+  -- delete, and a cascade runs as the child's owner, so the guard triggers below
+  -- could not see it.
   fk_actions text[] := ARRAY[
     'access_tokens(wedding_id)->weddings=NOACTION',
     'access_tokens(wedding_id+approval_request_id+approval_version_id)->approval_requests=NOACTION',
@@ -169,7 +191,7 @@ DECLARE
     'invitation_drafts(wedding_id)->weddings=CASCADE',
     'invitation_versions(created_by)->auth.users=CASCADE',
     'invitation_versions(design_template_id)->design_templates=RESTRICT',
-    'invitation_versions(tradition_pack_id)->tradition_packs=RESTRICT',
+    'invitation_versions(tradition_pack_release_id)->tradition_pack_releases=RESTRICT',
     'invitation_versions(wedding_id)->weddings=NOACTION',
     'invitation_versions(wedding_id+supersedes_version_id)->invitation_versions=NOACTION',
     'profiles(user_id)->auth.users=CASCADE',
@@ -177,7 +199,8 @@ DECLARE
     'publications(wedding_id+version_id)->invitation_versions=NOACTION',
     'rsvp_responses(wedding_id)->weddings=CASCADE',
     'rsvp_responses(wedding_id+household_id+event_id)->household_event_scopes=NOACTION',
-    'tradition_packs(reviewed_by)->auth.users=SETNULL',
+    'tradition_pack_releases(pack_id)->tradition_packs=RESTRICT',
+    'tradition_pack_releases(reviewed_by)->auth.users=SETNULL',
     'user_roles(user_id)->auth.users=CASCADE',
     'venues(wedding_id)->weddings=CASCADE',
     'wedding_assets(wedding_id)->weddings=CASCADE',
@@ -186,7 +209,7 @@ DECLARE
     'wedding_people(wedding_id)->weddings=CASCADE',
     'weddings(design_template_id)->design_templates=RESTRICT',
     'weddings(owner_user_id)->auth.users=CASCADE',
-    'weddings(tradition_pack_id)->tradition_packs=RESTRICT'];
+    'weddings(tradition_pack_release_id)->tradition_pack_releases=RESTRICT'];
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
   -- unindexed foreign key has to arrive here with a reason of its own before it can
@@ -200,21 +223,26 @@ DECLARE
     -- retention tooling only; a user delete is rare and the scan is bounded by the
     -- number of audit rows, which is the price of keeping them
     'audit_events->auth.users',
-    -- catalog reviewers are read by pack/template, never searched by reviewer
+    -- catalog reviewers are read by pack/template, never searched by reviewer. Stage 4
+    -- moved the reviewer FK onto the release row, where the same reasoning holds; the
+    -- release->pack edge is *not* here because it is the leading column of
+    -- UNIQUE (pack_id, release_number), which the catalogue read uses anyway.
     'design_templates->auth.users',
-    'tradition_packs->auth.users',
+    'tradition_pack_releases->auth.users',
     -- created_by is attribution, not a query key; the row is deleted with its wedding
     'invitation_versions->auth.users',
     -- platform content is withdrawn by status, not deleted, so the RESTRICT check
-    -- runs only in a migration
+    -- runs only in a migration. That is now the *designed* lifecycle for a pack
+    -- release too: deprecating is a status write, and an approved-once release cannot
+    -- be deleted at all (the guard refuses, and this key is what the refusal protects)
     'invitation_versions->design_templates',
-    'invitation_versions->tradition_packs',
+    'invitation_versions->tradition_pack_releases',
     -- lineage walks one wedding's versions, which (wedding_id, ...) indexes cover
     'invitation_versions->invitation_versions',
     -- a venue is deleted after its events are un-pointed; venue_id alone is indexed
     'wedding_events->venues',
     'weddings->design_templates',
-    'weddings->tradition_packs'];
+    'weddings->tradition_pack_releases'];
   t text;
 BEGIN
   -- =========================================================== 1. row-level security
@@ -246,7 +274,7 @@ BEGIN
                  WHERE n.nspname = 'legacy'));
 
   -- =========================================================== 2. primary keys, shape
-  PERFORM pg_temp.st2_ok('C05 every public table is one of the eighteen canonical ones',
+  PERFORM pg_temp.st2_ok('C05 every public table is one of the nineteen canonical ones',
     (SELECT array_agg(c.relname::text ORDER BY c.relname)
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'public') = (SELECT array_agg(x ORDER BY x) FROM unnest(public_tbls) x));
@@ -280,11 +308,29 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                  WHERE c.relkind = 'r' AND n.nspname IN ('public','private','legacy')
                    AND has_table_privilege('anon', c.oid, 'SELECT, INSERT, UPDATE, DELETE')));
-  PERFORM pg_temp.st2_ok('C12 authenticated has SELECT on exactly the canonical tables',
+  -- Stage 2 wrote this as one list of nineteen readable tables, and for eighteen of them that
+  -- is still the shape. Naming the exception rather than dropping it is what keeps the
+  -- inventory exact: a later `GRANT SELECT ON public.tradition_pack_releases TO authenticated`
+  -- added for convenience would put the table back in the first list and fail C12 as a
+  -- mismatch, instead of quietly widening a read path that §9 narrowed on purpose.
+  PERFORM pg_temp.st2_ok('C12 authenticated has table-level SELECT on exactly the canonical tables minus the one whose read path is a column projection',
     (SELECT array_agg(c.relname::text ORDER BY c.relname)
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'public'
-        AND has_table_privilege('authenticated', c.oid, 'SELECT')) = (SELECT array_agg(x ORDER BY x) FROM unnest(public_tbls) x));
+        AND has_table_privilege('authenticated', c.oid, 'SELECT')) = (SELECT array_agg(x ORDER BY x) FROM unnest(array_remove(public_tbls, 'tradition_pack_releases')) x));
+  -- ... and that table is readable, not closed. The projection is measured from the catalogue
+  -- rather than from this file's list, so a column added later and granted shows up here as a
+  -- difference in a set, not as a comment nobody re-read.
+  PERFORM pg_temp.st2_ok('C12b and exactly these seven columns of that table are nameable by a signed-in role — the release''s own identity, status, language coverage and reviewed wording, with the reviewer''s identity and qualification and the maintenance timestamps withheld',
+    (SELECT array_agg(q.attname::text ORDER BY q.attname)
+       FROM pg_attribute q
+       JOIN pg_class c ON c.oid = q.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = 'tradition_pack_releases'
+        AND q.attnum > 0 AND NOT q.attisdropped
+        AND has_column_privilege('authenticated', 'public.tradition_pack_releases',
+                                 q.attname, 'SELECT'))
+      = (SELECT array_agg(x ORDER BY x) FROM unnest(release_read_cols) x));
   -- Three commands, three inventories. Stage 2 wrote this as one check over
   -- INSERT AND UPDATE AND DELETE, which could only ever describe a table a customer
   -- owned outright — and so it was blind to the difference this stage now depends on:
@@ -331,7 +377,7 @@ BEGIN
   PERFORM pg_temp.st2_ok('C15 service_role can reach the canonical and server schema',
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname IN ('public','private')
-        AND has_table_privilege('service_role', c.oid, 'SELECT, INSERT, UPDATE, DELETE')) = 20::bigint);
+        AND has_table_privilege('service_role', c.oid, 'SELECT, INSERT, UPDATE, DELETE')) = 21::bigint);
   PERFORM pg_temp.st2_ok('C16 service_role holds nothing in legacy',
     NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                  WHERE c.relkind = 'r' AND n.nspname = 'legacy'
@@ -417,7 +463,7 @@ BEGIN
     (SELECT count(*) FROM pg_policy pol
       JOIN pg_class c ON c.oid = pol.polrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public' AND pol.polcmd = 'r') = 18::bigint);
+     WHERE n.nspname = 'public' AND pol.polcmd = 'r') = 19::bigint);
   PERFORM pg_temp.st2_ok('C21 write policies exist on exactly the customer set',
     (SELECT array_agg(x.relname::text ORDER BY x.relname)
        FROM (SELECT DISTINCT c.relname FROM pg_policy pol
@@ -444,8 +490,15 @@ BEGIN
   -- Every ownership decision is expressed against weddings.owner_user_id; a policy
   -- inventing its own ownership rule would be a second source of truth. Exactly two
   -- policies do not mention auth.uid() — the platform catalogue, which is read by
-  -- status rather than by possession — and that exemption is named here so a third
-  -- one has to be argued for before it can ship.
+  -- status or by what has been approved rather than by possession — and that exemption
+  -- is named here so a third one has to be argued for before it can ship.
+  --
+  -- The release table used to be one of them and no longer is. Ruling A1 requires a host
+  -- to keep reading the *deprecated* release their own wedding selected, which is a
+  -- statement about possession, so that policy names auth.uid() like every other
+  -- customer-facing one. Being dropped from this exemption list is therefore the
+  -- assertion: an approved release is still visible to everyone, and the only widening is
+  -- per-host. stage4/50_pack_release.sql measures the behaviour both ways.
   PERFORM pg_temp.st2_set('C25 policies without an auth.uid() predicate are the two catalogue reads',
     (SELECT array_agg(x ORDER BY x) FROM (
        SELECT c.relname || '.' || pol.polname || '=' || pol.polcmd::text AS x
@@ -457,7 +510,7 @@ BEGIN
                 coalesce(pg_get_expr(pol.polqual, pol.polrelid), '') ||
                 coalesce(pg_get_expr(pol.polwithcheck, pol.polrelid), '')) = 0) s),
     ARRAY['design_templates.users_read_platform_templates=r',
-          'tradition_packs.users_read_platform_packs=r']);
+          'tradition_packs.users_read_packs_with_approved_releases=r']);
   PERFORM pg_temp.st2_ok('C25b every wedding-scoped policy resolves ownership through weddings',
     NOT EXISTS (SELECT 1 FROM pg_policy pol
                   JOIN pg_class c ON c.oid = pol.polrelid
@@ -709,9 +762,25 @@ BEGIN
       'public.invitation_drafts.set_updated_at=touch_updated_at',
       'public.invitation_versions.versions_immutable_no_delete=reject_client_delete',
       'public.invitation_versions.versions_immutable_no_update=reject_client_write',
+      -- Stage 4 §11: a frozen version may only point at the release its wedding
+      -- pointed at when it was frozen. INVOKER, and reads as the calling role, so a
+      -- freeze cannot be laundered through a definer that sees more than the host does.
+      'public.invitation_versions.versions_pack_release_gate=require_frozen_pack_release',
       'public.publications.publications_no_client_write=reject_client_write',
       'public.publications.set_updated_at=touch_updated_at',
       'public.rsvp_responses.set_updated_at=touch_updated_at',
+      -- Stage 4: the release row's own lifecycle gate plus the standard write and delete
+      -- guards. All three are INVOKER — a guard that reported anything other than the
+      -- role which issued the statement would be a guard with a privilege of its own to
+      -- use. Same-name-order rule as the other guarded tables, so on an UPDATE the
+      -- browser role is refused by `no_client_write_*` before the lifecycle gate sees
+      -- the row, and the gate fires last on INSERT/UPDATE/DELETE; that ordering is what
+      -- 20_attacks.sql group 8b measures from a customer role, and the gate's own
+      -- transitions are group 15.
+      'public.tradition_pack_releases.no_client_delete_tradition_pack_releases=reject_client_delete',
+      'public.tradition_pack_releases.no_client_write_tradition_pack_releases=reject_client_write',
+      'public.tradition_pack_releases.set_updated_at=touch_updated_at',
+      'public.tradition_pack_releases.tradition_pack_release_guard=guard_tradition_pack_release',
       'public.tradition_packs.no_client_write_tradition_packs=reject_client_write',
       'public.tradition_packs.set_updated_at=touch_updated_at',
       'public.venues.set_updated_at=touch_updated_at',
@@ -725,7 +794,11 @@ BEGIN
       -- dropped — because the alternative to defining it was leaving the invariant
       -- open to an owner delete. It is in this inventory because this assertion is the
       -- alarm for a trigger arriving or disappearing without being qualified.
-      'public.weddings.weddings_have_draft=attach_draft_on_wedding_create']);
+      'public.weddings.weddings_have_draft=attach_draft_on_wedding_create',
+      -- Stage 4 §10: a wedding may only point at an *approved* release. INVOKER, and it
+      -- reads the release as the calling role, so a host cannot select a release through
+      -- a definer that sees rows the host was never shown.
+      'public.weddings.weddings_pack_release_gate=require_approved_pack_release']);
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
   -- use. That is the property this check carried in Stage 2, when the whole schema had
@@ -749,7 +822,17 @@ BEGIN
                   JOIN pg_proc p ON p.oid = t.tgfoid
                  WHERE NOT t.tgisinternal AND p.prosecdef
                    AND p.proname IN ('reject_client_write','reject_client_delete',
-                                     'touch_updated_at')));
+                                     'touch_updated_at',
+                                     -- Stage 4's three pack gates. Named here because
+                                     -- each one reads a row it is deciding about, and a
+                                     -- definer body would decide against the privileged
+                                     -- schema's view rather than the caller's — which is
+                                     -- exactly the difference between "this release is
+                                     -- not approved" and "this release is invisible to
+                                     -- you", and only the second is a secret.
+                                     'guard_tradition_pack_release',
+                                     'require_approved_pack_release',
+                                     'require_frozen_pack_release')));
   -- Phase 47: "no client-writable trusted field". The grant list (C13/C22) says which
   -- tables a client may write; this says every table that must not be client-written
   -- also has a trigger refusing it, so a future GRANT cannot be the only line of
@@ -858,7 +941,7 @@ BEGIN
                                           ~ (a.attname || ' *(>=|>) *(0|1)'))));
   -- ... and the bounded set is the one expected, so a column cannot dodge C42 by
   -- being renamed out of the pattern while still pretending to be a quantity.
-  PERFORM pg_temp.st2_set('C42b the quantity columns are exactly the seven expected',
+  PERFORM pg_temp.st2_set('C42b the quantity columns are exactly the eight expected',
     (SELECT array_agg(x ORDER BY x) FROM (
        SELECT c.relname || '.' || a.attname AS x
          FROM pg_attribute a
@@ -869,8 +952,12 @@ BEGIN
           AND n.nspname IN ('public','private')
           AND ty.oid IN ('integer'::regtype,'bigint'::regtype,'smallint'::regtype)
           AND a.attname ~* 'count|size|number|order|qty|duration|pages') s),
+    -- Stage 4's entry is not a bookkeeping number: `release_number` is the ordinal that
+    -- makes "revise this pack" mean *insert a row* rather than edit one, so a bound on it
+    -- (and the UNIQUE (pack_id, release_number) key) is part of the immutability claim.
     ARRAY['guest_households.expected_party_size','invitation_versions.version_number',
-          'rsvp_responses.party_size','wedding_assets.size_bytes',
+          'rsvp_responses.party_size','tradition_pack_releases.release_number',
+          'wedding_assets.size_bytes',
           'wedding_events.display_order','wedding_people.display_order',
           'weddings.estimated_guest_count']);
   -- Phase 66: the domain has no place for inherited or assumed identity. This is the
@@ -1157,6 +1244,149 @@ BEGIN
   PERFORM pg_temp.st2_ok('C69 the guards are not executable by service_role either',
     pg_temp.st2_state('SELECT private.reject_client_write()', 'service_role') = '42501');
 
+  -- ===================== 13b. the pack lifecycle is a schema property (Stage 4 §5, §6)
+  -- 20_attacks.sql group 15 proves a customer cannot walk a release through the
+  -- lifecycle. This section asks the quieter question: is the lifecycle even *encoded*,
+  -- or does it live inside a trigger body where a later migration could rewrite it
+  -- without anything noticing? A stage whose whole purpose is "content is reviewed,
+  -- versioned and explicitly selected" has to be able to fail when the vocabulary of
+  -- review stops being a fact about the table.
+  --
+  -- Each expectation below was read off the migrated schema. They compare *normalised*
+  -- constraint definitions (whitespace collapsed) rather than generated constraint names,
+  -- because an unnamed table-level CHECK is auto-named `tradition_pack_releases_checkN`
+  -- and Postgres renumbers those in column order — a column added above one silently
+  -- retargets any test that asserts on the number. The definition is the claim itself.
+  --
+  -- The six rules this stage depends on are therefore named in the migration, and C72b
+  -- below is what makes the naming a contract rather than a style choice: 20_attacks.sql
+  -- group 15 asserts that a forged promotion is refused *by the constraint called
+  -- `review_metadata_is_mandatory`, and a refusal that names a constraint nobody pinned
+  -- would be a test of whichever rule happened to hold that number.
+  PERFORM pg_temp.st2_set('C71a a release status is one of exactly four lifecycle states',
+    (SELECT array_agg(v ORDER BY v) FROM (
+       SELECT (regexp_matches(
+                 pg_get_constraintdef(k.oid), '''([a-z_]+)''::text', 'g'))[1] AS v
+         FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+        WHERE c.relname = 'tradition_pack_releases' AND k.contype = 'c'
+          -- the vocabulary rule specifically, not the four pairing rules that also
+          -- mention `status` — matched on the shape of the expression for the same
+          -- reason the closed set below is: generated names are Postgres' to change
+          AND pg_get_constraintdef(k.oid) LIKE 'CHECK ((status = ANY%') s),
+    ARRAY['approved','deprecated','draft','reviewed']);
+  -- The language vocabulary is bounded for a different reason than the status one: a
+  -- release may only claim locales this product can actually render, so an unserved
+  -- language cannot be approved into existence and then silently fall back to English.
+  -- §14 forbids pretending an English string is Tamil, and this is the schema half of
+  -- that sentence.
+  PERFORM pg_temp.st2_set('C71b a release claims only languages the product serves',
+    (SELECT array_agg(v ORDER BY v) FROM (
+       SELECT (regexp_matches(
+                 pg_get_constraintdef(k.oid), '''([a-z_]+)''::text', 'g'))[1] AS v
+         FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+        WHERE c.relname = 'tradition_pack_releases' AND k.contype = 'c'
+          AND pg_get_constraintdef(k.oid) LIKE '%(cardinality(languages) > 0)%') s),
+    ARRAY['en','kn','ml','ta','te']);
+  -- Five rules, as a closed set: draft carries no review record at all; a reviewed
+  -- release carries the whole one; "approved" and "deprecated" each mean exactly one
+  -- timestamp and nothing else; and the vocabulary check above. The pairing is what
+  -- makes promotion unforgable — a client that sets `status = 'approved'` without the
+  -- review record hits this, and one that sets it *with* a fabricated record still has
+  -- to pass the transition guard, which group 15 measures from both sides.
+  PERFORM pg_temp.st2_set('C72 the lifecycle is five paired CHECKs on the release row, no more',
+    (SELECT array_agg(x ORDER BY x) FROM (
+       SELECT regexp_replace(pg_get_constraintdef(k.oid), '\s+', ' ', 'g') AS x
+         FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+        WHERE c.relname = 'tradition_pack_releases' AND k.contype = 'c'
+          AND pg_get_constraintdef(k.oid) LIKE '%status%') s),
+    ARRAY[
+      'CHECK (((status <> ''draft''::text) OR ((review_label IS NULL) AND (review_basis IS NULL) AND (review_scope IS NULL) AND (reviewed_languages IS NULL) AND (reviewed_by IS NULL) AND (reviewed_at IS NULL) AND (approved_at IS NULL) AND (deprecated_at IS NULL))))',
+      'CHECK (((status <> ALL (ARRAY[''reviewed''::text, ''approved''::text, ''deprecated''::text])) OR ((review_label IS NOT NULL) AND (review_basis IS NOT NULL) AND (review_scope IS NOT NULL) AND (reviewed_languages IS NOT NULL) AND (reviewed_at IS NOT NULL))))',
+      'CHECK (((status = ''deprecated''::text) = (deprecated_at IS NOT NULL)))',
+      'CHECK (((status = ANY (ARRAY[''approved''::text, ''deprecated''::text])) = (approved_at IS NOT NULL)))',
+      'CHECK ((status = ANY (ARRAY[''draft''::text, ''reviewed''::text, ''approved''::text, ''deprecated''::text])))']);
+  -- The named half of the same fact: every rule this stage's refusals quote by name, and
+  -- nothing else that was named by hand. Auto-generated column checks are excluded by
+  -- shape (`<table>_<column>_check`), so this is a closed list of the rules whose *identity*
+  -- is load-bearing. A seventh appears here the moment someone names a rule in the
+  -- migration, and one that loses its name disappears from this list — which is the
+  -- failure mode 20_attacks.sql would otherwise report as a wrong-constraint mystery.
+  PERFORM pg_temp.st2_set('C72b the release rules this stage quotes by name are exactly six named CHECKs',
+    (SELECT array_agg(k.conname ORDER BY k.conname)
+       FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+      WHERE c.relname = 'tradition_pack_releases' AND k.contype = 'c'
+        AND left(k.conname, length(c.relname) + 1) <> c.relname || '_'),
+    ARRAY['approved_at_matches_status','deprecated_at_matches_status',
+          'draft_carries_no_review_metadata','machine_assistance_disclosure_required',
+          'review_metadata_is_mandatory','reviewed_languages_are_supported_ones']);
+  -- §5: the pack body is "NOT arbitrary JSON". Two halves — the column is jsonb with an
+  -- object CHECK (so it can be inspected by `jsonb_typeof` and by the section resolver,
+  -- and is versioned by `definition_schema_version`), and no content column anywhere in
+  -- the canonical schema is the weaker `json` type, which would quietly skip every
+  -- containment or type assertion a later migration thought it was making.
+  PERFORM pg_temp.st2_ok('C73a a pack definition is a versioned jsonb object, not free-form text',
+    (SELECT ty.typname FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_type ty ON ty.oid = a.atttypid
+      WHERE c.relname = 'tradition_pack_releases' AND a.attname = 'definition') = 'jsonb'
+    AND EXISTS (SELECT 1 FROM pg_constraint k
+                  JOIN pg_class c ON c.oid = k.conrelid
+                 WHERE c.relname = 'tradition_pack_releases' AND k.contype = 'c'
+                   AND pg_get_constraintdef(k.oid)
+                       LIKE '%jsonb_typeof(definition) = ''object''%')
+    AND EXISTS (SELECT 1 FROM pg_constraint k
+                  JOIN pg_class c ON c.oid = k.conrelid
+                 WHERE c.relname = 'tradition_pack_releases' AND k.contype = 'c'
+                   AND pg_get_constraintdef(k.oid) LIKE '%(definition_schema_version > 0)%'));
+  PERFORM pg_temp.st2_ok('C73b no jsonb-carrying column in the canonical schema is plain json',
+    NOT EXISTS (SELECT 1 FROM pg_attribute a
+                  JOIN pg_class c ON c.oid = a.attrelid
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                  JOIN pg_type ty ON ty.oid = a.atttypid
+                 WHERE a.attnum > 0 AND NOT a.attisdropped AND c.relkind = 'r'
+                   AND n.nspname IN ('public','private') AND ty.typname = 'json'));
+  -- §10: "No tradition pack / Write my own" is the *default* state of a wedding, so it
+  -- has to be representable without inventing a sentinel row that a guest could
+  -- otherwise be served. A nullable column with no default is that representation; a
+  -- NOT NULL version of this table would have forced a fake pack into existence, and
+  -- that is the kind of decision worth failing a build over.
+  PERFORM pg_temp.st2_ok('C74 selecting no tradition pack is a schema state, not a sentinel row',
+    (SELECT count(*) FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+      WHERE c.relname IN ('weddings','invitation_versions')
+        AND a.attname = 'tradition_pack_release_id'
+        AND NOT a.attnotnull
+        AND NOT EXISTS (SELECT 1 FROM pg_attrdef d
+                         WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum)) = 2::bigint);
+  -- §18: review provenance is prose with a floor, so "reviewed" cannot be satisfied by a
+  -- tick box or a space. Closed set of the length-bounded text columns on the two pack
+  -- tables, read off the schema — a tenth field that needs a bound has to arrive here,
+  -- and one that loses its bound stops being a claim about anything.
+  --
+  -- Single-column checks only, on purpose. §B's machine-assistance disclosure is a *pairing*
+  -- rule (`machine_assisted` true ⇒ the notes column is filled in) and its definition
+  -- mentions btrim length while contributing two columns to it; folding it in here would
+  -- list the boolean as a prose field and add the notes column twice. The notes column is
+  -- in the set below through its own bound, which is the one that actually holds it.
+  PERFORM pg_temp.st2_set('C75 the pack tables'' bounded prose is exactly the nine review/author fields',
+    (SELECT array_agg(x ORDER BY x) FROM (
+       SELECT c.relname || '.' || a.attname AS x
+         FROM pg_constraint k
+         JOIN pg_class c ON c.oid = k.conrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN LATERAL unnest(k.conkey) u(n) ON true
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = u.n
+        WHERE n.nspname = 'public'
+          AND c.relname IN ('tradition_packs','tradition_pack_releases')
+          AND k.contype = 'c'
+          AND cardinality(k.conkey) = 1
+          AND pg_get_constraintdef(k.oid) LIKE '%length(btrim%') s),
+    ARRAY['tradition_pack_releases.author_label','tradition_pack_releases.changelog',
+          'tradition_pack_releases.machine_assistance_notes',
+          'tradition_pack_releases.review_basis','tradition_pack_releases.review_label',
+          'tradition_pack_releases.review_scope','tradition_pack_releases.source_reference',
+          'tradition_packs.display_name','tradition_packs.scope_statement']);
+
   -- ================================================== 14. the suite has not been emptied
   -- Every list above is a *set* comparison, so an empty schema would satisfy several of
   -- them by accident; the floor is what says this run measured something. And the probe
@@ -1166,24 +1396,36 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM pg_class WHERE relname LIKE 'st2_probe_%')
     AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname LIKE 'st2_probe_%'));
 
-  -- Measured on this branch: 94. The file ran 76 at Stage 2's head commit, and Stage 3
-  -- added ten by splitting two claims that could no longer be made whole — C13 became
-  -- C13a-d (one per command, plus the draft itself) and C28 became C28a/C28b (the
-  -- anonymous surface, the signed-in surface) — plus C17c/C17d for the `api` schema,
-  -- C29a/C29c for the callable inventory and its argument shape, C32b for the guard
-  -- privilege that C32's blanket form can no longer state, and C63b for the limitation
-  -- the new schema inherits. That measurement was 86; the independent-review closure
-  -- repair added eight more, all of them about the second RPC schema rather than about
-  -- new subject matter — C17d2 (internal_api holds functions and no policy), C17e (no
-  -- USAGE or CREATE for a server role there), C26b (nothing exposed through `api` acts
-  -- above its caller), C26c (the wrappers pin their own path), C26d (a wrapper is one
-  -- delegation and nothing else), C26e (internal_api is exactly the seven bodies),
-  -- C26f (each body is a pinned definer whose caller matrix mirrors its wrapper), and
-  -- C63c (the limitation C63b states applies inside internal_api too). Re-measure and
+  -- The file ran 76 at Stage 2's head commit. Stage 3 added ten by splitting two claims
+  -- that could no longer be made whole — C13 became C13a-d (one per command, plus the
+  -- draft itself) and C28 became C28a/C28b (the anonymous surface, the signed-in
+  -- surface) — plus C17c/C17d for the `api` schema, C29a/C29c for the callable inventory
+  -- and its argument shape, C32b for the guard privilege that C32's blanket form can no
+  -- longer state, and C63b for the limitation the new schema inherits. That measurement
+  -- was 86; the independent-review closure repair added eight more, all of them about the
+  -- second RPC schema rather than about new subject matter — C17d2 (internal_api holds
+  -- functions and no policy), C17e (no USAGE or CREATE for a server role there), C26b
+  -- (nothing exposed through `api` acts above its caller), C26c (the wrappers pin their
+  -- own path), C26d (a wrapper is one delegation and nothing else), C26e (internal_api is
+  -- exactly the seven bodies), C26f (each body is a pinned definer whose caller matrix
+  -- mirrors its wrapper), and C63c (the limitation C63b states applies inside
+  -- internal_api too). Stage 4 then added eight, all of them about the pack lifecycle
+  -- rather than about a schema it had to re-describe: C71a/C71b (the two closed
+  -- vocabularies), C72 (the five status rules as one set), C72b (the same rules' *names*,
+  -- which 20_attacks.sql quotes in its refusal assertions), C73a/C73b (a versioned jsonb
+  -- object, and no plain json anywhere), C74 (selecting no pack is representable), C75
+  -- (review prose is bounded). Measured on this branch: 102, then 103 once §9's column grant
+  -- split C12 — the readable-table inventory can no longer be one list, because one table on it
+  -- is now readable by projection rather than by a table grant, so C12 counts the eighteen and
+  -- C12b names the seven columns of the nineteenth. Note what did *not* move:
+  -- the inventories that grew in place — one more public table, one more read policy, one
+  -- more server-authored table, five more triggers, three more foreign keys, one more
+  -- bounded quantity — changed no assertion count, which is worth saying because a reader
+  -- comparing totals would otherwise look for a change that is not there. Re-measure and
   -- say so whenever a check is added or removed: a floor nobody re-measures stops
   -- meaning anything.
-  IF (current_setting('st2.passed'))::int < 94 THEN
-    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 94',
+  IF (current_setting('st2.passed'))::int < 103 THEN
+    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 103',
       (current_setting('st2.passed'))::int;
   END IF;
 END $CATALOG$;

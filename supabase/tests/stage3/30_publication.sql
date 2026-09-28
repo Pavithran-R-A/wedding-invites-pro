@@ -1,8 +1,8 @@
 -- Stage 3 §6/§14/§15/§16/§17 — the publication and credential rules, at the layer
 -- where they are actually decided.
 --
--- Run AFTER bootstrap + published migrations + the Stage 2 chain + the Stage 3 chain,
--- as the trusted login role, in one transaction. `supabase/tests/stage2/run.sh`
+-- Run AFTER bootstrap + published migrations + the Stage 2, 3 and 4 chains, as the
+-- trusted login role, in one transaction. `supabase/tests/stage2/run.sh`
 -- applies this file between the draft invariant and the attack suites, so a Stage 3
 -- loosening of a Stage 2 guarantee shows up here too. It cleans up after itself
 -- (group Z) because `--single-transaction` *commits* a file that succeeds, and the
@@ -281,7 +281,7 @@ SELECT gen_random_uuid() AS owner_c, gen_random_uuid() AS owner_d,
        gen_random_uuid() AS wed_c,   gen_random_uuid() AS wed_d,
        gen_random_uuid() AS wed_bare, gen_random_uuid() AS household_c,
        gen_random_uuid() AS household_d, gen_random_uuid() AS tmpl_c,
-       gen_random_uuid() AS pack_c,   gen_random_uuid() AS no_such;
+       gen_random_uuid() AS no_such;
 
 INSERT INTO auth.users (id, email) VALUES
   ((SELECT owner_c FROM pf), 'host-c@stage3pub.test'),
@@ -302,9 +302,14 @@ SELECT set_config('probe.hash_a',
 SELECT set_config('probe.hash_b',
   encode(extensions.digest(convert_to('stage3-probe-b', 'UTF8'), 'sha256'), 'hex'), false);
 
-INSERT INTO public.tradition_packs (id, pack_key, revision, display_name, structure)
-SELECT pack_c, 'stage3-probe-pack', 1, 'Stage 3 Probe Pack',
-       '{"sections":["SENTINEL-PACK-STRUCTURE"]}'::jsonb FROM pf;
+-- Neither wedding selects a tradition pack. Stage 3 left this file seeding one, and a
+-- pack release is now a row that walks a lifecycle: an approved release cannot be
+-- deleted by anybody, by design (`supabase/migrations/20260927120000_…sql` §3), so this
+-- file's group Z erasure could no longer remove its own fixture. The pack-bearing guest
+-- document — including every closure property this file asserts for the pack-less one,
+-- and the release-pinning rules Stage 4 exists for — is qualified in
+-- `supabase/tests/stage4/50_pack_release.sql`, which runs last in the chain for exactly
+-- that reason and leaves its approved rows to the throwaway database that dies with them.
 INSERT INTO public.design_templates (id, template_key, revision, display_name,
                                      layout_settings, preview_svg)
 SELECT tmpl_c, 'stage3-probe-template', 2, 'Stage 3 Probe Template',
@@ -314,13 +319,13 @@ SELECT tmpl_c, 'stage3-probe-template', 2, 'Stage 3 Probe Template',
 -- Seeded by the maintenance role: this file is about publication, and the owner's
 -- own create path is already proved by the draft-invariant suite that runs before it.
 INSERT INTO public.weddings (id, owner_user_id, title, primary_language, additional_languages,
-                             style_settings, tradition_pack_id, design_template_id)
+                             style_settings, design_template_id)
 SELECT wed_c, owner_c, 'Asha weds Bala', 'en', ARRAY['ta'],
        '{"font":"Playfair Display","fontSize":"24","color":"#C9972F","alignment":"center","foilEnabled":true}',
-       pack_c, tmpl_c
+       tmpl_c
   FROM pf;
--- The second family has no pack and no template attached at all: the branch that
--- must produce a JSON null rather than an invented one.
+-- The second family has no template attached either: the branch that must produce a
+-- JSON null rather than an invented one.
 INSERT INTO public.weddings (id, owner_user_id, title, primary_language, style_settings)
 SELECT wed_d, owner_d, 'Bala weds Divya', 'ta',
        '{"font":"Mukta Malar","fontSize":"20","color":"#7a1f1f","alignment":"left"}' FROM pf;
@@ -413,13 +418,14 @@ BEGIN
 
   PERFORM pg_temp.st3p_has_keys('B1 the host gets back exactly what it needs and nothing else',
     v_res, ARRAY['snapshot', 'version_id', 'version_number']);
-  PERFORM pg_temp.st3p_has_keys('B2 the snapshot is the six-part document',
-    v_snap, ARRAY['wedding', 'design_template', 'tradition_pack', 'people', 'events', 'draft']);
+  PERFORM pg_temp.st3p_has_keys('B2 the snapshot is the seven-part document',
+    v_snap, ARRAY['wedding', 'design_template', 'tradition_pack_release', 'sections',
+                  'people', 'events', 'draft']);
   PERFORM pg_temp.st3p_eq('B3 the first version is number 1', (v_res ->> 'version_number')::int, 1);
   PERFORM pg_temp.st3p_eq('B4 the second numbers itself after the first', (v_res2 ->> 'version_number')::int, 2);
   PERFORM pg_temp.st3p_eq('B5 the stored version declares the shape the projection understands',
     (SELECT iv.snapshot_schema_version FROM public.invitation_versions iv
-      WHERE iv.id = (v_res ->> 'version_id')::uuid), 1);
+      WHERE iv.id = (v_res ->> 'version_id')::uuid), 2);
   PERFORM pg_temp.st3p_eq('B6 both versions are stored as separate rows',
     (SELECT count(*) FROM public.invitation_versions
       WHERE wedding_id = current_setting('probe.wed_c')::uuid), 2::bigint);
@@ -448,9 +454,29 @@ BEGIN
   PERFORM pg_temp.st3p_has_keys('B14 the template block carries identity and display settings',
     v_snap -> 'design_template',
     ARRAY['template_key', 'revision', 'display_name', 'layout_settings', 'supported_languages']);
-  PERFORM pg_temp.st3p_has_keys('B15 the pack block is its mirror image',
-    v_snap -> 'tradition_pack',
-    ARRAY['pack_key', 'revision', 'display_name', 'structure', 'supported_languages']);
+  PERFORM pg_temp.st3p_eq('B15 a wedding with no pack records no pack, and does not invent one',
+    jsonb_typeof(v_snap -> 'tradition_pack_release'), 'null');
+  PERFORM pg_temp.st3p_has_keys('B15b the section list says what was asked for and what resolved',
+    v_snap -> 'sections', ARRAY['requested', 'items']);
+  PERFORM pg_temp.st3p_eq('B15c this wedding asked for English',
+    v_snap -> 'sections' ->> 'requested', 'en');
+  PERFORM pg_temp.st3p_eq('B15d with no pack selected the platform default gives six ordered sections',
+    ARRAY(SELECT s ->> 'section_key' FROM jsonb_array_elements(v_snap -> 'sections' -> 'items') s
+           ORDER BY (s ->> 'position')::integer),
+    ARRAY['welcome', 'family_introduction', 'family', 'ceremonies', 'event_notes', 'closing']);
+  PERFORM pg_temp.st3p_eq('B15e a host-authored section resolves to the host, and a list section to nothing',
+    ARRAY(SELECT coalesce(s ->> 'body_source', '(none)')
+            FROM jsonb_array_elements(v_snap -> 'sections' -> 'items') s
+           ORDER BY (s ->> 'position')::integer),
+    ARRAY['host', 'host', '(none)', '(none)', 'host', 'host']);
+  PERFORM pg_temp.st3p_eq('B15f and nothing claims to have overridden a pack it never had',
+    (SELECT count(*) FROM jsonb_array_elements(v_snap -> 'sections' -> 'items') s
+      WHERE coalesce((s ->> 'overrode_pack_text')::boolean, false)), 0::bigint);
+  PERFORM pg_temp.st3p_eq('B15g the one section the default gives a heading to is the event list',
+    ARRAY(SELECT coalesce(s ->> 'heading_text', '(none)')
+            FROM jsonb_array_elements(v_snap -> 'sections' -> 'items') s
+           ORDER BY (s ->> 'position')::integer),
+    ARRAY['(none)', '(none)', '(none)', 'The ceremonies', '(none)', '(none)']);
   PERFORM pg_temp.st3p_has_keys('B16 the draft contributes its four sections, not the whole blob',
     v_snap -> 'draft',
     ARRAY['welcome', 'family_introduction', 'event_notes', 'closing']);
@@ -794,6 +820,7 @@ DECLARE
   v_same    jsonb;
   v_dto     jsonb;
   v_dtod    jsonb;
+  v_p       jsonb;
   v_preview jsonb;
   v_snap    jsonb;
   v_univ    text[];
@@ -801,11 +828,13 @@ DECLARE
 BEGIN
   v_univ := ARRAY['title', 'language', 'primary', 'additional', 'style', 'font', 'fontSize',
                   'color', 'alignment', 'design_template', 'template_key', 'revision',
-                  'display_name', 'tradition_pack', 'pack_key', 'people', 'event_key',
+                  'display_name', 'tradition_pack', 'people', 'event_key',
                   'role_key', 'role_label', 'group_key', 'group_label', 'events',
                   'starts_at_local', 'ends_at_local', 'timezone', 'venue', 'name',
                   'address_text', 'map_url', 'welcome', 'family_introduction',
-                  'event_notes', 'closing'];
+                  'event_notes', 'closing', 'sections', 'requested', 'items',
+                  'section_key', 'position', 'kind', 'required', 'host_field',
+                  'heading', 'body', 'text', 'fallback_used', 'source', 'overrode_pack_text'];
   v_banned := ARRAY['owner_user_id', 'user_id', 'profile_id', 'account_id', 'entitlement',
                     'entitlement_tier', 'package_code', 'package', 'token_hash', 'token_kind',
                     'access_token', 'raw_token', 'path', 'publication_id', 'version_id',
@@ -839,17 +868,40 @@ BEGIN
   PERFORM pg_temp.st3p_has_keys('D7 a live invitation answers with two keys and no third',
     v_out, ARRAY['available', 'invitation']);
   PERFORM pg_temp.st3p_eq('D8 and says it is available', (v_out ->> 'available')::boolean, true);
-  PERFORM pg_temp.st3p_has_keys('D9 the guest projection is eleven named things',
+  PERFORM pg_temp.st3p_has_keys('D9 the guest projection is twelve named things',
     v_dto, ARRAY['title', 'language', 'style', 'design_template', 'tradition_pack',
-                 'people', 'events', 'welcome', 'family_introduction', 'event_notes', 'closing']);
+                 'sections', 'people', 'events', 'welcome', 'family_introduction',
+                 'event_notes', 'closing']);
   PERFORM pg_temp.st3p_has_keys('D10 the language block is a primary and an ordered list',
     v_dto -> 'language', ARRAY['primary', 'additional']);
   PERFORM pg_temp.st3p_has_keys('D11 the style block is the four values a renderer may apply',
     v_dto -> 'style', ARRAY['font', 'fontSize', 'color', 'alignment']);
   PERFORM pg_temp.st3p_has_keys('D12 the template is named, keyed and numbered',
     v_dto -> 'design_template', ARRAY['display_name', 'template_key', 'revision']);
-  PERFORM pg_temp.st3p_has_keys('D13 the pack is its mirror image',
-    v_dto -> 'tradition_pack', ARRAY['display_name', 'pack_key', 'revision']);
+  PERFORM pg_temp.st3p_has_keys('D13 the section block is the request and the resolved order',
+    v_dto -> 'sections', ARRAY['requested', 'items']);
+  PERFORM pg_temp.st3p_has_keys('D13b a resolved section is keyed, ordered, typed and sourced',
+    v_dto #> '{sections,items,0}',
+    ARRAY['section_key', 'position', 'kind', 'required', 'host_field', 'heading', 'body']);
+  PERFORM pg_temp.st3p_has_keys('D13c a host-written body says so, in five fields and no more',
+    v_dto #> '{sections,items,0,body}',
+    ARRAY['source', 'text', 'language', 'fallback_used', 'overrode_pack_text']);
+  -- Compared as text, not as `'host'::jsonb`: a bare word is not a JSON document, and
+  -- asking Postgres to parse one fails before the assertion can be measured.
+  PERFORM pg_temp.st3p_eq('D13d the host wrote this section, so the guest reads the host''s words',
+    v_dto #>> '{sections,items,0,body,source}', 'host');
+  PERFORM pg_temp.st3p_eq('D13e and the wording is the same string the top-level section carries',
+    v_dto #>> '{sections,items,0,body,text}', v_dto ->> 'welcome');
+  -- The host's own words have no language record, because nobody examined them for one.
+  -- Saying `language: 'en'` here would be the projection inventing a review fact. The
+  -- key is present and holds JSON null, so `#> ... IS NULL` would be true of a missing
+  -- key as easily as of an honest null; `jsonb_typeof` tells them apart.
+  PERFORM pg_temp.st3p_eq('D13f a host body names no language and claims no fallback',
+    ARRAY[jsonb_typeof(v_dto #> '{sections,items,0,body,language}'),
+          jsonb_typeof(v_dto #> '{sections,items,0,body,fallback_used}')],
+    ARRAY['null', 'null']);
+  PERFORM pg_temp.st3p_eq('D13g a pack-less document credits no pack',
+    jsonb_typeof(v_dto -> 'tradition_pack'), 'null');
   PERFORM pg_temp.st3p_has_keys('D14 a guest sees a person as five optional labels',
     v_dto -> 'people' -> 0,
     ARRAY['display_name', 'role_key', 'role_label', 'group_key', 'group_label']);
@@ -899,7 +951,8 @@ BEGIN
   PERFORM pg_temp.st3p_ok('D31b and it still carries every block the shape requires',
     ARRAY['additional', 'alignment', 'closing', 'color', 'design_template', 'display_name',
           'event_key', 'event_notes', 'events', 'family_introduction', 'font', 'fontSize',
-          'language', 'people', 'primary', 'starts_at_local', 'style', 'title',
+          'heading', 'items', 'language', 'people', 'position', 'primary', 'requested',
+          'section_key', 'sections', 'source', 'starts_at_local', 'style', 'text', 'title',
           'tradition_pack', 'welcome']
     <@ pg_temp.st3p_all_keys(v_dtod));
 
@@ -913,25 +966,53 @@ BEGIN
   SELECT iv.snapshot INTO v_snap FROM public.invitation_versions iv
    WHERE iv.wedding_id = current_setting('probe.wed_d')::uuid;
 
-  PERFORM pg_temp.st3p_eq('D32 an unsafe map link in frozen history is dropped, not rendered',
-    private.public_invitation_dto(1,
-      jsonb_set(v_snap, '{events,0,venue,map_url}', '"javascript:alert(1)"'::jsonb))
-      #>> '{events,0,venue,map_url}', NULL::text);
-  PERFORM pg_temp.st3p_eq('D33 a smuggled structure where a string belongs becomes null',
-    private.public_invitation_dto(1,
-      jsonb_set(v_snap, '{people,0,display_name}', '{"a":1}'::jsonb))
-      #>> '{people,0,display_name}', NULL::text);
-  PERFORM pg_temp.st3p_eq('D34 a style value that would become CSS is refused',
-    private.public_invitation_dto(1,
-      jsonb_set(v_snap, '{wedding,style_settings,color}',
-                '"red; background:url(http://x)"'::jsonb))
-      #>> '{style,color}', NULL::text);
-  PERFORM pg_temp.st3p_ok('D35 an unknown snapshot shape is unavailable, not partially rendered',
-    private.public_invitation_dto(2, v_snap) IS NULL);
+  -- Stage 4 made these three two-part assertions on purpose. The projection now refuses
+  -- a snapshot that declares a shape it is not, so a one-part "this field came back
+  -- null" would also be satisfied by the whole document being null — the vacuous pass
+  -- the header warns about. Each one therefore names the patched document's survival as
+  -- well as the patched field's removal.
+  v_p := private.public_invitation_dto(2,
+        jsonb_set(v_snap, '{events,0,venue,map_url}', '"javascript:alert(1)"'::jsonb));
+  PERFORM pg_temp.st3p_ok('D32 an unsafe map link in frozen history is dropped, not rendered',
+    v_p IS NOT NULL AND v_p #>> '{events,0,venue,map_url}' IS NULL);
+  v_p := private.public_invitation_dto(2,
+        jsonb_set(v_snap, '{people,0,display_name}', '{"a":1}'::jsonb));
+  PERFORM pg_temp.st3p_ok('D33 a smuggled structure where a string belongs becomes null',
+    v_p IS NOT NULL AND v_p #>> '{people,0,display_name}' IS NULL);
+  v_p := private.public_invitation_dto(2,
+        jsonb_set(v_snap, '{wedding,style_settings,color}',
+                  '"red; background:url(http://x)"'::jsonb));
+  PERFORM pg_temp.st3p_ok('D34 a style value that would become CSS is refused',
+    v_p IS NOT NULL AND v_p #>> '{style,color}' IS NULL);
+  -- A version written before Stage 4 records no release and carries no sections, so
+  -- projecting it would mean inventing exactly the facts a credit line exists to state.
+  PERFORM pg_temp.st3p_ok('D35 a snapshot of a shape this build does not have is unavailable, not partially rendered',
+    private.public_invitation_dto(1, v_snap) IS NULL);
   PERFORM pg_temp.st3p_ok('D36 a snapshot that is not the documented document is unavailable',
-    private.public_invitation_dto(1, '{"wedding":"not an object"}'::jsonb) IS NULL);
+    private.public_invitation_dto(2, '{"wedding":"not an object"}'::jsonb) IS NULL);
   PERFORM pg_temp.st3p_ok('D37 and a well-formed snapshot still projects',
-    private.public_invitation_dto(1, v_snap) IS NOT NULL);
+    private.public_invitation_dto(2, v_snap) IS NOT NULL);
+  -- Stage 4 §24 split the next claim in two, and the split is the point rather than a
+  -- loosening. This file first pinned "a section with an unknown kind takes the whole document
+  -- down", which conflated two cases a guest feels differently about. A section the contract
+  -- *requires* and this build cannot draw means the document is not the document it promised,
+  -- so it stays unavailable. A section nobody is obliged to show can arrive from a release
+  -- frozen after this build shipped, and blanking somebody's wedding invitation for it is the
+  -- worse failure: the item is still handed over, named, with its heading and body as JSON
+  -- null, so the client's own normalizer reports it and the rest of the page draws.
+  PERFORM pg_temp.st3p_ok('D37b a REQUIRED section claiming a kind no renderer knows still takes the whole document down',
+    private.public_invitation_dto(2,
+      jsonb_set(jsonb_set(v_snap, '{sections,items,0,kind}', '"temple_hymn"'::jsonb),
+                '{sections,items,0,required}', 'true'::jsonb)) IS NULL);
+  v_p := private.public_invitation_dto(2, jsonb_set(v_snap, '{sections,items,0,kind}',
+                                                    '"temple_hymn"'::jsonb));
+  PERFORM pg_temp.st3p_ok('D37c and an optional one does not: the document projects, every section is still counted, and the unrenderable one carries its kind with null heading and body',
+    v_p IS NOT NULL
+    AND jsonb_array_length(v_p -> 'sections' -> 'items')
+        = jsonb_array_length(v_snap -> 'sections' -> 'items')
+    AND v_p #>> '{sections,items,0,kind}' = 'temple_hymn'
+    AND jsonb_typeof(v_p #> '{sections,items,0,heading}') = 'null'
+    AND jsonb_typeof(v_p #> '{sections,items,0,body}') = 'null');
 
   -- ---- the freeze, proved against a live edit ---------------------------
   EXECUTE 'SET ROLE authenticated';
@@ -950,7 +1031,8 @@ BEGIN
     v_preview ->> 'welcome', 'SENTINEL-EDITED-AFTER-PUBLISH');
   PERFORM pg_temp.st3p_has_keys('D40 the preview is the same projection, not a second dialect of it',
     v_preview, ARRAY['title', 'language', 'style', 'design_template', 'tradition_pack',
-                     'people', 'events', 'welcome', 'family_introduction', 'event_notes', 'closing']);
+                     'sections', 'people', 'events', 'welcome', 'family_introduction',
+                     'event_notes', 'closing']);
   PERFORM pg_temp.st3p_universe('D41 the preview observes the same closed vocabulary as the guest page',
     v_preview, v_univ);
   PERFORM pg_temp.st3p_eq('D42 a new version captures the new wording',
@@ -1745,8 +1827,13 @@ BEGIN
      WHERE iv.id = (v_snap ->> 'version_id')::uuid),
       (SELECT iv.snapshot FROM public.invitation_versions iv WHERE iv.id = (v_snap ->> 'version_id')::uuid))
     INTO v_dto;
-  PERFORM pg_temp.st3p_eq('F6c the guest document is eleven fields and no twelfth',
-    (SELECT count(*) FROM jsonb_object_keys(v_dto) k), 11::bigint);
+  -- Stage 4 added the `sections` block to this projection, so the count that used to
+  -- read "eleven fields and no twelfth" is now twelve. Asserted as the named set rather
+  -- than as a number, because a count passes by coincidence and a set cannot.
+  PERFORM pg_temp.st3p_has_keys('F6c the guest document is exactly the twelve contracted fields',
+    v_dto, ARRAY['title', 'language', 'style', 'design_template', 'tradition_pack',
+                 'sections', 'people', 'events', 'welcome', 'family_introduction',
+                 'event_notes', 'closing']);
   PERFORM pg_temp.st3p_ok('F6d and the stray 5000 characters never reach a guest',
     v_dto::text NOT LIKE '%cccccc%');
 
@@ -1900,7 +1987,6 @@ BEGIN
   DELETE FROM public.invitation_versions v USING pf WHERE v.wedding_id IN (pf.wed_c, pf.wed_d, pf.wed_bare);
   DELETE FROM public.weddings w          USING pf WHERE w.id IN (pf.wed_c, pf.wed_d, pf.wed_bare);
   DELETE FROM public.design_templates t  USING pf WHERE t.id = pf.tmpl_c;
-  DELETE FROM public.tradition_packs p   USING pf WHERE p.id = pf.pack_c;
   DELETE FROM auth.users u               USING pf WHERE u.id IN (pf.owner_c, pf.owner_d);
 
   SELECT count(*) INTO v_left FROM public.weddings w JOIN pf ON pf.wed_c = w.id OR pf.wed_d = w.id
@@ -1919,9 +2005,17 @@ BEGIN
   PERFORM pg_temp.st3p_eq('Z6 the two households cascaded with their weddings', v_left, 0::bigint);
   SELECT count(*) INTO v_left FROM auth.users u JOIN pf ON pf.owner_c = u.id OR pf.owner_d = u.id;
   PERFORM pg_temp.st3p_eq('Z7 the two host accounts are gone, so no other suite sees a stranger''s owner', v_left, 0::bigint);
-  SELECT count(*) INTO v_left FROM public.tradition_packs p JOIN pf ON pf.pack_c = p.id;
-  PERFORM pg_temp.st3p_eq('Z8 the probe pack and template are gone',
-    v_left + (SELECT count(*) FROM public.design_templates t JOIN pf ON pf.tmpl_c = t.id), 0::bigint);
+  PERFORM pg_temp.st3p_eq('Z8 the probe template is gone',
+    (SELECT count(*) FROM public.design_templates t JOIN pf ON pf.tmpl_c = t.id), 0::bigint);
+  -- Stage 4 made this one worth stating out loud: an approved pack release cannot be
+  -- deleted by anybody, so a file that minted one could not clean up after itself and
+  -- would leave the suites that run next counting a stranger's rows. This file's answer
+  -- is to need no pack at all; the pack-bearing guest document is qualified by
+  -- `supabase/tests/stage4/50_pack_release.sql`, which runs after everything else.
+  PERFORM pg_temp.st3p_eq('Z9 this file seeded no tradition pack and no release',
+    ARRAY[(SELECT count(*) FROM public.tradition_packs),
+          (SELECT count(*) FROM public.tradition_pack_releases)],
+    ARRAY[0::bigint, 0::bigint]);
 END $Z$;
 
 -- ===========================================================================
@@ -1930,11 +2024,15 @@ END $Z$;
 --
 -- A file that prints its own total proves it reached the end; the floor proves it
 -- reached *this* end. The number below is the count of assertions and probes in
--- groups A-Z as measured by a run of this file: 203 labelled assertions plus 66
--- refusal probes = 269. The previous measurement on this branch was 246 (182 plus
--- 64); the closure repair added 23, of which 9 are the `internal_api` half of group
--- G (G1f, G1g, G1h, G2b, G2c, G5c, G5d, G6b, G9c), 12 are group I's revocation
--- states, and 2 are group I's ownership probes. The probe groups are B(3) B4(1)
+-- groups A-Z as measured by a run of both chains: 218 labelled assertions plus 66
+-- refusal probes = 284. Stage 3's own total was 246 (182 plus 64) and its closure
+-- repair took that to 269; Stage 4 added 15 by asserting the section contract on a
+-- pack-less document (B15b-B15g), the resolved section shape on the guest page
+-- (D13b-D13g), the unknown-kind refusal in both of its arms (D37b required, D37c
+-- optional) and the empty-catalogue cleanup invariant (Z9). An earlier note here
+-- counted 13 and printed 282; the two it left out were D13g and the D37c arm that
+-- §24's split created. The previous totals are kept rather than overwritten because
+-- §20 asks for old and new counts side by side. The probe groups are B(3) B4(1)
 -- B2(6) B3(2) C(5) C2(3) C4(4) D(2) E(18) F(13) F2(4) H(3) I(2); every one of them
 -- also fails the run outright if it executes zero probes, so a group cannot quietly
 -- empty itself.
@@ -1942,8 +2040,8 @@ DO $END$
 DECLARE n integer;
 BEGIN
   n := coalesce(nullif(current_setting('st3p.passed', true), ''), '0')::int;
-  IF n < 269 THEN
-    RAISE EXCEPTION 'FAIL: only % assertions ran; this file has 269 and stopped early', n;
+  IF n < 284 THEN
+    RAISE EXCEPTION 'FAIL: only % assertions ran; this file has 284 and stopped early', n;
   END IF;
   RAISE NOTICE 'ALL STAGE 3 PUBLICATION TESTS PASSED (%)', n;
 END $END$;
