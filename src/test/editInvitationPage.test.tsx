@@ -16,8 +16,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { parsePublicInvitation } from "@/lib/publicInvitation";
-import { guestPayload } from "@/test/invitationFixture";
+import { parsePublicInvitation, type PublicInvitation } from "@/lib/publicInvitation";
+import {
+  guestInvitation,
+  guestPayload,
+  packedGuestPayload,
+  payloadOfWith,
+} from "@/test/invitationFixture";
 import type {
   InvitationDraftContent,
   StoredInvitationVersion,
@@ -45,6 +50,10 @@ const api = vi.hoisted(() => ({
   listPeople: vi.fn(),
   listVenues: vi.fn(),
   listCeremonies: vi.fn(),
+  listSelectableTraditionReleases: vi.fn(),
+  getSelectedTraditionRelease: vi.fn(),
+  selectTraditionRelease: vi.fn(),
+  clearTraditionRelease: vi.fn(),
 }));
 
 vi.mock("@/integrations/supabase/weddings", () => ({
@@ -85,6 +94,17 @@ vi.mock("@/integrations/supabase/weddingContent", () => {
     removeCeremony: unused,
   };
 });
+
+// The tradition-pack reads and writes, stubbed at the same seam as the other three adapters:
+// the catalogue's own behaviour is `traditionPackPanel.test.tsx`, and what the adapter sends
+// over PostgREST is `traditionReleases.test.ts`. Here the panel only needs an answer, and the
+// default one is "nothing to choose, nothing chosen" — the state a fresh wedding is in.
+vi.mock("@/integrations/supabase/traditionReleases", () => ({
+  listSelectableTraditionReleases: (...a: unknown[]) => api.listSelectableTraditionReleases(...a),
+  getSelectedTraditionRelease: (...a: unknown[]) => api.getSelectedTraditionRelease(...a),
+  selectTraditionRelease: (...a: unknown[]) => api.selectTraditionRelease(...a),
+  clearTraditionRelease: (...a: unknown[]) => api.clearTraditionRelease(...a),
+}));
 
 // One stable identity object: a fresh one per call would re-run the load effect on every
 // render, which is not what the provider does.
@@ -150,6 +170,11 @@ const visit = async () => {
     </MemoryRouter>,
   );
   await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Share with guests" })).toBeInTheDocument());
+  // The row editor prints its heading in BOTH the loading and the loaded state, so that
+  // heading is not a sync point for anything below it. Wait for a control only the loaded
+  // state has: the three lists land in one commit, so the first button to appear brings
+  // the other two with it.
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add a person" })).toBeInTheDocument());
   return result;
 };
 
@@ -170,7 +195,19 @@ beforeEach(() => {
   api.listPeople.mockReset().mockResolvedValue(ok([]));
   api.listVenues.mockReset().mockResolvedValue(ok([]));
   api.listCeremonies.mockReset().mockResolvedValue(ok([]));
+  api.listSelectableTraditionReleases.mockReset().mockResolvedValue(ok([]));
+  api.getSelectedTraditionRelease.mockReset().mockResolvedValue({ data: null, error: null });
+  api.selectTraditionRelease.mockReset().mockResolvedValue(ok(null));
+  api.clearTraditionRelease.mockReset().mockResolvedValue(ok(null));
 });
+
+/** The document the host is being shown, and nothing else.
+ *
+ *  Read off the page rather than from `container.textContent`: a `<textarea>`'s value is its
+ *  child text node in the DOM, so the whole page's text includes every word the host has typed
+ *  whether or not the canvas drew it. An assertion on the page would have passed on a preview
+ *  that showed nothing — which is precisely the bug this scoping exists to catch. */
+const canvasText = () => screen.getByRole("article").textContent ?? "";
 
 describe("what the host is shown while editing", () => {
   it("draws the guest's own renderer, fed by the server's projection", async () => {
@@ -196,16 +233,88 @@ describe("what the host is shown while editing", () => {
   });
 
   it("shows typing at once and says it is not saved yet", async () => {
-    const { container } = await visit();
-    expect(container.textContent).not.toContain("Please come early for the aarthi");
+    await visit();
+    expect(canvasText()).not.toContain("Please come early for the aarthi");
     fireEvent.change(screen.getByLabelText("A note about the ceremonies"), {
       target: { value: "Please come early for the aarthi" },
     });
-    expect(container.textContent).toContain("Please come early for the aarthi");
+    // On the canvas, not merely in the field: this slot's saved row is empty, so the
+    // projection answered no body for it at all, and a preview that waited for Save to show a
+    // first paragraph would be showing the host a document they are not writing.
+    expect(canvasText()).toContain("Please come early for the aarthi");
     expect(screen.getByText(/Draft preview — unsaved changes shown/)).toBeInTheDocument();
     expect(status()).toHaveTextContent("Unsaved changes");
     // Local until Save: typing spends no request.
     expect(api.updateDraftContent).not.toHaveBeenCalled();
+  });
+
+  it("takes a paragraph off the canvas when the host deletes it", async () => {
+    await visit();
+    expect(canvasText()).toContain(savedDraft.welcome);
+    fireEvent.change(screen.getByLabelText("The opening"), { target: { value: "" } });
+    expect(canvasText()).not.toContain(savedDraft.welcome);
+  });
+
+  it("draws the host's words over a pack line the moment they type, and drops the pack's", async () => {
+    // A section the release is filling: `host_field: welcome` with a `reviewed_pack` body,
+    // which is exactly what the projection answers when the chosen pack has wording for a slot
+    // and the host's own draft line is empty.
+    const packFilled = packedGuestPayload() as {
+      invitation: { sections: { items: Record<string, unknown>[] } };
+    };
+    packFilled.invitation.sections.items[0] = {
+      ...packFilled.invitation.sections.items[0],
+      host_field: "welcome",
+      body: {
+        source: "reviewed_pack",
+        text: "[placeholder opening line from the release]",
+        language: "ta",
+        fallback_used: false,
+        overrode_pack_text: false,
+      },
+    };
+    api.previewInvitation.mockResolvedValue(ok(parsePublicInvitation(packFilled) as PublicInvitation));
+    // The draft row has to agree with that projection: a pack line is only on the page because
+    // the host's own line for that slot is empty. A test that left the saved words in place
+    // would be showing the canvas two answers to one question.
+    api.getDraftContent.mockResolvedValue(ok({ ...savedDraft, welcome: null }));
+    await visit();
+    expect(canvasText()).toContain("[placeholder opening line from the release]");
+
+    fireEvent.change(screen.getByLabelText("The opening"), {
+      target: { value: "Arun and Deepa invite you" },
+    });
+    // Both halves of one sentence: the host's words are on the page and the reviewed line is
+    // not, because directive §12 forbids a document that reads as the pack's while carrying
+    // words no reviewer saw.
+    expect(canvasText()).toContain("Arun and Deepa invite you");
+    expect(canvasText()).not.toContain("[placeholder opening line from the release]");
+  });
+
+  it("names what the preview could not draw, beside the canvas and not on it", async () => {
+    const unknownKind = payloadOfWith(guestInvitation() as unknown as Record<string, unknown>, ["invitation", "sections", "items", 1, "kind"], "prose");
+    api.previewInvitation.mockResolvedValue(ok(parsePublicInvitation(unknownKind) as PublicInvitation));
+    await visit();
+    const note = screen.getByRole("heading", { level: 3, name: "What this preview could not draw" });
+    expect(note).toBeInTheDocument();
+    // The normalizer's own sentence, unedited: the list is the same object the renderer was
+    // handed, so what is named here is what was skipped there.
+    expect(document.body.textContent).toContain("claims kind prose, which no renderer in this build knows, so it was skipped");
+    // Host-facing prose beside it, and nothing of the list inside the guest's document.
+    expect(document.body.textContent).toContain("Your guests see none of this list");
+    expect(canvasText()).not.toContain("no renderer in this build knows");
+    // §20's "never a raw schema error", measured as absence of the shapes one would be: a JSON
+    // pointer, a quoted key, or a brace. The host reads sentences this app wrote.
+    expect(note.parentElement?.textContent).not.toMatch(/[{}"]|\/sections\/|expected /);
+  });
+
+  it("mounts the tradition-pack choice for this wedding", async () => {
+    await visit();
+    expect(screen.getByRole("heading", { level: 2, name: "Tradition & wording" })).toBeInTheDocument();
+    expect(api.listSelectableTraditionReleases).toHaveBeenCalled();
+    expect(api.getSelectedTraditionRelease).toHaveBeenCalledWith(USER, WEDDING);
+    // Nothing chosen is a state the screen says out loud rather than an empty box.
+    expect(screen.getByRole("radio", { name: /No tradition pack — write it yourself/ })).toBeChecked();
   });
 
   it("does not nag about unsaved changes when the typing is undone", async () => {
