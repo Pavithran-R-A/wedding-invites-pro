@@ -1383,9 +1383,9 @@ in the instrument.
     `npm ci` (`22:48`) and the build that first fed §32.4's table (`00:25`), something ran `pnpm
     install` in this directory, and the bundle it produced disagreed with §27 by 68 kB on the entry
     chunk. The stage's discipline caught it because the number was recorded before the claim was
-    written, but the cause was an outside action this report cannot attribute, and the same thing can
-    silently move any future measurement here. §32.7 carries the timestamps, the repair, and the
-    check a later gate run should print.
+    written, but the cause was an outside action this report cannot attribute, and it recurred twenty
+    minutes after the repair (§32.7). The same thing can silently move any future measurement here.
+    §32.7 carries the timestamps, the repair, and the check a later gate run should print.
 
 ## 32. Commits, push and CI
 
@@ -1621,6 +1621,26 @@ forbids, and the only thing that revealed it was a build that disagreed with the
 gate run that reports a size, a module count or a version should print the installer marker it ran
 against (`node_modules/.package-lock.json` for npm, `node_modules/.modules.yaml` for pnpm) rather
 than assuming the tree is the one §30 installed.
+
+**That check earned its place immediately.** After the two clean builds, every re-run gate above, the
+commit and the push, `node_modules/vite` was found to be a symlink into `.pnpm/` again and
+`node_modules/.modules.yaml` carried `2026-09-29 00:58–00:59` — a second install of the same kind,
+twenty minutes after the first was repaired. No measurement in this document was taken after that
+moment: the commands run from 00:58 onward were `git status`, `git rev-parse`, `git ls-remote`,
+`gh run`, `docker ps`, `netstat` and `stat`, none of which reads `node_modules`. The tree is left in
+that state deliberately, because §31 says to leave the two pnpm files as found and repairing the
+directory again would only be undone by whatever keeps doing it. What this stage can assert is the
+narrower, useful thing: **the 491.21 kB / 2194-module figures were measured on a tree whose npm
+marker was the only installer marker present at the time**, and the way to confirm that on any future
+run is the marker check, not the number.
+
+The marker check was then used as instructed, wrapped around the last documentation round rather than
+remembered afterwards: a third `npm ci` at `2026-09-29 01:10`, `npm run product:check` and the full
+`npm test` run in the same shell invocation, with `node -p existsSync` on both markers printed
+immediately before and immediately after. Both readings were npm-only (`npm: true pnpm: false`),
+`product:check` reported 171 files / 0 violations, and `npm test` reported 24 files / 355 tests with
+exit 0. That is the shape a §30 run should take on this host from now on: the gate and the proof of
+which tree it ran on come back in the same command.
 
 ## 33. Stage 5 boundary
 
