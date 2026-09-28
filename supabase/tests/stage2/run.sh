@@ -10,18 +10,29 @@
 # Why two chains, and why the order below is fixed:
 #
 #   bootstrap -> published migrations -> [fixture] -> Stage 2 chain -> Stage 3 chain
-#             -> outcome suite -> Stage 3 draft-invariant suite -> attack suite
-#             -> catalog suite
+#             -> Stage 4 chain -> outcome suite -> Stage 3 draft-invariant suite
+#             -> attack suite -> catalog suite
 #
 #   * The chain ends at schema head, which is what a customer's database actually
 #     looks like now. The Stage 2 suites therefore qualify the *current* schema, not
-#     the schema as of Stage 2's commit: a Stage 3 migration must be shown not to
-#     have loosened a Stage 2 guarantee. Stage 2's own totals at commit a51856f were
-#     41 / 75 / 322 / 75 and remain reproducible from that commit. On this branch the
-#     same two suites print 325 and 94, because Stage 3 and its closure repair added
-#     assertions to them (draft-invariant INSERT/DELETE refusals, the `api` schema
-#     catalogue, and the `internal_api` half of the boundary); every
-#     other number below is the record of this branch, measured, not recalled.
+#     the schema as of Stage 2's commit: a later migration must be shown not to have
+#     loosened a Stage 2 guarantee. Stage 2's own totals at commit a51856f were
+#     41 / 75 / 322 / 75 and remain reproducible from that commit. Immediately before
+#     Stage 4 the same four suites printed 41 / 75 / 325 / 94 on this branch, because
+#     Stage 3 and its closure repair added assertions to them (draft-invariant
+#     INSERT/DELETE refusals, the `api` schema catalogue, and the `internal_api` half of
+#     the boundary). Stage 4 declares one more table, so its two outcome floors moved to
+#     42 and 76; its attack suite prints 464 and the catalogue suite 103, measured on both
+#     chains on the run recorded in docs/audits/stage-4-tradition-pack-foundation.md.
+#     Those five totals are Stage 2's own and stop here. The Stage 4 document battery was
+#     briefly wired in below as a sixth suite; §6 of the Stage 4 directive asks for a
+#     dedicated Stage 4 suite instead of one hidden inside Stage 2/3, so it now runs from
+#     `supabase/tests/stage4/run.sh`, which prints its own totals. Nothing in this file
+#     counts it, and its numbers were never folded into the five above.
+#     Most of that attack-suite growth is the Stage 4 release contract being written out
+#     slot by slot, plus every invalid-state probe having to name the refusal it expects
+#     rather than merely that one happened. Every number in this file's output is a
+#     measurement of this branch, not a recollection.
 #   * The fixture is applied *between* the published migrations and the Stage 2 chain,
 #     so the migration is tested against real-shaped history rather than an empty
 #     schema. Skipping it is the clean chain, which proves the opposite half: that the
@@ -31,8 +42,10 @@
 #     those rows are still there afterwards. Every count in `30_migration_*.sql` was
 #     measured on a chain that had not been attacked, and running them in the other
 #     order would turn exact numbers into lies.
-#   * The catalog suite is last because it reads structure, not data, and the attack
-#     suite's `SET ROLE` probes leave no schema changes behind.
+#   * The catalog suite is last because it reads structure, not data, and the attack suite's
+#     `SET ROLE` probes leave no schema changes behind. It is the end of Stage 2's own count:
+#     the Stage 4 document battery runs from its own runner, on its own chains, and is not
+#     reported as one of these five numbers.
 #
 # Boundary this script cannot cross, stated rather than hidden: it runs plain Postgres
 # with `supabase/tests/rls/00_bootstrap.sql` providing `anon` / `authenticated` /
@@ -50,9 +63,24 @@ IMAGE="${PG_IMAGE:-postgres:16-alpine}"
 CTR="vivaahvarnam-stage2-$$"
 export PGCLIENTENCODING=UTF8
 
+# Every SQL file reaches psql through `sql_bytes`, never through a bare `<` redirect.
+#
+# Why: this repository's committed SQL is LF, but a Windows checkout with `core.autocrlf`
+# and no `.gitattributes` rewrites the working copy to CRLF — the same file is `w/lf` or
+# `w/crlf` depending only on whether git happened to re-materialise it. psql keeps those
+# CR bytes inside multi-line dollar-quoted literals, and the suites compare whole literals
+# exactly, so a checkout with no content change at all can turn a green battery red. That
+# is a broken instrument, and a broken instrument is worse than a failure: it teaches the
+# reader to distrust the gate.
+#
+# Stripping CR at the stdin boundary makes the database receive exactly the committed
+# bytes on every platform. It normalises input only. No expectation, assertion or count
+# is touched, and a genuine schema regression still fails the same way.
+sql_bytes() { tr -d '\r' < "$1"; }
+
 if [ "${STAGE2_LOCAL:-0}" = "1" ]; then
   PSQLED=(psql -U "${PGUSER:-postgres}" -d postgres -v ON_ERROR_STOP=1)
-  run_sql() { psql -d "$DB" -v ON_ERROR_STOP=1 --single-transaction -q < "$1"; }
+  run_sql() { sql_bytes "$1" | psql -d "$DB" -v ON_ERROR_STOP=1 --single-transaction -q; }
   admin_sql() { "${PSQLED[@]}" -q "$@"; }
   echo "==> Backend: existing cluster (PGHOST=${PGHOST:-localhost} PGPORT=${PGPORT:-5432})"
 else
@@ -67,8 +95,8 @@ else
   docker exec "$CTR" pg_isready -U postgres >/dev/null 2>&1 \
     || { echo "!! Postgres did not become ready (image pull blocked, or container unavailable)."; \
          echo "!! Use STAGE2_LOCAL=1 against a local cluster; do not treat a pull failure as a code failure."; exit 3; }
-  run_sql() { docker exec -i -e PGCLIENTENCODING=UTF8 "$CTR" \
-                psql -d "$DB" -U postgres -v ON_ERROR_STOP=1 --single-transaction -q < "$1"; }
+  run_sql() { sql_bytes "$1" | docker exec -i -e PGCLIENTENCODING=UTF8 "$CTR" \
+                psql -d "$DB" -U postgres -v ON_ERROR_STOP=1 --single-transaction -q; }
   admin_sql() { docker exec -i "$CTR" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q "$@"; }
 fi
 
@@ -118,11 +146,10 @@ chain() { # chain <clean|legacy>
   # wedding created from here on. A single flat glob would put the trigger ahead of the
   # migration it is supposed to follow and fail on a duplicate-key error that no real
   # database can reach.
-  for m in $(ls supabase/migrations/*.sql | grep _stage2_ | sort); do
-    run_sql "$m"
-  done
-  for m in $(ls supabase/migrations/*.sql | grep _stage3_ | sort); do
-    run_sql "$m"
+  for stage in stage2 stage3 stage4; do
+    for m in $(ls supabase/migrations/*.sql | grep "_${stage}_" | sort); do
+      run_sql "$m"
+    done
   done
 
   if [ "$1" = legacy ]; then
