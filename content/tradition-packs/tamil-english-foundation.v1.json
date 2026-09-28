@@ -1,0 +1,136 @@
+{
+  "artifact": "tradition_pack_release_candidate",
+  "artifact_schema_version": 1,
+  "status": "draft",
+  "machine_assisted": true,
+  "human_reviewed": false,
+  "customer_selectable": false,
+  "pack_key": "tamil_english_foundation",
+  "display_name": "Tamil and English invitation structure (candidate)",
+  "scope_statement": "This pack supplies the structure of an invitation: which sections appear, in what order, what each is called, and which of them read the host's own words. It does not supply ritual instruction, religious authority, community obligation, or an interpretation of any tradition, and it does not claim that any wording in it is traditional, correct, or approved. Its purpose is to be a machine-checkable candidate for a schema, not advice about ceremony.",
+  "release_number": 1,
+  "definition_schema_version": 1,
+  "languages": ["en", "ta"],
+  "author_label": "VivaahVarnam Stage 4 working draft, authored with a coding model",
+  "machine_assistance_notes": "Every string in this candidate was produced by a coding model working from the Stage 4 section vocabulary. Nothing in it has been read by a human reviewer, and no native speaker of Tamil has checked any Tamil value. Each Tamil value is a bracketed placeholder rather than wording, so the artifact cannot be mistaken for reviewed content, and no Tamil sentence has been machine-generated for a human to approve after the fact.",
+  "source_reference": "Stage 4 directive sections 7, 10, 13 and 14; the section vocabulary pinned in supabase/migrations/20260927120000_stage4_tradition_pack_releases.sql and mirrored in src/lib/traditionPackContract.ts. No external text, scripture, community source or prior invitation was copied or paraphrased into this file.",
+  "changelog": "Candidate 1 of this pack: declares the eleven section slots this build renders, one people list, one event list, four host-field readings, and a three-entry event vocabulary. All body wording is placeholder. No reviewed wording is claimed.",
+  "review": null,
+  "definition": {
+    "sections": [
+      {
+        "section_key": "opening",
+        "position": 1,
+        "kind": "text",
+        "required": true,
+        "heading": { "ta": "[placeholder] opening label", "en": "Invitation" },
+        "pack_text": {
+          "ta": "[placeholder] opening body pending human review",
+          "en": "[placeholder] Opening body. This candidate supplies no reviewed wording; a reviewer supplies it before this release can be marked reviewed."
+        },
+        "allow_english_fallback": true
+      },
+      {
+        "section_key": "welcome",
+        "position": 2,
+        "kind": "text",
+        "required": false,
+        "host_field": "welcome",
+        "heading": { "ta": "[placeholder] welcome label", "en": "A warm welcome" },
+        "allow_english_fallback": true
+      },
+      {
+        "section_key": "family_introduction",
+        "position": 3,
+        "kind": "text",
+        "required": false,
+        "host_field": "family_introduction"
+      },
+      {
+        "section_key": "family",
+        "position": 4,
+        "kind": "people_list",
+        "required": false
+      },
+      {
+        "section_key": "couple",
+        "position": 5,
+        "kind": "text",
+        "required": false,
+        "heading": { "ta": "[placeholder] couple label", "en": "The couple" },
+        "pack_text": {
+          "ta": "[placeholder] couple body pending human review",
+          "en": "[placeholder] Couple body. Names are drawn from the host's own people list, never from this pack."
+        },
+        "allow_english_fallback": true
+      },
+      {
+        "section_key": "invitation",
+        "position": 6,
+        "kind": "text",
+        "required": false,
+        "heading": { "ta": "[placeholder] invitation label", "en": "You are invited" },
+        "pack_text": {
+          "ta": "[placeholder] invitation body pending human review",
+          "en": "[placeholder] Invitation body. The request to attend is ordinary English here, not a traditional form of words."
+        },
+        "allow_english_fallback": true
+      },
+      {
+        "section_key": "ceremonies",
+        "position": 7,
+        "kind": "event_list",
+        "required": true
+      },
+      {
+        "section_key": "venue",
+        "position": 8,
+        "kind": "text",
+        "required": false,
+        "heading": { "ta": "[placeholder] venue label", "en": "Where" },
+        "pack_text": {
+          "ta": "[placeholder] venue body pending human review",
+          "en": "[placeholder] Venue body. The address itself belongs to the host's event list, not to this pack."
+        },
+        "allow_english_fallback": true
+      },
+      {
+        "section_key": "event_notes",
+        "position": 9,
+        "kind": "text",
+        "required": false,
+        "host_field": "event_notes"
+      },
+      {
+        "section_key": "blessing",
+        "position": 10,
+        "kind": "text",
+        "required": false,
+        "heading": { "ta": "[placeholder] blessing label", "en": "With our blessings" },
+        "pack_text": {
+          "ta": "[placeholder] blessing body pending human review",
+          "en": "[placeholder] Blessing body. A closing good wish in the host's own words belongs here, not in this pack."
+        },
+        "allow_english_fallback": true
+      },
+      {
+        "section_key": "closing",
+        "position": 11,
+        "kind": "text",
+        "required": false,
+        "host_field": "closing",
+        "pack_text": {
+          "ta": "[placeholder] closing body pending human review",
+          "en": "[placeholder] Closing body."
+        },
+        "allow_english_fallback": true
+      }
+    ],
+    "event_vocabulary": [
+      { "event_key": "ceremony", "labels": { "ta": "[placeholder] ceremony label", "en": "Ceremony" } },
+      { "event_key": "reception", "labels": { "ta": "[placeholder] reception label", "en": "Reception" } },
+      { "event_key": "meal", "labels": { "ta": "[placeholder] meal label", "en": "Meal" } }
+    ],
+    "design_guidance": { "lead_size": 28, "motif_reference": "[placeholder] motif token, no asset supplied" }
+  }
+}

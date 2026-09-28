@@ -21,6 +21,10 @@ dist-ssr
 supabase/.temp/
 supabase/.branches/
 
+# Local evidence a run writes for a human to look at (browser screenshots, traces).
+# Never committed: they name throwaway local tokens in their filenames or contents.
+artifacts/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

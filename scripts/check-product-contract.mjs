@@ -174,7 +174,7 @@ export const RULES = [
   },
   {
     id: "canonical-table-read-outside-the-adapter",
-    pattern: /\.from\(\s*['"](?:weddings|wedding_events|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs)['"]\s*\)/g,
+    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases)['"]\s*\)/g,
     message: "queries a canonical wedding table outside the adapter",
     fix: "add the read to src/integrations/supabase/ so its columns, errors and refusals stay in one place",
     scope: ["src/"],
@@ -189,6 +189,95 @@ export const RULES = [
     fix: "no browser file may reference it; the local key exists only in .env.local for the test runners",
     scope: ["src/", "index.html"],
   },
+  // ---------------------------------------------------------------------------
+  // Stage 4 §24 and §25 — application code must not know any tradition.
+  //
+  // §24 asks for a search that fails the stage if the renderer or the picker grows a
+  // branch on pack identity, religion, caste, community or a name. Putting it here,
+  // rather than in a review habit, is what makes it a gate.
+  //
+  // Every rule below is a *shape*, never a noun, and none of them is scoped to `docs/`.
+  // The reason is deliberate: the sentence "this renderer never compares a pack key to
+  // anything" is governance documentation and has to stay writable, in the source tree
+  // and in the product docs, while the expression `packKey === "x"` is a branch that
+  // has no legitimate use in this build. A rule that fired on the sentence would be
+  // deleted the first time it blocked a correct comment; a rule that fires on the
+  // operator cannot be argued with.
+  {
+    id: "tradition-pack-identity-branch",
+    // A pack's or release's identity compared to a literal, or switched on. Either form
+    // moves a content decision out of the frozen definition and into code, which is what
+    // makes the catalogue stop being extendable — a new release would need a new branch.
+    pattern: /\b(?:packKey|pack_key|releaseNumber|release_number)\s*(?:===|!==|==|!=)\s*(?:["'`]\w|\d)|\bswitch\s*\(\s*(?:packKey|pack_key|releaseNumber|release_number)\s*\)/g,
+    message: "branches on a tradition pack's identity in application code",
+    fix: "the renderer switches only on the generic `section.kind`; anything specific to one pack belongs in that pack's definition (directive §24)",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "tradition-selected-from-identity",
+    // An identity or language column named on the same statement as the pack selection —
+    // the shape a "suggest a pack from the couple's details" feature arrives in. Proximity
+    // rather than data flow, because data flow is what the tests in
+    // `src/test/traditionReleases.test.ts` prove absent column by column; this rule is the
+    // tripwire that keeps someone from writing it back in.
+    pattern: /\b(?:religion|caste|community|surname|gotra|family_name|mother_tongue|primary_language|additional_languages)\b[^\n]{0,60}\b(?:tradition_pack_release_id|traditionReleaseId|selectedReleaseId|releaseOptionId|packKey)\b|\b(?:tradition_pack_release_id|traditionReleaseId|selectedReleaseId|releaseOptionId|packKey)\b[^\n]{0,60}\b(?:religion|caste|community|surname|gotra|family_name|mother_tongue|primary_language|additional_languages)\b/gi,
+    message: "connects an identity, name or language field to a tradition pack selection",
+    fix: "a pack is chosen by the host and by nothing else; see docs/product/content-governance.md rule 3 (no inference) and §19 of the Stage 4 directive",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "identity-tested-by-name-shape",
+    // `surname === "Iyer"` is the obvious form; `surname.startsWith("Reddi")` is the same
+    // decision wearing a call. Both guess a community from a name, which is the invention
+    // class this stage exists to make unrepresentable.
+    pattern: /\b(?:surname|gotra|family_name|given_name|caste|community|religion)\s*\.\s*(?:includes|startsWith|endsWith|match|split|toLowerCase|toUpperCase)\s*\(/gi,
+    message: "inspects the shape of a name or an identity field",
+    fix: "names are data the host types; no code may read a tradition, community or rite out of one",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "language-gated-rite",
+    // "if Tamil then a special ritual section" — a language *tested in a condition* on the
+    // same line as a rite word. The comparison is required, and that requirement is a
+    // measured decision rather than a tolerance: the first version of this rule matched any
+    // line carrying both vocabulary classes, and it fired on
+    // `src/components/landing/DesignDirectionSection.tsx:13`, the display name of a visual
+    // template ("Telugu Ceremonial"). A style name is not a branch, and §24 forbids logic
+    // ("switch only on generic section.kind"), not the six design-direction titles a host
+    // reads on the landing page. That name is disclosed as a content question for the human
+    // review in docs/content-review/ rather than silently exempted or renamed here.
+    pattern: /^(?=.*(?:===|!==|\bswitch\s*\())(?=.*(?:\blanguage\b|\blang\b|\bta\b|\bte\b|\bml\b|\bkn\b|tamil|telugu|malayalam|kannada))(?=.*\b(?:ritual|rite|ceremony|ceremonial|priest|purohit|mantra|vedic|auspicious|puja|havan|homam)\b).*/gi,
+    message: "gates ceremonial behaviour on a language",
+    fix: "the only per-language behaviour is which resolved section text and slot word a document draws, in src/lib/invitationSections.ts",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "ceremonial-authority-claim",
+    // The customer-facing claims §19 forbids without evidence: that a tradition is
+    // authentic, that ritual wording is correct, that a practice is official. Adjacency,
+    // not co-occurrence — "does not claim that any wording in it is traditional, correct,
+    // or approved" is the honest scope sentence and stays writable.
+    pattern: /\b(?:authentic|verified|correct|official|certified|genuine|traditional)\s+(?:tamil\s+|telugu\s+|kannada\s+|malayalam\s+)?(?:tradition|traditions|ritual|ceremony|ceremonial|rite|wording|practice)\b|\b(?:religiously|expert|scripturally|community)[ -](?:approved|certified|validated)\b/gi,
+    message: "claims ceremonial, religious or community authority for wording",
+    fix: "describe what a pack is — a prepared wording release — and never what no review has certified it to be",
+    scope: ["src/", "index.html", "README.md", "content/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "draft-candidate-claimed-shippable",
+    // The two flags that make the Stage 4 candidate honest, flipped to `true`, and the
+    // prose form of the same lie. `machine_assisted: true` is legitimately present in the
+    // artifact and is deliberately not a finding here — the disclosure is the point.
+    pattern: /\b(?:human_reviewed|humanReviewed|customer_selectable|customerSelectable)["']?\s*[:=]\s*true\b|\b(?:is|was|has been|now|already)\s+(?:human[- ]reviewed|culturally validated|expert-reviewed|community-approved)\b/gi,
+    message: "presents the unreviewed draft candidate as reviewed or selectable",
+    fix: "the candidate stays draft, human_reviewed false, customer_selectable false until a named human review exists — see docs/content-review/tamil-english-foundation-v1.md",
+    scope: ["src/", "index.html", "README.md", "content/"],
+    exclude: ["src/test/"],
+  },
 ];
 
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
@@ -201,6 +290,19 @@ export const MUST_NOT_MATCH = [
   "No account or app is needed to read this invitation.",
   "This invitation is not available",
   `const { data } = await client.schema('api').rpc('resolve_public_invitation');`,
+  // Stage 4's cultural-safety near-miss controls. Each is a sentence this repository either
+  // ships or must keep shipping, and each is one edit away from a phrase the rules above do
+  // forbid — which is why they are asserted rather than assumed.
+  "This pack does not claim that any wording in it is traditional, correct, or approved.",
+  "Nothing here asks about religion, caste or community, and no role is guessed from a name.",
+  "Tradition packs are optional. You can create an invitation without one.",
+  "a wedding may only select an approved tradition pack release",
+  "TEST FIXTURE REVIEWER — NOT A REAL CULTURAL REVIEW",
+  'body_source === "reviewed_pack"',
+  // The design-direction name that made the first version of `language-gated-rite` fire. It
+  // stays in the repository, so the rule's precision is now a checked fact rather than a
+  // claim in a comment.
+  'title: "Telugu Ceremonial"',
 ];
 
 export function isScannedPath(relativePath) {
@@ -288,6 +390,12 @@ export function selfTest() {
     "ad-hoc-supabase-client": `const supabase = createClient(url, anonKey);`,
     "canonical-table-read-outside-the-adapter": `const { data } = await supabase.from('weddings').select('*');`,
     "service-role-key-in-browser-code": `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
+    "tradition-pack-identity-branch": `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
+    "tradition-selected-from-identity": `wedding.tradition_pack_release_id = suggestRelease(host.community);`,
+    "identity-tested-by-name-shape": `if (person.surname.startsWith("Reddi")) assumeVocabulary();`,
+    "language-gated-rite": `if (language === "ta") body = "The priest will confirm the auspicious time";`,
+    "ceremonial-authority-claim": `<p>An authentic Tamil tradition for your invitation.</p>`,
+    "draft-candidate-claimed-shippable": `{ "human_reviewed": true, "customer_selectable": true }`,
   };
   for (const [ruleId, text] of Object.entries(fixtures)) {
     if (!scanContent("src/fixture.tsx", text).some((v) => v.rule === ruleId)) {
@@ -356,6 +464,30 @@ export function selfTest() {
   if (benignHits.length > 0) {
     failures.push(
       `honest planning text produced ${benignHits.length} violation(s): ${[...new Set(benignHits.map((v) => v.rule))].join(", ")}`,
+    );
+  }
+
+  // The Stage 4 rules are scoped to `src/`, so the block above cannot exercise them — a
+  // governance sentence in `docs/` is out of scope by construction and would pass even
+  // against a rule that fired on the whole repository. These lines are the same honest
+  // sentences, read at an in-scope path, and they are the reason the cultural-safety rules
+  // are shape rules: `packKey === "x"` is a finding, while the sentence saying the code
+  // never writes one is the documentation this stage needs to keep.
+  const culturalNearMiss = [
+    `// The renderer never compares a pack key to anything, and no name is read for a tradition.`,
+    `const body = source === "reviewed_pack" ? packText : hostText;`,
+    `scope_statement: "This pack does not claim that any wording in it is traditional, correct, or approved."`,
+    `intro="Nothing here asks about religion, caste or community, and no role is guessed from a name."`,
+    `title: "Telugu Ceremonial",`,
+    `<p>Tradition packs are optional. You can create an invitation without one.</p>`,
+    `review_label: "TEST FIXTURE REVIEWER — NOT A REAL CULTURAL REVIEW"`,
+    `const isRetired = release.status === "deprecated";`,
+    `// a release whose pack_key is unknown to this build is refused by name, not guessed at.`,
+  ].join("\n");
+  const culturalHits = scanContent("src/components/invitation/InvitationRenderer.tsx", culturalNearMiss);
+  if (culturalHits.length > 0) {
+    failures.push(
+      `honest cultural-safety language produced ${culturalHits.length} violation(s): ${culturalHits.map((v) => `${v.rule} on ${v.matched}`).join(", ")}`,
     );
   }
 

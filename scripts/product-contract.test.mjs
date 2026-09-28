@@ -36,6 +36,12 @@ describe("product contract checker", () => {
         `const supabase = createClient(url, anonKey);`,
         `const { data } = await supabase.from('weddings').select('*');`,
         `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
+        `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
+        `wedding.tradition_pack_release_id = suggestRelease(host.community);`,
+        `if (person.surname.startsWith("Reddi")) assumeVocabulary();`,
+        `if (language === "ta") body = "The priest will confirm the auspicious time";`,
+        `<p>An authentic Tamil tradition for your invitation.</p>`,
+        `{ "human_reviewed": true, "customer_selectable": true }`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());
@@ -61,6 +67,78 @@ describe("product contract checker", () => {
         ].join("\n"),
       ),
     ).toEqual([]);
+  });
+
+  it("holds every table the adapter actually queries inside the adapter rule", () => {
+    // Stage 4 found this rule's table list named seven of the nine tables the adapter reads:
+    // `wedding_people`, `venues` and the new `tradition_pack_releases` were absent, so a stray
+    // `.from()` on them outside the adapter would have passed CI. The list is now derived from
+    // what the adapter does, so a future table that leaves it out is a visible gap in this
+    // assertion rather than an invisible one in the gate.
+    const stray = [
+      `const a = await supabase.from('wedding_people').select('*');`,
+      `const b = await supabase.from('venues').select('*');`,
+      `const c = await supabase.from('tradition_pack_releases').select('*');`,
+    ].join("\n");
+    expect([
+      ...new Set(
+        scanContent("src/pages/EditProject.tsx", stray).map((v) => v.rule),
+      ),
+    ]).toEqual(["canonical-table-read-outside-the-adapter"]);
+
+    // The positive control: the identical statements are legal where they belong, and an
+    // unrelated table name is not swept in by the widening.
+    expect(scanContent("src/integrations/supabase/weddingContent.ts", stray)).toEqual([]);
+    expect(
+      scanContent("src/pages/EditProject.tsx", `supabase.from('rsvp_responses').select('*')`),
+    ).toEqual([]);
+  });
+
+  it("keeps the Stage 4 cultural-safety rules about code shapes, not governance sentences", () => {
+    // The rules added for §24 and §25 are scoped to `src/` and to `content/`, so a sentence
+    // in `docs/` cannot be a finding no matter what it says. Inside the source tree the
+    // honest disclaimer and the forbidden branch differ by an operator, which is the whole
+    // design — and `Telugu Ceremonial` is the measured case that forced the precision: the
+    // first version of `language-gated-rite` fired on that landing-page template name,
+    // because it matched vocabulary rather than logic.
+    const honest = [
+      `// The renderer never compares a pack key to anything, and no name is read for a tradition.`,
+      `const body = source === "reviewed_pack" ? packText : hostText;`,
+      `scope_statement: "This pack does not claim that any wording in it is traditional, correct, or approved."`,
+      `intro="Nothing here asks about religion, caste or community, and no role is guessed from a name."`,
+      `title: "Telugu Ceremonial",`,
+      `<p>Tradition packs are optional. You can create an invitation without one.</p>`,
+      `const isRetired = release.status === "deprecated";`,
+    ].join("\n");
+    expect(scanContent("src/components/invitation/InvitationRenderer.tsx", honest)).toEqual([]);
+
+    const branch = `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`;
+    expect(
+      scanContent("src/components/invitation/InvitationRenderer.tsx", branch).map((v) => v.rule),
+    ).toEqual(["tradition-pack-identity-branch"]);
+
+    // The same sentence, in a governance document, is out of scope by construction — which is
+    // why the rule cannot be quietly widened to `docs/` later without this assertion moving.
+    expect(scanContent("docs/product/content-governance.md", branch)).toEqual([]);
+  });
+
+  it("treats the draft candidate's own flags as honest and a flipped flag as a finding", () => {
+    // §25's second concern: a live claim that the unreviewed candidate is reviewed or
+    // selectable. The shipped artifact's real flag values are the passing case, so the rule
+    // cannot be satisfied by rewording the artifact.
+    const honest = [
+      `  "status": "draft",`,
+      `  "machine_assisted": true,`,
+      `  "human_reviewed": false,`,
+      `  "customer_selectable": false,`,
+    ].join("\n");
+    expect(scanContent("content/tradition-packs/tamil-english-foundation.v1.json", honest)).toEqual([]);
+    expect(
+      scanContent(
+        "content/tradition-packs/tamil-english-foundation.v1.json",
+        `  "human_reviewed": true,`,
+      ).map((v) => v.rule),
+    ).toEqual(["draft-candidate-claimed-shippable"]);
   });
 
   it("reports the exact position of each hit", () => {
