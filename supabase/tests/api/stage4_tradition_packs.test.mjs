@@ -1198,7 +1198,7 @@ describe('§17 FREEZE', () => {
     const [id, number, status] = landed.split(' | ');
     assert.equal(id, minted);
     assert.equal(status, 'approved', 'the mint did not reach the state the journey starts from');
-    assert.ok(Number(number) > 4, `the mint was numbered ${number} inside a pack that already had four`);
+    assert.ok(Number(number) > 3, `the mint was numbered ${number} inside a pack that has three fixed fixture releases`);
 
     const chose = await pointAt('hostA', hosts.wedMint.id, minted);
     assert.equal(chose.status, 200, JSON.stringify(chose.body));
