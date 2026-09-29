@@ -1663,8 +1663,3 @@ What Stage 4 leaves for the next stage to decide, in the shape of a sentence rat
 * Still explicitly deferred, unchanged from `domain-model.md` §8: guest RSVP actions, the family
   approval workflow, uploads and Storage, entitlements from a real payment provider, retention and
   erasure, and pack × template compatibility (still no join table, because no pairing needs one yet).
-
-
-
-
-
