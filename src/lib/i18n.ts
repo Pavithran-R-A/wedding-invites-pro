@@ -8,3 +8,9 @@ export const LANGUAGES: { code: Language; label: string; nativeLabel: string }[]
   { code: 'ml', label: 'Malayalam', nativeLabel: 'മലയാളം' },
   { code: 'kn', label: 'Kannada', nativeLabel: 'ಕನ್ನಡ' },
 ];
+
+/** A language code spoken in the words this platform uses for it. An unfamiliar code prints as
+ *  itself rather than as nothing: a release that claims a language this build has never heard of
+ *  still claims it, and renaming that away would be this file's invention. */
+export const languageLabel = (code: string): string =>
+  LANGUAGES.find(language => language.code === code)?.label ?? code;

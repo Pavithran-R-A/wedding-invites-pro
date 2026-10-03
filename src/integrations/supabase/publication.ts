@@ -20,6 +20,16 @@ import { supabase } from './client';
 import { asObject, isBooleanValue, isNumberValue, isText, booleanValue, numberValue, text } from '@/lib/jsonShape';
 import { describe } from '@/lib/safeError';
 import { parsePublicInvitation, type PublicInvitation } from '@/lib/publicInvitation';
+import {
+  PACK_HOST_FIELDS,
+  PACK_OVERRIDE_RULES,
+  PACK_SECTION_KEYS,
+  PACK_SECTION_KINDS,
+  type PackHostField,
+  type PackOverrideRule,
+  type PackSectionKey,
+  type PackSectionKind,
+} from '@/lib/traditionPackContract';
 import type { QueryResult } from './weddings';
 
 /** A frozen version, as the host is told about it. The snapshot itself is not carried:
@@ -126,6 +136,169 @@ export async function previewInvitation(weddingId: string): Promise<QueryResult<
   if (invitation === null) return fail('the preview could not be drawn', null);
   return { data: invitation, error: null };
 }
+
+/** One way the live document falls short, as the server computed it. */
+export interface InvitationIssue {
+  code: string;
+  /** The stable name this build's own copy is keyed on. `code` and `messageKey` are the same
+   *  string today; keeping both read means a server that starts to separate them cannot make
+   *  the editor print the wrong sentence, because the lookup uses only the key. */
+  messageKey: string;
+  sectionKey: string | null;
+  field: string | null;
+  blocking: boolean;
+  params: Record<string, unknown>;
+}
+
+/**
+ * What one section of this wedding's release asks the host to do, in the release's own order.
+ *
+ * This is the AUTHORING DECLARATION, and it is the reason the editor never reads a pack
+ * definition: the server has already applied its own defaults (`required` false,
+ * `override_rule` `host_may_replace`, `requires_venue` false), so a v1 release or a wedding with
+ * no pack arrives as a declaration that asks for nothing beyond what the manual editor always
+ * showed. `kind` says which control belongs here and `hostField` says which of the four draft
+ * slots it writes; the reviewed wording itself is not repeated, because it is already on the
+ * document as a section body with its provenance.
+ */
+export interface AuthoringSection {
+  sectionKey: PackSectionKey;
+  kind: PackSectionKind;
+  position: number;
+  required: boolean;
+  hostField: PackHostField | null;
+  /** null on a structured section, which has no wording to override. */
+  overrideRule: PackOverrideRule | null;
+  /** null on anything but an event list. */
+  requiresVenue: boolean | null;
+}
+
+/** The release behind a live document, in the only form a host needs. */
+export interface SelectedReleaseSummary {
+  packKey: string;
+  displayName: string;
+  releaseNumber: number;
+  definitionSchemaVersion: number;
+  /** False when the release has been retired since — the fact a "this invitation uses an
+   *  older release" notice is built from, and not the word `deprecated`. */
+  isCurrent: boolean;
+}
+
+/**
+ * The document, the server's verdict on it, the rules behind it, and what it stands on — from
+ * one resolution.
+ *
+ * This is Stage 5's answer to the preview/freeze parity requirement, and the shape is the
+ * point: the document, its issues and its authoring declaration arrive in the same round trip,
+ * from the same snapshot and the same definition read, so what an editor refuses the button for
+ * is the list the server produced about the bytes on screen, and the control that holds a
+ * required line is the one the release says is required. `previewInvitation` above stays the
+ * guest-projection read; this is the one a host's editor should use, and the freeze below still
+ * recomputes everything, because a client that was told the truth at 14:00 can edit at 14:01.
+ */
+export async function previewInvitationDocument(
+  weddingId: string,
+): Promise<QueryResult<{
+  invitation: PublicInvitation;
+  issues: InvitationIssue[];
+  authoring: AuthoringSection[];
+  selectedRelease: SelectedReleaseSummary | null;
+}>> {
+  const { data, error } = await supabase.schema('api').rpc('preview_invitation_document', {
+    p_wedding_id: weddingId,
+  });
+  if (error) return fail('the preview could not be drawn', error);
+  const raw = asObject(data);
+  const invitation = raw
+    ? parsePublicInvitation({ available: true, invitation: raw.invitation })
+    : null;
+  if (!raw || invitation === null) return fail('the preview could not be drawn', null);
+  if (!Array.isArray(raw.issues)) return fail('the preview could not be drawn', null);
+  // A missing `authoring` array is a server that is not answering this shape, and an editor
+  // that fell back to its own guess about the sections would be the thing §19 forbids. The
+  // page keeps the last declaration it was given and reports the failure instead.
+  if (!Array.isArray(raw.authoring)) return fail('the preview could not be drawn', null);
+  return {
+    data: {
+      invitation,
+      issues: raw.issues.map(parseIssue).filter((i): i is InvitationIssue => i !== null),
+      authoring: raw.authoring.map(parseAuthoring).filter((s): s is AuthoringSection => s !== null),
+      selectedRelease: parseSelectedRelease(raw.selected_release),
+    },
+    error: null,
+  };
+}
+
+const parseIssue = (value: unknown): InvitationIssue | null => {
+  const raw = asObject(value);
+  if (!raw || !isText(raw.code) || !isBooleanValue(raw.blocking)) return null;
+  if (!isText(raw.message_key)) return null;
+  const params = asObject(raw.params);
+  return {
+    code: text(raw.code),
+    messageKey: text(raw.message_key),
+    sectionKey: text(presentValue(raw.section_key)),
+    field: text(presentValue(raw.field)),
+    blocking: booleanValue(raw.blocking) ?? false,
+    params: params ?? {},
+  };
+};
+
+/** One entry of the server's authoring declaration. A value outside this build's vocabulary is
+ *  a rule the editor has no control for, so the whole entry is refused rather than drawn with
+ *  the surprising field replaced by a guess — the server's issue list is what tells the host
+ *  about a release this build cannot fully honour, and it does so by code, not by a control
+ *  this file invented. */
+const parseAuthoring = (value: unknown): AuthoringSection | null => {
+  const raw = asObject(value);
+  if (!raw) return null;
+  const sectionKey = text(presentValue(raw.section_key));
+  const kind = text(presentValue(raw.kind));
+  const position = numberValue(raw.position);
+  if (sectionKey === null || !PACK_SECTION_KEYS.includes(sectionKey as PackSectionKey)) return null;
+  if (kind === null || !PACK_SECTION_KINDS.includes(kind as PackSectionKind)) return null;
+  if (position === null) return null;
+  if (!isBooleanValue(raw.required)) return null;
+
+  const hostField = text(presentValue(raw.host_field));
+  if (hostField !== null && !PACK_HOST_FIELDS.includes(hostField as PackHostField)) return null;
+
+  const rule = text(presentValue(raw.override_rule));
+  if (rule !== null && !PACK_OVERRIDE_RULES.includes(rule as PackOverrideRule)) return null;
+
+  if (raw.requires_venue !== undefined && !isBooleanValue(raw.requires_venue)) return null;
+  return {
+    sectionKey: sectionKey as PackSectionKey,
+    kind: kind as PackSectionKind,
+    position,
+    required: booleanValue(raw.required) ?? false,
+    hostField: hostField as PackHostField | null,
+    overrideRule: rule as PackOverrideRule | null,
+    requiresVenue: raw.requires_venue === undefined ? null : (booleanValue(raw.requires_venue) ?? false),
+  };
+};
+
+const parseSelectedRelease = (value: unknown): SelectedReleaseSummary | null => {
+  const raw = asObject(value);
+  // `null` here is the no-tradition-pack state rather than a broken response, so the two are
+  // told apart by the caller looking at the whole document, not by this parser guessing.
+  if (!raw) return null;
+  const packKey = text(raw.pack_key);
+  const displayName = text(raw.display_name);
+  const releaseNumber = numberValue(raw.release_number);
+  const schemaVersion = numberValue(raw.definition_schema_version);
+  if (packKey === null || displayName === null || releaseNumber === null) return null;
+  if (!isBooleanValue(raw.status_is_current)) return null;
+  return {
+    packKey,
+    displayName,
+    releaseNumber,
+    definitionSchemaVersion: schemaVersion ?? 0,
+    isCurrent: booleanValue(raw.status_is_current) ?? false,
+  };
+};
+
+const presentValue = (value: unknown): unknown => (value === undefined ? null : value);
 
 export async function createInvitationVersion(
   weddingId: string,

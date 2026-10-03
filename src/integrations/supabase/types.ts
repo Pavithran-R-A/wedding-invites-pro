@@ -1,5 +1,5 @@
-// Database types for the canonical Stage 4 schema: the RLS-governed tables in `public`,
-// and the seven browser-callable RPCs in `api`.
+// Database types for the canonical Stage 5 schema: the RLS-governed tables in `public`,
+// and the eight browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -47,6 +47,15 @@
 // the release is the frozen definition with its review provenance. `weddings` and
 // `invitation_versions` renamed their `tradition_pack_id` to `tradition_pack_release_id`,
 // so a selection and a pinned snapshot both point at a release, never at a moving concept.
+//
+// Stage 5 added one column and one RPC, and both are visible here as the generator's own
+// text: `tradition_pack_releases.review_packet_hash` — the SHA-256 the lifecycle guard writes
+// at draft -> reviewed and re-compares at reviewed -> approved — and `api
+// .preview_invitation_document`, the host's live document beside the server's own verdict on
+// it. What the file does NOT contain is the maintenance surface: the eleven
+// `internal_api.tradition_pack_*` functions are in no schema this file describes, because
+// `--schema` names only `public` and `api`, and a type that named a function no browser may
+// execute would advertise a door that is shut.
 export type Json =
   | string
   | number
@@ -73,6 +82,10 @@ export type Database = {
         Returns: Json
       }
       preview_invitation: { Args: { p_wedding_id: string }; Returns: Json }
+      preview_invitation_document: {
+        Args: { p_wedding_id: string }
+        Returns: Json
+      }
       publish_invitation_version: {
         Args: {
           p_expires_at?: string
@@ -635,6 +648,7 @@ export type Database = {
           release_number: number
           review_basis: string | null
           review_label: string | null
+          review_packet_hash: string | null
           review_scope: string | null
           reviewed_at: string | null
           reviewed_by: string | null
@@ -659,6 +673,7 @@ export type Database = {
           release_number: number
           review_basis?: string | null
           review_label?: string | null
+          review_packet_hash?: string | null
           review_scope?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
@@ -683,6 +698,7 @@ export type Database = {
           release_number?: number
           review_basis?: string | null
           review_label?: string | null
+          review_packet_hash?: string | null
           review_scope?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null

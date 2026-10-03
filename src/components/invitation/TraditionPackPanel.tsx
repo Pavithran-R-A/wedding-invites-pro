@@ -26,7 +26,7 @@
 // "No tradition pack" is an option rather than the absence of one, because writing everything
 // yourself is a decision the platform should let a host make on purpose.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   clearTraditionRelease,
   getSelectedTraditionRelease,
@@ -35,7 +35,8 @@ import {
   type SelectedTraditionRelease,
   type TraditionReleaseOption,
 } from '@/integrations/supabase/traditionReleases';
-import { TRADITION_PACK_DEFINITION_SCHEMA_VERSION } from '@/lib/traditionPackContract';
+import { isReadableDefinitionSchemaVersion } from '@/lib/traditionPackContract';
+import { retiredReleaseNotice } from '@/lib/invitationAuthoring';
 import { LANGUAGES } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 
@@ -76,11 +77,23 @@ const TraditionPackPanel = ({
   const [pendingChoice, setPendingChoice] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
 
+  /** Which read of the catalogue and of the current choice is still the newest question. The
+   *  mount load, the retry button and the re-read that follows a write all answer into these
+   *  same states, and the responses arrive in an order this panel does not control: a slow first
+   *  read landing after a fast one would put the selection back to what it was before the host
+   *  clicked, which is the sequencing defect §20 asks to be fixed rather than worked around. */
+  const readTicket = useRef(0);
+
   const load = useCallback(async () => {
+    readTicket.current += 1;
+    const ticket = readTicket.current;
     const [catalogue, selection] = await Promise.all([
       listSelectableTraditionReleases(),
       getSelectedTraditionRelease(userId, weddingId),
     ]);
+    // Superseded, not wrong: the newer read describes the world as this panel knows it, and
+    // writing an old answer over it would contradict a choice already on the screen.
+    if (ticket !== readTicket.current) return;
     const phrases = [catalogue.error, selection.error].filter((phrase): phrase is string => phrase !== null);
     if (catalogue.data) setOptions(catalogue.data);
     if (selection.error === null) setSelected(selection.data);
@@ -110,13 +123,48 @@ const TraditionPackPanel = ({
       setWriteError(result.error);
       return;
     }
+    // Claiming the ticket here is what protects the choice the host just made: a load that
+    // started before the write is still in flight, and its answer describes the selection as it
+    // stood a moment ago. It is now the stale one, and it steps aside below.
+    readTicket.current += 1;
+    const ticket = readTicket.current;
     const refreshed = await getSelectedTraditionRelease(userId, weddingId);
-    if (refreshed.error === null) setSelected(refreshed.data);
+    // The write is already the server's fact; only the *read* can be stale. A newer read that
+    // claimed the ticket will put the selection on screen itself, so this one does not race it
+    // for the same state.
+    if (readTicket.current === ticket && refreshed.error === null) setSelected(refreshed.data);
     onSelectionChanged();
   };
 
   const currentId = selected === null ? NO_PACK : selected.id;
   const busy = pendingChoice !== null;
+
+  /** The newest approved release of the pack this wedding already chose, when one is newer than
+   *  the retired selection on screen. §21 asks a host to be *offered* the newer release rather
+   *  than left to spot it in a list of packs — and asks for that as an explicit choice, so this
+   *  is a comparison over the catalogue the server returned (same `packKey`, higher number) and
+   *  nothing more: no release is selected, moved or upgraded by it, and there is no branch on
+   *  which pack it is. */
+  const newerRelease = selected === null || !selected.retired
+    ? null
+    : options.reduce<TraditionReleaseOption | null>(
+        (best, option) =>
+          option.packKey === selected.packKey &&
+          option.releaseNumber > selected.releaseNumber &&
+          (best === null || option.releaseNumber > best.releaseNumber)
+            ? option
+            : best,
+        null,
+      );
+
+  const newerReleaseLine = newerRelease === null ? null : (
+    <p className="text-[11px] leading-snug text-muted-foreground">
+      {`Release ${newerRelease.releaseNumber} of ${newerRelease.packDisplayName} is available to choose, `}
+      listed below. Choosing it is what moves this invitation onto it — nothing moves by itself,
+      and the versions you have already frozen and the link your guests hold stay on the release
+      they were made from.
+    </p>
+  );
 
   const optionRow = (option: TraditionReleaseOption) => {
     const isCurrent = option.id === currentId;
@@ -140,6 +188,11 @@ const TraditionPackPanel = ({
           <span className="block text-xs font-medium">
             {option.packDisplayName}
             <span className="text-muted-foreground"> · release {option.releaseNumber}</span>
+            {option.id === newerRelease?.id ? (
+              <span className="ml-1 text-[11px] font-normal text-success">
+                — newer release of the one you chose
+              </span>
+            ) : null}
           </span>
           <span className="block text-[11px] text-muted-foreground">
             Languages: {option.languages.map(languageLabel).join(', ')}
@@ -233,12 +286,12 @@ const TraditionPackPanel = ({
             Chosen: {selected.packDisplayName}, release {selected.releaseNumber}
           </p>
           {selected.retired ? (
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              This pack has been retired since you chose it. Versions you already froze keep
-              showing what it said; a new freeze from it is refused until you choose again.
+            <p className="text-[11px] leading-snug text-warning">
+              {retiredReleaseNotice(selected.packDisplayName, selected.releaseNumber)}
             </p>
           ) : null}
-          {selected.definitionSchemaVersion !== TRADITION_PACK_DEFINITION_SCHEMA_VERSION ? (
+          {newerReleaseLine}
+          {!isReadableDefinitionSchemaVersion(selected.definitionSchemaVersion) ? (
             <p className="text-[11px] leading-snug text-muted-foreground">
               This pack was written against a newer definition format than this build reads.
               Anything it adds that this build cannot place is listed under the preview instead

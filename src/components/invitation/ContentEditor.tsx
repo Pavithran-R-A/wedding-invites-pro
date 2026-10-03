@@ -7,7 +7,17 @@
 // the prose above it can give. Each row therefore carries its own Save, and each save
 // re-reads the list so what the host sees afterwards is what the row answered with.
 //
-// Three rules this page keeps to:
+// Why this file exports a hook and three groups rather than one component. Stage 5's editor
+// lays the invitation out in the order the chosen release declares (§19), and that order
+// interleaves prose with lists — a release that puts the people between two paragraphs needs
+// the *people editor* there, not in a box underneath the prose. One component owning all three
+// lists could only be mounted whole, so an ordered outline would have had to mount it whole and
+// hide two thirds of it: a second copy of the same row state, and a Save that could be in flight
+// in a group nobody is looking at. So the state lives in `useWeddingContentRows` once and each
+// list is a view over it. Nothing about that split is pack-specific — `AuthoringOutline` picks a
+// group by the section's `kind`, and a release that declares no lists never asks for one.
+//
+// Three rules this screen keeps to:
 //
 //   * It asks no question about religion, caste, community or tradition, and infers
 //     nothing from a name. "Role" is a word the host writes for their own relative; the
@@ -96,7 +106,14 @@ const ceremonyPayload = (draft: CeremonyDraft): CeremonyDraft => ({
 
 /** In-progress edits to a list of rows, keyed by row id, so a host fixing one name does
  *  not lose the other row they were halfway through typing. */
-function useRowDrafts<T extends { id: string }, D>(toDraft: (row: T) => D) {
+interface RowDrafts<T extends { id: string }, D> {
+  draftFor: (row: T) => D;
+  changed: (row: T) => boolean;
+  patchFor: (row: T, change: Partial<D>) => void;
+  forget: (id: string) => void;
+}
+
+function useRowDrafts<T extends { id: string }, D>(toDraft: (row: T) => D): RowDrafts<T, D> {
   const [edits, setEdits] = useState<Record<string, D>>({});
   const draftFor = (row: T): D => edits[row.id] ?? toDraft(row);
   const changed = (row: T): boolean => JSON.stringify(draftFor(row)) !== JSON.stringify(toDraft(row));
@@ -209,11 +226,40 @@ const RowActions = ({
   </div>
 );
 
-export interface ContentEditorProps {
-  weddingId: string;
-  /** Called after any content row changes, so the canvas re-reads the server's projection
-   *  and shows the guest's document rather than a guess about it. */
-  onContentChanged: () => void;
+/** Which of the three row lists has an add form open. One slot rather than three, so a host who
+ *  opens the person form and then clicks "Add a venue" is not left holding two half-filled add
+ *  forms with the same button label. */
+export type ContentRowKind = 'person' | 'venue' | 'ceremony';
+
+/** Everything a row group needs, owned once for the whole wedding. */
+export interface WeddingContentRows {
+  /** The wedding every write from any group is scoped to. On this object rather than on each
+   *  group's props so a group takes exactly one prop. */
+  readonly weddingId: string;
+  /** Prefix for every field id in every group, so an id names one field of one row of one
+   *  wedding even when two groups are mounted in the same document. */
+  fieldId: string;
+  loading: boolean;
+  busy: boolean;
+  /** The adapter's phrase for the last refusal, or null. One slot for all three lists: a failed
+   *  write belongs to the wedding, not to the group that happened to send it. */
+  notice: string | null;
+  people: PersonEntry[];
+  venues: VenueEntry[];
+  ceremonies: CeremonyEntry[];
+  personRows: RowDrafts<PersonEntry, PersonDraft>;
+  venueRows: RowDrafts<VenueEntry, VenueDraft>;
+  ceremonyRows: RowDrafts<CeremonyEntry, CeremonyDraft>;
+  adding: ContentRowKind | null;
+  newPerson: PersonDraft;
+  newVenue: VenueDraft;
+  newCeremony: CeremonyDraft;
+  startAdd: (kind: ContentRowKind) => void;
+  cancelAdd: () => void;
+  setNewPerson: (change: Partial<PersonDraft>) => void;
+  setNewVenue: (change: Partial<VenueDraft>) => void;
+  setNewCeremony: (change: Partial<CeremonyDraft>) => void;
+  run: (call: Promise<QueryResult<unknown>>, afterWrite: () => void) => Promise<void>;
 }
 
 const EMPTY_PERSON: PersonDraft = { displayName: '', roleLabel: '', groupLabel: '', displayOrder: 0 };
@@ -228,7 +274,17 @@ const EMPTY_CEREMONY: CeremonyDraft = {
   enabled: true,
 };
 
-const ContentEditor = ({ weddingId, onContentChanged }: ContentEditorProps) => {
+export interface UseWeddingContentRowsArgs {
+  weddingId: string;
+  /** Called after any content row changes, so the canvas re-reads the server's projection
+   *  and shows the guest's document rather than a guess about it. */
+  onContentChanged: () => void;
+}
+
+export const useWeddingContentRows = ({
+  weddingId,
+  onContentChanged,
+}: UseWeddingContentRowsArgs): WeddingContentRows => {
   const fieldId = useId();
   const [people, setPeople] = useState<PersonEntry[]>([]);
   const [venues, setVenues] = useState<VenueEntry[]>([]);
@@ -236,7 +292,7 @@ const ContentEditor = ({ weddingId, onContentChanged }: ContentEditorProps) => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [adding, setAdding] = useState<null | 'person' | 'venue' | 'ceremony'>(null);
+  const [adding, setAdding] = useState<ContentRowKind | null>(null);
   const [newPerson, setNewPerson] = useState<PersonDraft>(EMPTY_PERSON);
   const [newVenue, setNewVenue] = useState<VenueDraft>(EMPTY_VENUE);
   const [newCeremony, setNewCeremony] = useState<CeremonyDraft>(EMPTY_CEREMONY);
@@ -297,7 +353,7 @@ const ContentEditor = ({ weddingId, onContentChanged }: ContentEditorProps) => {
     [reload, onContentChanged],
   );
 
-  const startAdd = (kind: 'person' | 'venue' | 'ceremony') => {
+  const startAdd = (kind: ContentRowKind) => {
     setAdding(kind);
     setNotice(null);
     const displayOrder = kind === 'person' ? people.length : kind === 'ceremony' ? ceremonies.length : 0;
@@ -306,267 +362,294 @@ const ContentEditor = ({ weddingId, onContentChanged }: ContentEditorProps) => {
     if (kind === 'ceremony') setNewCeremony({ ...EMPTY_CEREMONY, displayOrder });
   };
 
-  const cancelAdd = () => setAdding(null);
-
-  if (loading) {
-    return (
-      <section className="space-y-3">
-        <h2 className="font-display font-semibold text-sm">People, venues and ceremonies</h2>
-        <p className="text-xs text-muted-foreground animate-pulse">Loading your invitation content…</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="space-y-6" aria-labelledby="content-heading">
-      <h2 id="content-heading" className="font-display font-semibold text-sm">
-        People, venues and ceremonies
-      </h2>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        These are saved as soon as you save each row — they are the facts a version freezes,
-        not draft text. Each row is shown to your guests exactly as you write it.
-      </p>
-
-      {notice !== null ? (
-        <p role="alert" className="text-xs text-destructive">
-          {notice}
-        </p>
-      ) : null}
-
-      <div className="space-y-3">
-        <SectionHeading
-          id="people-heading"
-          title="The people"
-          intro="Names as guests should read them. Nothing here asks about religion, caste or community, and no role is guessed from a name."
-        />
-        {people.length === 0 ? <p className="text-xs text-muted-foreground">No one is listed yet.</p> : null}
-        <ul className="space-y-4">
-          {people.map(person => {
-            const draft = personRows.draftFor(person);
-            return (
-              <li key={person.id}>
-                <fieldset className="space-y-2 rounded-lg border border-border p-3">
-                  <legend className="px-1 text-xs font-medium">{person.displayName}</legend>
-                  <PersonFields
-                    idPrefix={`${fieldId}-person-${person.id}`}
-                    draft={draft}
-                    onChange={change => personRows.patchFor(person, change)}
-                    disabled={busy}
-                  />
-                  <RowActions
-                    dirty={personRows.changed(person)}
-                    busy={busy}
-                    onSave={() =>
-                      void run(updatePerson(weddingId, person.id, draft), () => personRows.forget(person.id))
-                    }
-                    onRemove={() => void run(removePerson(weddingId, person.id), () => personRows.forget(person.id))}
-                    removeLabel="Remove"
-                  />
-                </fieldset>
-              </li>
-            );
-          })}
-        </ul>
-        {adding === 'person' ? (
-          <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
-            <p className="text-xs font-medium">Add a person</p>
-            <PersonFields
-              idPrefix={`${fieldId}-new-person`}
-              draft={newPerson}
-              onChange={change => setNewPerson(p => ({ ...p, ...change }))}
-              disabled={busy}
-            />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="rounded-lg h-8 text-xs"
-                disabled={busy}
-                onClick={() =>
-                  void run(createPerson(weddingId, newPerson), () => {
-                    setNewPerson({ ...EMPTY_PERSON, displayOrder: people.length + 1 });
-                    setAdding(null);
-                  })
-                }
-              >
-                Add to invitation
-              </Button>
-              <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={cancelAdd} disabled={busy}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => startAdd('person')} disabled={busy}>
-            Add a person
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-3">
-        <SectionHeading
-          id="venues-heading"
-          title="The venues"
-          intro="Where each gathering happens. A map link is a full https:// address you paste; this build does not look up coordinates."
-        />
-        {venues.length === 0 ? <p className="text-xs text-muted-foreground">No venue is listed yet.</p> : null}
-        <ul className="space-y-4">
-          {venues.map(venue => {
-            const draft = venueRows.draftFor(venue);
-            return (
-              <li key={venue.id}>
-                <fieldset className="space-y-2 rounded-lg border border-border p-3">
-                  <legend className="px-1 text-xs font-medium">{venue.name}</legend>
-                  <VenueFields
-                    idPrefix={`${fieldId}-venue-${venue.id}`}
-                    draft={draft}
-                    onChange={change => venueRows.patchFor(venue, change)}
-                    disabled={busy}
-                  />
-                  <RowActions
-                    dirty={venueRows.changed(venue)}
-                    busy={busy}
-                    onSave={() =>
-                      void run(updateVenue(weddingId, venue.id, draft), () => venueRows.forget(venue.id))
-                    }
-                    onRemove={() => void run(removeVenue(weddingId, venue.id), () => venueRows.forget(venue.id))}
-                    removeLabel="Remove venue"
-                  />
-                </fieldset>
-              </li>
-            );
-          })}
-        </ul>
-        {adding === 'venue' ? (
-          <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
-            <p className="text-xs font-medium">Add a venue</p>
-            <VenueFields
-              idPrefix={`${fieldId}-new-venue`}
-              draft={newVenue}
-              onChange={change => setNewVenue(v => ({ ...v, ...change }))}
-              disabled={busy}
-            />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="rounded-lg h-8 text-xs"
-                disabled={busy}
-                onClick={() =>
-                  void run(createVenue(weddingId, newVenue), () => {
-                    setNewVenue(EMPTY_VENUE);
-                    setAdding(null);
-                  })
-                }
-              >
-                Add to invitation
-              </Button>
-              <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={cancelAdd} disabled={busy}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => startAdd('venue')} disabled={busy}>
-            Add a venue
-          </Button>
-        )}
-      </div>
-
-      <div className="space-y-3">
-        <SectionHeading
-          id="ceremonies-heading"
-          title="The ceremonies"
-          intro="Name each gathering in your own words — there is no list of ceremony names to choose from yet, and nothing is translated for you."
-        />
-        {ceremonies.length === 0 ? <p className="text-xs text-muted-foreground">No ceremony is listed yet.</p> : null}
-        <ul className="space-y-4">
-          {ceremonies.map(ceremony => {
-            const draft = ceremonyRows.draftFor(ceremony);
-            const prefix = `${fieldId}-ceremony-${ceremony.id}`;
-            return (
-              <li key={ceremony.id}>
-                <fieldset className="space-y-2 rounded-lg border border-border p-3">
-                  <legend className="px-1 text-xs font-medium">{ceremony.displayName}</legend>
-                  <CeremonyFields
-                    idPrefix={prefix}
-                    draft={draft}
-                    venues={venues}
-                    onChange={change => ceremonyRows.patchFor(ceremony, change)}
-                    disabled={busy}
-                  />
-                  <label className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      id={`${prefix}-enabled`}
-                      className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-                      checked={draft.enabled}
-                      disabled={busy}
-                      onChange={e => ceremonyRows.patchFor(ceremony, { enabled: e.target.checked })}
-                    />
-                    <span className="text-[11px] leading-snug">
-                      Show this ceremony to guests
-                      <span className="block text-muted-foreground">
-                        Unchecking it keeps the row for you and leaves it out of the invitation.
-                      </span>
-                    </span>
-                  </label>
-                  <RowActions
-                    dirty={ceremonyRows.changed(ceremony)}
-                    busy={busy}
-                    onSave={() =>
-                      void run(
-                        updateCeremony(weddingId, ceremony.id, ceremonyPayload(draft)),
-                        () => ceremonyRows.forget(ceremony.id),
-                      )
-                    }
-                    onRemove={() => void run(removeCeremony(weddingId, ceremony.id), () => ceremonyRows.forget(ceremony.id))}
-                    removeLabel="Remove ceremony"
-                  />
-                </fieldset>
-              </li>
-            );
-          })}
-        </ul>
-        {adding === 'ceremony' ? (
-          <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
-            <p className="text-xs font-medium">Add a ceremony</p>
-            <CeremonyFields
-              idPrefix={`${fieldId}-new-ceremony`}
-              draft={newCeremony}
-              venues={venues}
-              onChange={change => setNewCeremony(c => ({ ...c, ...change }))}
-              disabled={busy}
-            />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                className="rounded-lg h-8 text-xs"
-                disabled={busy}
-                onClick={() =>
-                  void run(createCeremony(weddingId, ceremonyPayload(newCeremony)), () => {
-                    setNewCeremony({ ...EMPTY_CEREMONY, displayOrder: ceremonies.length + 1 });
-                    setAdding(null);
-                  })
-                }
-              >
-                Add to invitation
-              </Button>
-              <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={cancelAdd} disabled={busy}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => startAdd('ceremony')} disabled={busy}>
-            Add a ceremony
-          </Button>
-        )}
-      </div>
-    </section>
-  );
+  return {
+    weddingId,
+    fieldId,
+    loading,
+    busy,
+    notice,
+    people,
+    venues,
+    ceremonies,
+    personRows,
+    venueRows,
+    ceremonyRows,
+    adding,
+    newPerson,
+    newVenue,
+    newCeremony,
+    startAdd,
+    cancelAdd: () => setAdding(null),
+    setNewPerson: change => setNewPerson(p => ({ ...p, ...change })),
+    setNewVenue: change => setNewVenue(v => ({ ...v, ...change })),
+    setNewCeremony: change => setNewCeremony(c => ({ ...c, ...change })),
+    run,
+  };
 };
+
+/** The last refusal, printed once, wherever the page that owns the rows chooses to put it. */
+export const ContentNotice = ({ notice }: { notice: string | null }) =>
+  notice === null ? null : (
+    <p role="alert" className="text-xs text-destructive">
+      {notice}
+    </p>
+  );
+
+export const PeopleGroup = ({ rows }: { rows: WeddingContentRows }) => (
+  <div className="space-y-3">
+    <SectionHeading
+      id="people-heading"
+      title="The people"
+      intro="Names as guests should read them. Nothing here asks about religion, caste or community, and no role is guessed from a name."
+    />
+    {rows.loading ? <p className="text-xs text-muted-foreground animate-pulse">Loading the people…</p> : null}
+    {!rows.loading && rows.people.length === 0 ? (
+      <p className="text-xs text-muted-foreground">No one is listed yet.</p>
+    ) : null}
+    <ul className="space-y-4">
+      {rows.people.map(person => {
+        const draft = rows.personRows.draftFor(person);
+        return (
+          <li key={person.id}>
+            <fieldset className="space-y-2 rounded-lg border border-border p-3">
+              <legend className="px-1 text-xs font-medium">{person.displayName}</legend>
+              <PersonFields
+                idPrefix={`${rows.fieldId}-person-${person.id}`}
+                draft={draft}
+                onChange={change => rows.personRows.patchFor(person, change)}
+                disabled={rows.busy}
+              />
+              <RowActions
+                dirty={rows.personRows.changed(person)}
+                busy={rows.busy}
+                onSave={() =>
+                  void rows.run(updatePerson(rows.weddingId, person.id, draft), () => rows.personRows.forget(person.id))
+                }
+                onRemove={() =>
+                  void rows.run(removePerson(rows.weddingId, person.id), () => rows.personRows.forget(person.id))
+                }
+                removeLabel="Remove"
+              />
+            </fieldset>
+          </li>
+        );
+      })}
+    </ul>
+    {rows.adding === 'person' ? (
+      <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+        <p className="text-xs font-medium">Add a person</p>
+        <PersonFields
+          idPrefix={`${rows.fieldId}-new-person`}
+          draft={rows.newPerson}
+          onChange={rows.setNewPerson}
+          disabled={rows.busy}
+        />
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="rounded-lg h-8 text-xs"
+            disabled={rows.busy}
+            onClick={() =>
+              void rows.run(createPerson(rows.weddingId, rows.newPerson), () => {
+                rows.setNewPerson({ ...EMPTY_PERSON, displayOrder: rows.people.length + 1 });
+                rows.cancelAdd();
+              })
+            }
+          >
+            Add to invitation
+          </Button>
+          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    ) : (
+      <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => rows.startAdd('person')} disabled={rows.busy}>
+        Add a person
+      </Button>
+    )}
+  </div>
+);
+
+export const VenueGroup = ({ rows }: { rows: WeddingContentRows }) => (
+  <div className="space-y-3">
+    <SectionHeading
+      id="venues-heading"
+      title="The venues"
+      intro="Where each gathering happens. A map link is a full https:// address you paste; this build does not look up coordinates."
+    />
+    {rows.loading ? <p className="text-xs text-muted-foreground animate-pulse">Loading the venues…</p> : null}
+    {!rows.loading && rows.venues.length === 0 ? (
+      <p className="text-xs text-muted-foreground">No venue is listed yet.</p>
+    ) : null}
+    <ul className="space-y-4">
+      {rows.venues.map(venue => {
+        const draft = rows.venueRows.draftFor(venue);
+        return (
+          <li key={venue.id}>
+            <fieldset className="space-y-2 rounded-lg border border-border p-3">
+              <legend className="px-1 text-xs font-medium">{venue.name}</legend>
+              <VenueFields
+                idPrefix={`${rows.fieldId}-venue-${venue.id}`}
+                draft={draft}
+                onChange={change => rows.venueRows.patchFor(venue, change)}
+                disabled={rows.busy}
+              />
+              <RowActions
+                dirty={rows.venueRows.changed(venue)}
+                busy={rows.busy}
+                onSave={() =>
+                  void rows.run(updateVenue(rows.weddingId, venue.id, draft), () => rows.venueRows.forget(venue.id))
+                }
+                onRemove={() =>
+                  void rows.run(removeVenue(rows.weddingId, venue.id), () => rows.venueRows.forget(venue.id))
+                }
+                removeLabel="Remove venue"
+              />
+            </fieldset>
+          </li>
+        );
+      })}
+    </ul>
+    {rows.adding === 'venue' ? (
+      <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+        <p className="text-xs font-medium">Add a venue</p>
+        <VenueFields
+          idPrefix={`${rows.fieldId}-new-venue`}
+          draft={rows.newVenue}
+          onChange={rows.setNewVenue}
+          disabled={rows.busy}
+        />
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="rounded-lg h-8 text-xs"
+            disabled={rows.busy}
+            onClick={() =>
+              void rows.run(createVenue(rows.weddingId, rows.newVenue), () => {
+                rows.setNewVenue(EMPTY_VENUE);
+                rows.cancelAdd();
+              })
+            }
+          >
+            Add to invitation
+          </Button>
+          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    ) : (
+      <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => rows.startAdd('venue')} disabled={rows.busy}>
+        Add a venue
+      </Button>
+    )}
+  </div>
+);
+
+export const CeremonyGroup = ({ rows }: { rows: WeddingContentRows }) => (
+  <div className="space-y-3">
+    <SectionHeading
+      id="ceremonies-heading"
+      title="The ceremonies"
+      intro="Name each gathering in your own words — there is no list of ceremony names to choose from yet, and nothing is translated for you."
+    />
+    {rows.loading ? <p className="text-xs text-muted-foreground animate-pulse">Loading the ceremonies…</p> : null}
+    {!rows.loading && rows.ceremonies.length === 0 ? (
+      <p className="text-xs text-muted-foreground">No ceremony is listed yet.</p>
+    ) : null}
+    <ul className="space-y-4">
+      {rows.ceremonies.map(ceremony => {
+        const draft = rows.ceremonyRows.draftFor(ceremony);
+        const prefix = `${rows.fieldId}-ceremony-${ceremony.id}`;
+        return (
+          <li key={ceremony.id}>
+            <fieldset className="space-y-2 rounded-lg border border-border p-3">
+              <legend className="px-1 text-xs font-medium">{ceremony.displayName}</legend>
+              <CeremonyFields
+                idPrefix={prefix}
+                draft={draft}
+                venues={rows.venues}
+                onChange={change => rows.ceremonyRows.patchFor(ceremony, change)}
+                disabled={rows.busy}
+              />
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  id={`${prefix}-enabled`}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                  checked={draft.enabled}
+                  disabled={rows.busy}
+                  onChange={e => rows.ceremonyRows.patchFor(ceremony, { enabled: e.target.checked })}
+                />
+                <span className="text-[11px] leading-snug">
+                  Show this ceremony to guests
+                  <span className="block text-muted-foreground">
+                    Unchecking it keeps the row for you and leaves it out of the invitation.
+                  </span>
+                </span>
+              </label>
+              <RowActions
+                dirty={rows.ceremonyRows.changed(ceremony)}
+                busy={rows.busy}
+                onSave={() =>
+                  void rows.run(
+                    updateCeremony(rows.weddingId, ceremony.id, ceremonyPayload(draft)),
+                    () => rows.ceremonyRows.forget(ceremony.id),
+                  )
+                }
+                onRemove={() =>
+                  void rows.run(
+                    removeCeremony(rows.weddingId, ceremony.id),
+                    () => rows.ceremonyRows.forget(ceremony.id),
+                  )
+                }
+                removeLabel="Remove ceremony"
+              />
+            </fieldset>
+          </li>
+        );
+      })}
+    </ul>
+    {rows.adding === 'ceremony' ? (
+      <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+        <p className="text-xs font-medium">Add a ceremony</p>
+        <CeremonyFields
+          idPrefix={`${rows.fieldId}-new-ceremony`}
+          draft={rows.newCeremony}
+          venues={rows.venues}
+          onChange={rows.setNewCeremony}
+          disabled={rows.busy}
+        />
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="rounded-lg h-8 text-xs"
+            disabled={rows.busy}
+            onClick={() =>
+              void rows.run(createCeremony(rows.weddingId, ceremonyPayload(rows.newCeremony)), () => {
+                rows.setNewCeremony({ ...EMPTY_CEREMONY, displayOrder: rows.ceremonies.length + 1 });
+                rows.cancelAdd();
+              })
+            }
+          >
+            Add to invitation
+          </Button>
+          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    ) : (
+      <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => rows.startAdd('ceremony')} disabled={rows.busy}>
+        Add a ceremony
+      </Button>
+    )}
+  </div>
+);
 
 /** The three fields a venue row carries. */
 const VenueFields = ({
@@ -727,9 +810,12 @@ const CeremonyFields = ({
           </option>
         ))}
       </select>
+      {/* Says "this invitation" rather than "above". An ordered outline may place the venue list
+          after the ceremonies, and a direction that depends on the layout would be wrong in half
+          the layouts this group is now mounted in. */}
       {venues.length === 0 ? (
         <p className="text-[11px] leading-snug text-muted-foreground">
-          Add a venue above first, and it will appear here.
+          Nothing to choose yet — a venue you add to this invitation appears here.
         </p>
       ) : null}
     </div>
@@ -741,5 +827,3 @@ const CeremonyFields = ({
     />
   </>
 );
-
-export default ContentEditor;

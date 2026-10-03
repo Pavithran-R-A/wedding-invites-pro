@@ -16,11 +16,20 @@
 //     buttons hand the host a URL and a chat app takes it from there.
 //   * Bring a taken-down link back. Revocation is permanent by design; only a new
 //     publication of a new version can produce a working address.
+//   * Offer a freeze while the wedding stands on a release the platform has retired. Publishing
+//     a version frozen earlier is still offered — a retired release must keep serving every
+//     document already frozen from it — and the notice that explains the missing freeze says so,
+//     because a host who is told their pack is out of date will otherwise assume the page their
+//     guests are reading is about to change under them.
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { PublicationState } from '@/integrations/supabase/publication';
+import type {
+  PublicationState,
+  SelectedReleaseSummary,
+} from '@/integrations/supabase/publication';
 import type { StoredInvitationVersion } from '@/integrations/supabase/weddings';
+import { retiredReleaseNotice } from '@/lib/invitationAuthoring';
 
 export interface PublicationPanelProps {
   /** The address this session was handed, or null when none was minted. */
@@ -31,6 +40,21 @@ export interface PublicationPanelProps {
    *  reading text in an unknown language is not a thing to discover after the freeze.
    *  The plan is shown as a precondition, not inferred from a failure. */
   languageChosen: boolean;
+  /** A blocking finding from `api.preview_invitation_document`. The button goes quiet while the
+   *  server says a version cannot be made, because pressing it would only earn the host a
+   *  refusal — but this is a courtesy, not the rule: the freeze call re-checks the same records,
+   *  and a host on an older bundle whose server result we have not read still reaches the
+   *  button and still gets the truth from the database. */
+  serverBlocking: boolean;
+  /** The release this wedding points at, when it points at one and that release has been
+   *  retired since. A separate prop rather than one more entry in `serverBlocking`, because no
+   *  `issues` record says it: the refusal is `versions_pack_release_gate` at the version INSERT,
+   *  and §21 requires that a host be told it in words that also promise their *existing* versions
+   *  and live link do not change — a promise that belongs beside the buttons those versions are
+   *  published with. The summary is passed rather than a boolean because naming the release is
+   *  itself something §21 asks the host to be able to inspect. Same courtesy, same
+   *  non-enforcement: the freeze call checks the release again on the server. */
+  retiredRelease: SelectedReleaseSummary | null;
   busy: boolean;
   /** What just happened, in the page's words: a version froze, a link went live. */
   message: string | null;
@@ -81,6 +105,8 @@ const PublicationPanel = ({
   state,
   versions,
   languageChosen,
+  serverBlocking,
+  retiredRelease,
   busy,
   message,
   notice,
@@ -123,18 +149,45 @@ const PublicationPanel = ({
 
       <StatusLine state={state} />
 
+      {retiredRelease !== null ? (
+        // Outside the numbered steps, because it is a fact about the invitation rather than a
+        // step's precondition, and because the sentence has to be readable while the host is
+        // deciding whether to touch the two buttons below it: publishing an already frozen
+        // version from a retired release is allowed, and freezing a new one is not.
+        <p className="text-[11px] leading-snug text-warning">
+          {retiredReleaseNotice(retiredRelease.displayName, retiredRelease.releaseNumber)}
+        </p>
+      ) : null}
+
       <ol className="space-y-3 text-sm">
         <li className="flex items-start gap-2">
           <span aria-hidden="true" className="mt-0.5 text-muted-foreground">1</span>
           <span className="flex-1">
             <Button type="button" size="sm" variant="outline" className="rounded-lg"
-              onClick={onCreateVersion} disabled={busy || !languageChosen}>
+              onClick={onCreateVersion}
+              disabled={busy || !languageChosen || serverBlocking || retiredRelease !== null}>
               Freeze this draft as a version
             </Button>
             {!languageChosen ? (
               <span className="block text-[11px] text-muted-foreground">
                 Choose the invitation language on the planning page first — a version
                 states the language its guests are reading in.
+              </span>
+            ) : serverBlocking ? (
+              // Named in italics rather than in quotation marks, because this screen's contract
+              // with the host is sentences the app wrote: a quote character here would read like
+              // a machine's field name. The heading it names is `AuthoritativeIssues`' own.
+              <span className="block text-[11px] text-muted-foreground">
+                Waiting on the checks under{' '}
+                <em>What the server says stands between this and a version</em>. Fixing one is
+                enough to re-run them; the freeze call makes the same checks again whichever way
+                this button is showing.
+              </span>
+            ) : retiredRelease !== null ? (
+              <span className="block text-[11px] text-muted-foreground">
+                Not while your invitation stands on that older release — choose another pack, or
+                write it yourself, and this button is offered again. The freeze call refuses it on
+                the server whichever way this button is showing.
               </span>
             ) : null}
           </span>

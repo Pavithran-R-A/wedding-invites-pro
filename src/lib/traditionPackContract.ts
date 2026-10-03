@@ -15,12 +15,34 @@
 // caste: the vocabulary describes where content goes, not what a tradition holds. Adding a
 // slot is a code change with a renderer beside it, never a content write.
 
-/** The one definition contract version this build reads. */
-export const TRADITION_PACK_DEFINITION_SCHEMA_VERSION = 1
+/**
+ * The definition contract versions this build reads. Stage 5 added 2, and 1 is in the list
+ * because the releases already frozen and already authored claim it: a build that could only
+ * read 2 would have to refuse every invitation its own database still serves.
+ */
+export const TRADITION_PACK_DEFINITION_SCHEMA_VERSIONS = [1, 2] as const
+
+/** The version a release this build authors claims. */
+export const TRADITION_PACK_DEFINITION_SCHEMA_VERSION = 2
+
+/** True when this build can interpret a release's claim at all. */
+export function isReadableDefinitionSchemaVersion(version: number): boolean {
+  return (TRADITION_PACK_DEFINITION_SCHEMA_VERSIONS as readonly number[]).includes(version)
+}
 
 /** Top-level keys a definition may carry. Anything else is a key nobody specified. */
 export const PACK_DEFINITION_KEYS = ['sections', 'event_vocabulary', 'design_guidance'] as const
 
+// Stage 5's two authoring rules are in this list, and they are refused outright on a release
+// claiming version 1 — which is what makes the asymmetry in
+// `TRADITION_PACK_DEFINITION_SCHEMA_VERSIONS` real rather than a promise: an old release cannot
+// carry new semantics, so an old build and a new build read the same bytes the same way.
+//
+// The comment sits above the literal rather than inside it on purpose:
+// `scripts/check-db-contract.mjs` reads these lists by taking every quoted name between the
+// brackets, so a quoted word in an inline comment becomes a vocabulary entry as far as that
+// reader is concerned. It found that out by reporting drift that did not exist, which is the
+// good kind of failure — the check was wrong loudly instead of quietly.
 /** Keys one section object may carry. */
 export const PACK_SECTION_FIELD_KEYS = [
   'section_key',
@@ -31,6 +53,8 @@ export const PACK_SECTION_FIELD_KEYS = [
   'heading',
   'pack_text',
   'allow_english_fallback',
+  'override_rule',
+  'requires_venue',
 ] as const
 
 /** The section slots this build renders, in no meaningful order. */
@@ -46,6 +70,20 @@ export const PACK_SECTION_KEYS = [
   'event_notes',
   'blessing',
   'closing',
+] as const
+
+/**
+ * Whose words a `text` section shows. This is Stage 5's answer to the question Stage 4 left
+ * the host to decide silently: `host_may_replace` is what Stage 4 measured and shipped, so a
+ * release that says nothing means exactly that; `pack_only` keeps reviewed wording on the page
+ * however full the host's field is; `host_must_supply` means the release declines to author
+ * the line at all. Only a prose section may carry one, and the guard refuses the mismatch — a
+ * rule with nothing to apply it to is a rule nobody can test.
+ */
+export const PACK_OVERRIDE_RULES = [
+  'host_may_replace',
+  'pack_only',
+  'host_must_supply',
 ] as const
 
 /**
@@ -87,3 +125,4 @@ export type PackSectionFieldKey = (typeof PACK_SECTION_FIELD_KEYS)[number]
 export type PackSectionKey = (typeof PACK_SECTION_KEYS)[number]
 export type PackSectionKind = (typeof PACK_SECTION_KINDS)[number]
 export type PackHostField = (typeof PACK_HOST_FIELDS)[number]
+export type PackOverrideRule = (typeof PACK_OVERRIDE_RULES)[number]

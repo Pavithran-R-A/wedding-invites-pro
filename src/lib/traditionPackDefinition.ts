@@ -29,12 +29,14 @@ import {
   PACK_LEAD_SIZE_MAX,
   PACK_LEAD_SIZE_MIN,
   PACK_MOTIF_MAX_CHARS,
+  PACK_OVERRIDE_RULES,
   PACK_SECTION_FIELD_KEYS,
   PACK_SECTION_KINDS,
   PACK_SECTION_KEYS,
   PACK_TEXT_MAX_CHARS,
-  TRADITION_PACK_DEFINITION_SCHEMA_VERSION,
+  isReadableDefinitionSchemaVersion,
   type PackHostField,
+  type PackOverrideRule,
   type PackSectionKey,
   type PackSectionKind,
 } from './traditionPackContract'
@@ -152,7 +154,7 @@ export const parseTraditionPackDefinition = (
 ): PackParseResult => {
   const issues: PackIssue[] = []
 
-  if (definitionSchemaVersion !== TRADITION_PACK_DEFINITION_SCHEMA_VERSION) {
+  if (!isReadableDefinitionSchemaVersion(definitionSchemaVersion)) {
     return {
       ok: false,
       definition: null,
@@ -296,6 +298,89 @@ export const parseTraditionPackDefinition = (
       } else {
         seenHostFields.push(candidate)
         hostField = candidate as PackHostField
+      }
+    }
+
+    // Stage 5's two authoring rules, mirrored from the guard clause for clause. The client is
+    // not the authority — the write is refused by the database either way — but an author who
+    // learns a rule only from a rejected save has been told nothing about which of the two
+    // declarations disagree, and that is the difference between a fix and a retry.
+    const rawOverrideRule = present(section, 'override_rule')
+    const rawRequiresVenue = present(section, 'requires_venue')
+    if (definitionSchemaVersion === 1
+        && (rawOverrideRule !== undefined || rawRequiresVenue !== undefined)) {
+      issues.push(
+        issue(
+          'section.v2_key_on_v1_definition',
+          path,
+          `section ${sectionKey} declares override_rule or requires_venue on a version-1 `
+            + 'definition, which claims the older contract while depending on the newer one',
+        ),
+      )
+    }
+    if (rawOverrideRule !== undefined && definitionSchemaVersion !== 1) {
+      const candidate = text(rawOverrideRule)
+      if (candidate === null || !PACK_OVERRIDE_RULES.includes(candidate as PackOverrideRule)) {
+        issues.push(
+          issue(
+            'override_rule.unknown',
+            `${path}.override_rule`,
+            `section ${sectionKey} declares override_rule ${String(rawOverrideRule)}, which is `
+              + 'not one of host_may_replace, pack_only or host_must_supply',
+          ),
+        )
+      } else if (listKind) {
+        issues.push(
+          issue(
+            'override_rule.on_list_section',
+            `${path}.override_rule`,
+            `section ${sectionKey} is a ${kind} and has no reviewed wording for an override `
+              + 'rule to govern',
+          ),
+        )
+      } else if (candidate === 'host_must_supply') {
+        if (present(section, 'pack_text') !== undefined) {
+          issues.push(
+            issue(
+              'override_rule.host_must_supply_offers_text',
+              `${path}.pack_text`,
+              `section ${sectionKey} must be written by the host but this release offers `
+                + 'wording for it anyway',
+            ),
+          )
+        }
+        if (hostField === null) {
+          issues.push(
+            issue(
+              'override_rule.host_must_supply_unfillable',
+              `${path}.host_field`,
+              `section ${sectionKey} must be written by the host but reads no host field, so `
+                + 'nobody could supply it',
+            ),
+          )
+        }
+      } else if (candidate === 'pack_only' && present(section, 'pack_text') === undefined) {
+        issues.push(
+          issue(
+            'override_rule.pack_only_without_text',
+            `${path}.pack_text`,
+            `section ${sectionKey} may not be overridden but carries no reviewed wording to `
+              + 'show instead',
+          ),
+        )
+      }
+    }
+    if (rawRequiresVenue !== undefined && definitionSchemaVersion !== 1) {
+      if (typeof rawRequiresVenue !== 'boolean') {
+        issues.push(
+          issue('requires_venue.not_boolean', `${path}.requires_venue`,
+            `section ${sectionKey} must declare requires_venue as a boolean`),
+        )
+      } else if (kind !== 'event_list') {
+        issues.push(
+          issue('requires_venue.on_non_event_list', `${path}.requires_venue`,
+            `section ${sectionKey} is a ${kind} and does not draw events, so it cannot require a venue`),
+        )
       }
     }
 

@@ -1,22 +1,33 @@
 // The host's workbench: their words, their styling, and the two steps that turn a saved
 // draft into an address a guest can open.
 //
-// Three rules shaped this page:
+// Four rules shaped this page:
 //
-//   * The canvas is the guest's renderer (§U), not a picture of one. `api.preview_invitation`
-//     runs the same snapshot builder and the same projection a guest's resolve call runs, so
-//     the host is looking at the document their guests would receive — and a preview that
-//     flattered them would be a lie told right before they share a link.
+//   * One server read is authoritative for three things. `api.preview_invitation_document`
+//     answers the guest's document, the release's section-by-section authoring declaration, and
+//     the server's own findings about whether a version could be frozen — all from the same
+//     snapshot and the same definition read that `api.create_invitation_version` runs again. So
+//     the canvas is the document a guest would receive, the outline below is laid out in the
+//     order the chosen release put it in, and the blocking list is the server's verdict rather
+//     than this file's guess about it. A preview that flattered the host would be a lie told
+//     right before they share a link.
 //   * Typing is local until Save. The composed object below is the server's projection with
-//     the editor's style and the four prose slots re-applied, which is exactly what
+//     the editor's style and the host's prose slots re-applied, which is exactly what
 //     "unsaved changes shown" means; everything else (title, language, names, ceremonies)
 //     is what is already in the rows. Freezing a version reads the rows, so unsaved typing
-//     is not in it — the panel says so before the button is pressed rather than after.
+//     is not in it — the panel says so before the button is pressed rather than after. A
+//     section the release will not take a replacement for is left exactly as the projection
+//     answered it, because drawing the host's unused line on the canvas would credit the
+//     preview with words the document does not carry.
+//   * The list under the canvas is not the freeze check. `normalizeInvitationSections` runs the
+//     guest renderer's own placement rules over the composed document to say what this build
+//     could not draw; it is a note about this browser's limits, and it is labelled as one. The
+//     findings that hold a freeze back are the server's, printed once, in their own panel.
 //   * Nothing here decides who the caller is. The RPCs take a wedding id and nothing else;
 //     the database derives the host from the JWT and refuses a wedding that is not theirs
 //     with one generic phrase, so this page cannot ask about someone else's invitation.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   EMPTY_DRAFT_CONTENT,
@@ -33,11 +44,14 @@ import {
 import {
   createInvitationVersion,
   getPublicationState,
-  previewInvitation,
+  previewInvitationDocument,
   publishInvitation,
   revokeInvitationPublication,
   rotateInvitationLink,
+  type AuthoringSection,
+  type InvitationIssue,
   type PublicationState,
+  type SelectedReleaseSummary,
 } from '@/integrations/supabase/publication';
 import type { PublicInvitation } from '@/lib/publicInvitation';
 import type { PackHostField } from '@/lib/traditionPackContract';
@@ -58,9 +72,16 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { sanitizeSvg } from '@/lib/sanitizeSvg';
 import { normalizeInvitationSections } from '@/lib/invitationSections';
 import { DRAFT_SLOT_LABELS, HOST_FIELD_OF_SLOT } from '@/lib/invitationDraftSlots';
+import {
+  BUILT_IN_AUTHORING,
+  hasBlockingIssue,
+  isHostEditable,
+  usesRetiredRelease,
+} from '@/lib/invitationAuthoring';
 import InvitationRenderer from '@/components/invitation/InvitationRenderer';
-import DraftTextEditor from '@/components/invitation/DraftTextEditor';
-import ContentEditor from '@/components/invitation/ContentEditor';
+import AuthoringOutline from '@/components/invitation/AuthoringOutline';
+import AuthoritativeIssues from '@/components/invitation/AuthoritativeIssues';
+import { ContentNotice, useWeddingContentRows } from '@/components/invitation/ContentEditor';
 import TraditionPackPanel from '@/components/invitation/TraditionPackPanel';
 import PublicationPanel from '@/components/invitation/PublicationPanel';
 
@@ -144,31 +165,41 @@ const EMPTY_BASE: PublicInvitation = {
 /**
  * Put the host's unsaved words where the canvas will draw them.
  *
- * `api.preview_invitation` resolves sections from the *saved* draft row, so a section whose
- * body is the host's carries the text as it was last saved. The canvas shows what is on the
- * screen instead, and §13 moved the prose into the section list: a section that reads one of
- * the four host fields is rewritten here, in the one place that knows what the host has typed
- * and not yet saved.
+ * The server's projection resolves sections from the *saved* draft row, so a section whose body
+ * is the host's carries the text as it was last saved. The canvas shows what is on the screen
+ * instead, and §13 moved the prose into the section list: a section that reads one of the host
+ * fields is rewritten here, in the one place that knows what the host has typed and not yet
+ * saved.
  *
  * The rewrite mirrors `private.resolve_invitation_sections`
  * (`supabase/migrations/20260927120000_stage4_tradition_pack_releases.sql:913-933`) rather
  * than inventing a rule of its own, because a preview that disagreed with the next save would
  * be a lie told right before the host shares a link:
  *
- *   * Typed text wins, and winning over wording the release supplied is exactly what
- *     `overrode_pack_text` records. A section the projection returned as `reviewed_pack`
- *     therefore becomes `host` the moment the host types over it — never "reviewed_pack, but
- *     the host edited it", which §12 refuses because it would credit a review with words no
- *     reviewer saw. A body the projection left empty is written one, which is what saving
- *     typed text does: with the words invisible until Save, a host who chose "no tradition
- *     pack" would watch this canvas refuse to show anything they typed into a blank field.
- *   * `language` and `fallback_used` go null on a host body, as the projection nulls them:
- *     the platform does not know what language a person typed in.
+ *   * Typed text wins — but only where the release's own `override_rule` allows a replacement.
+ *     A `pack_only` section is left exactly as the projection answered it, because the server
+ *     has already said it is not reading that draft slot; drawing the host's unused line over
+ *     the reviewed one would put words on the canvas that no guest document would carry.
+ *     `AuthoringOutline` shows the stored line beside the field instead, with the notice that
+ *     says it is stored and not used.
+ *   * Winning over wording the release supplied is exactly what `overrode_pack_text` records. A
+ *     section the projection returned as `reviewed_pack` therefore becomes `host` the moment the
+ *     host types over it — never "reviewed_pack, but the host edited it", which §12 refuses
+ *     because it would credit a review with words no reviewer saw. A body the projection left
+ *     empty is written one, which is what saving typed text does: with the words invisible until
+ *     Save, a host who chose "no tradition pack" would watch this canvas refuse to show anything
+ *     they typed into a blank field.
+ *   * `language` and `fallback_used` go null on a host body, as the projection nulls them: the
+ *     platform does not know what language a person typed in.
  *   * Cleared text drops the body. The release's line would resolve again server-side, and a
  *     host body never carried that wording across the wire, so the honest answer on screen is
  *     "nothing here yet" — and the panel beside the field says what Save brings back.
  */
-const withLocalProse = (invitation: PublicInvitation, draft: InvitationDraftContent): PublicInvitation => {
+const withLocalProse = (
+  invitation: PublicInvitation,
+  draft: InvitationDraftContent,
+  fixedFields: Set<PackHostField>,
+): PublicInvitation => {
   const flat = {
     welcome: draft.welcome,
     familyIntroduction: draft.familyIntroduction,
@@ -182,6 +213,7 @@ const withLocalProse = (invitation: PublicInvitation, draft: InvitationDraftCont
     // A field name this build has no editor for is left exactly as the projection wrote it:
     // inventing a mapping would draw the wrong paragraph under someone's heading.
     if (field === null || !PACK_HOST_FIELDS.includes(field as PackHostField)) return item;
+    if (fixedFields.has(field as PackHostField)) return item;
     const value = draft[HOST_FIELD_OF_SLOT[field as PackHostField]];
     const typed = value !== null && value.trim() !== '' ? value : null;
     if (typed === null) {
@@ -203,11 +235,28 @@ const withLocalProse = (invitation: PublicInvitation, draft: InvitationDraftCont
   return { ...invitation, ...flat, sections: { ...invitation.sections, items } };
 };
 
+/** The host fields the chosen release will not take a replacement for, read off the server's
+ *  declaration rather than from the wording on screen: a section can be `pack_only` and still
+ *  carry an empty body today, and the rule is what decides whether typing over it is allowed. */
+const notOverridableFields = (authoring: AuthoringSection[]): Set<PackHostField> => {
+  const fields = new Set<PackHostField>();
+  for (const section of authoring) {
+    if (section.hostField === null || isHostEditable(section)) continue;
+    fields.add(section.hostField);
+  }
+  return fields;
+};
+
 /** The lines the chosen release is currently supplying wording for, named in the host's own
  *  field labels. Read off the server's projection rather than re-resolved from the pinned
  *  definition here, so the panel can only name wording the document actually carries — and
- *  once the host has replaced a line with their own, that line leaves the list. */
-const suppliedSlotLabels = (projection: PublicInvitation | null): string[] => {
+ *  once the host has replaced a line with their own, that line leaves the list.
+ *
+ *  A section whose rule refuses a replacement is left out even when it does carry pack wording:
+ *  the sentence this list feeds tells the host to type over these fields, and offering that on a
+ *  field this release will not read would be an instruction the server contradicts. Those lines
+ *  are named where the host can see them, beside the field that holds their own stored wording. */
+const suppliedSlotLabels = (projection: PublicInvitation | null, fixedFields: Set<PackHostField>): string[] => {
   const items = projection?.sections?.items;
   if (items === undefined) return [];
   const labels: string[] = [];
@@ -215,6 +264,7 @@ const suppliedSlotLabels = (projection: PublicInvitation | null): string[] => {
     const field = item.hostField;
     if (item.body === null || item.body.source !== 'reviewed_pack' || field === null) continue;
     if (!PACK_HOST_FIELDS.includes(field as PackHostField)) continue;
+    if (fixedFields.has(field as PackHostField)) continue;
     labels.push(DRAFT_SLOT_LABELS[HOST_FIELD_OF_SLOT[field as PackHostField]]);
   }
   return labels;
@@ -222,16 +272,17 @@ const suppliedSlotLabels = (projection: PublicInvitation | null): string[] => {
 
 /**
  * What the canvas draws. The server's projection is the document; the only things replaced
- * with local values are the style and the four prose slots, because those are what this
- * page edits. If the preview call failed there is no projection to draw on, so a bare page
- * carries the host's words alone — a title and paragraphs they typed is still a readable
- * draft, and inventing an empty state that hid them would be the worse lie.
+ * with local values are the style and the prose slots this page edits, and only where the
+ * release accepts a replacement. If the document read failed there is no projection to draw
+ * on, so a bare page carries the host's words alone — a title and paragraphs they typed is
+ * still a readable draft, and inventing an empty state that hid them would be the worse lie.
  */
 const composedInvitation = (
   base: PublicInvitation | null,
   design: WeddingDesign,
   editor: EditorState,
   draft: InvitationDraftContent,
+  fixedFields: Set<PackHostField>,
 ): PublicInvitation => {
   const source =
     base ??
@@ -246,6 +297,7 @@ const composedInvitation = (
       style: { font: editor.font, fontSize: editor.fontSize, color: editor.color, alignment: editor.alignment },
     },
     draft,
+    fixedFields,
   );
 };
 
@@ -267,6 +319,73 @@ const SaveStatus = ({ state, dirty }: { state: SaveState; dirty: boolean }) => {
   return null;
 };
 
+/**
+ * What one call to `api.preview_invitation_document` answers, kept as one value.
+ *
+ * The document, its findings, the section declaration and the release it stands on arrive from
+ * the same resolution, so they are stored together: four separate states would let the outline
+ * build controls from one read while the finding list below it still answered another, which is
+ * the exact disagreement this endpoint exists to make impossible.
+ */
+type PreviewDocument = {
+  invitation: PublicInvitation;
+  issues: InvitationIssue[];
+  authoring: AuthoringSection[];
+  selectedRelease: SelectedReleaseSummary | null;
+};
+
+interface AuthoringRegionProps {
+  weddingId: string;
+  authoring: AuthoringSection[];
+  invitation: PublicInvitation;
+  draft: InvitationDraftContent;
+  onDraftChange: (value: InvitationDraftContent) => void;
+  onContentChanged: () => void;
+  disabled: boolean;
+}
+
+/**
+ * The prose and the rows, in the order the release declares, over one copy of the row state.
+ *
+ * This exists as its own component because the row lists are mounted wherever the declaration
+ * puts a list section (§19), and the hook that owns their state has to be called once, above
+ * that outline — not inside it, where each section would get its own copy of the same three
+ * lists. The page cannot call it itself and stay a page that renders a loading state before
+ * the wedding id is known, so the hook lives one level down, in the component that only ever
+ * mounts with an id in hand.
+ */
+const AuthoringRegion = ({
+  weddingId,
+  authoring,
+  invitation,
+  draft,
+  onDraftChange,
+  onContentChanged,
+  disabled,
+}: AuthoringRegionProps) => {
+  const rows = useWeddingContentRows({ weddingId, onContentChanged });
+  return (
+    <section className="space-y-3" aria-labelledby="authoring-heading">
+      <h2 id="authoring-heading" className="font-display font-semibold text-sm">
+        Your invitation, section by section
+      </h2>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        These are the parts your invitation is built from, in the order it uses them. The page
+        on the left is what your guests would read.
+      </p>
+      <ContentNotice notice={rows.notice} />
+      <AuthoringOutline
+        authoring={authoring}
+        invitation={invitation}
+        draft={draft}
+        onDraftChange={onDraftChange}
+        rows={rows}
+        disabled={disabled}
+      />
+    </section>
+  );
+};
+
 const EditProject = () => {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -275,7 +394,11 @@ const EditProject = () => {
   const [loadFailed, setLoadFailed] = useState(false);
   const [editor, setEditor] = useState<EditorState>(DEFAULT_EDITOR);
   const [draft, setDraft] = useState<InvitationDraftContent>(EMPTY_DRAFT_CONTENT);
-  const [serverPreview, setServerPreview] = useState<PublicInvitation | null>(null);
+  const [doc, setDoc] = useState<PreviewDocument | null>(null);
+  /** True when the last document read did not answer. Its own state rather than `doc === null`,
+   *  because a failed refresh must not clear the document on screen — and a note that says the
+   *  checks are unavailable must not appear while the first read is still in flight. */
+  const [checksUnavailable, setChecksUnavailable] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   /** `editKey` of the values the rows actually hold. Compared with the current key, so a
    *  host who types and then undoes it is not told they have unsaved changes. */
@@ -290,15 +413,38 @@ const EditProject = () => {
   const dirty = design !== null && editKey(editor, draft) !== baseline;
   const absolutePath = (path: string) => `${window.location.origin}${path}`;
 
+  /** Which document read is still the current question. A save, a row write and a pack choice
+   *  each ask for a fresh read, the responses arrive in an order this page does not control,
+   *  and a late answer to an earlier question would otherwise overwrite a newer document with a
+   *  stale one — including its issues, which is the list a host decides a freeze from. */
+  const previewTicket = useRef(0);
+
+  const applyPreview = useCallback(
+    (ticket: number, result: QueryResult<PreviewDocument>) => {
+      if (ticket !== previewTicket.current) return;
+      if (result.error !== null || result.data === null) {
+        // The last good document stays on screen: a refresh that failed says something about
+        // the refresh, not that the host's invitation disappeared.
+        setChecksUnavailable(true);
+        return;
+      }
+      setDoc(result.data);
+      setChecksUnavailable(false);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!id || !user) return;
     let live = true;
+    previewTicket.current += 1;
+    const ticket = previewTicket.current;
     void Promise.all([
       getWeddingDesign(user.id, id),
       getDraftContent(id),
       listInvitationVersions(id),
       getPublicationState(id),
-      previewInvitation(id),
+      previewInvitationDocument(id),
     ]).then(([designResult, draftResult, versionResult, stateResult, previewResult]) => {
       if (!live) return;
       if (designResult.error || designResult.data === null) {
@@ -313,20 +459,24 @@ const EditProject = () => {
       setBaseline(editKey(loadedEditor, loadedDraft));
       if (versionResult.data) setVersions(versionResult.data);
       if (stateResult.data) setPubState(stateResult.data);
-      if (previewResult.data) setServerPreview(previewResult.data);
+      applyPreview(ticket, previewResult);
       setSaveState('saved');
     });
     return () => {
       live = false;
     };
-  }, [id, user]);
+  }, [id, user, applyPreview]);
 
-  /** Re-read the projection so the canvas is the server's document rather than the local
-   *  overlay; a failed refresh leaves the overlay in place, which shows the same words. */
-  const refreshPreview = async (weddingId: string) => {
-    const refreshed = await previewInvitation(weddingId);
-    if (refreshed.data) setServerPreview(refreshed.data);
-  };
+  /** Re-read the document, its findings and its declaration as the one resolution they came
+   *  from, so the canvas, the outline and the blocking list always answer for the same read. */
+  const refreshPreview = useCallback(
+    async (weddingId: string) => {
+      previewTicket.current += 1;
+      const ticket = previewTicket.current;
+      applyPreview(ticket, await previewInvitationDocument(weddingId));
+    },
+    [applyPreview],
+  );
 
   const handleSave = async () => {
     if (!id || !user) return;
@@ -452,14 +602,26 @@ const EditProject = () => {
     );
   }
 
-  const invitation = composedInvitation(serverPreview, design, editor, draft);
+  // The declaration is the server's whenever it has answered. `BUILT_IN_AUTHORING` is used only
+  // while no document has ever been read, which is the shape the manual editor has always had —
+  // not a guess about a pack, and it disappears as soon as a read succeeds.
+  const authoring = doc?.authoring ?? BUILT_IN_AUTHORING;
+  const issues = doc?.issues ?? [];
+  const fixedFields = notOverridableFields(authoring);
+  const invitation = composedInvitation(doc?.invitation ?? null, design, editor, draft, fixedFields);
   const artwork = design.previewSvg === null ? null : sanitizeSvg(design.previewSvg);
   // The same normalizer the guest's renderer runs, on the same composed document, so what is
   // listed below the canvas is exactly what the canvas could not place — not a second opinion
-  // computed from a different reading of the page.
+  // computed from a different reading of the page. It is a note about *this build*, and it is
+  // labelled as one: the findings that hold a freeze back are the server's, listed on their own.
   const previewIssues = normalizeInvitationSections(invitation).issues;
-  const suppliedLabels = suppliedSlotLabels(serverPreview);
-
+  const suppliedLabels = suppliedSlotLabels(doc?.invitation ?? null, fixedFields);
+  const serverBlocking = hasBlockingIssue(issues);
+  /** The retired release this wedding stands on, when there is one. From the same document read
+   *  as the findings, so the freeze button's two reasons — the server's list and the release's
+   *  lifecycle — are answers about one snapshot rather than two guesses about the page. */
+  const selectedRelease = doc?.selectedRelease ?? null;
+  const retiredRelease = usesRetiredRelease(selectedRelease) ? selectedRelease : null;
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <h1 className="sr-only">Invitation draft: {design.title}</h1>
@@ -486,7 +648,10 @@ const EditProject = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row">
+      {/* The page a host works on. The error and loading branches above already name their region
+          as `main`; this one has to, or the screen a keyboard user spends their time on has no
+          landmark to jump to. */}
+      <main className="flex-1 flex flex-col lg:flex-row">
         <section
           className="flex-1 p-4 md:p-8 bg-muted/30"
           aria-labelledby="preview-heading"
@@ -509,9 +674,12 @@ const EditProject = () => {
                   ))}
                 </ul>
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  A note for you, the host. Your guests see none of this list — the sections it
-                  names are simply absent from their page, which is why they are named here
-                  rather than drawn as empty boxes.
+                  A note for you, the host, about what this build can draw. Your guests see none
+                  of this list — the sections it names are simply absent from their page, which is
+                  why they are named here rather than drawn as empty boxes. It is not the freeze
+                  check: whether a version can be made is the server&apos;s answer, printed in the
+                  panel headed{' '}
+                  <em>What the server says stands between this and a version</em>.
                 </p>
               </div>
             ) : null}
@@ -538,20 +706,32 @@ const EditProject = () => {
             </>
           ) : null}
 
-          <section className="space-y-3" aria-labelledby="words-heading">
-            <h2 id="words-heading" className="font-display font-semibold text-sm">
-              Your words
-            </h2>
-            <DraftTextEditor value={draft} onChange={setDraft} disabled={saveState === 'saving'} />
-          </section>
+          {checksUnavailable ? (
+            <p role="status" aria-live="polite" className="text-[11px] leading-snug text-muted-foreground">
+              The server&apos;s checks could not be re-read just now. What this page shows is
+              therefore from the last read that answered, or the plain manual layout if none has.
+              Saving re-reads them, and freezing a version runs every check again on the server,
+              so nothing can freeze on the strength of an old list.
+            </p>
+          ) : null}
 
-          <Separator />
-
-          <ContentEditor
+          <AuthoritativeIssues
+            issues={issues}
+            authoring={authoring}
+            invitation={invitation}
             weddingId={id}
+          />
+
+          <AuthoringRegion
+            weddingId={id}
+            authoring={authoring}
+            invitation={invitation}
+            draft={draft}
+            onDraftChange={setDraft}
             onContentChanged={() => {
               void refreshPreview(id);
             }}
+            disabled={saveState === 'saving'}
           />
 
           <Separator />
@@ -683,6 +863,8 @@ const EditProject = () => {
             message={message}
             notice={notice}
             languageChosen={design.primaryLanguage !== null}
+            serverBlocking={serverBlocking}
+            retiredRelease={retiredRelease}
             busy={busy}
             onCreateVersion={handleCreateVersion}
             onPublish={handlePublish}
@@ -690,7 +872,7 @@ const EditProject = () => {
             onRevoke={handleRevoke}
           />
         </aside>
-      </div>
+      </main>
     </div>
   );
 };
