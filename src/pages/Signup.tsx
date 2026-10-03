@@ -19,7 +19,7 @@ const Signup = () => {
     e.preventDefault();
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -32,7 +32,18 @@ const Signup = () => {
     if (error) {
       toast({ title: 'Signup failed', description: error.message, variant: 'destructive' });
     } else {
-      toast({ title: 'Account created!', description: 'Check your email to confirm your account.' });
+      // GoTrue hands back a session when the account is usable straight away, and none when
+      // it is waiting on an email confirmation. Telling the host to look for a message in the
+      // first case promised something this stack is configured never to send
+      // (supabase/config.toml:72), and the sign-up journey measured that there is no
+      // confirmation step to wait for.
+      const awaitsEmail = !data?.session;
+      toast({
+        title: 'Account created!',
+        description: awaitsEmail
+          ? 'Check your email to confirm your account.'
+          : 'Nothing was emailed — this stack confirms accounts without email. Log in to continue.',
+      });
       navigate('/login');
     }
   };

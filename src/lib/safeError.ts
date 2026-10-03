@@ -4,10 +4,20 @@
 // first three are written by Postgres and name tables, columns, constraints and
 // policies — accurate descriptions of the database, addressed to whoever happens to be
 // watching, which for a browser app is the visitor's own developer tools and, for a
-// shared link, potentially a guest. So no part of this project puts that prose in front
+// shared link, potentially a guest. So nothing on the data path puts that prose in front
 // of a user: pages show the short phrase their adapter chose, and the only thing this
 // mapper adds is a category and an error code, which are stable identifiers rather than
 // a description of the schema.
+//
+// One surface is outside this file, by decision rather than by oversight: the three auth
+// screens show the message Supabase Auth returns (`Login failed`, `Signup failed`,
+// `Reset failed`). Those sentences are authored by GoTrue for the person signing in —
+// "Invalid login credentials", "Email not confirmed" — and they describe an authentication
+// outcome, not the schema, so replacing them with a fixed phrase would lose the only
+// information that tells a host what they got wrong. §33's independent review found the
+// earlier wording of this comment (`no part of this project`) claimed more than the code
+// did; the claim is now the one the code holds, and the exception is named where a reader
+// would look for it.
 //
 // The code is kept because it is the difference between "this user may not do that" and
 // "the stack was unreachable" — a support question nobody can answer from a fixed

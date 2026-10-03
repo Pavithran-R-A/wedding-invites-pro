@@ -14,7 +14,13 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      // §31 measured this band flush with the top edge at 375x740: the card landed at y=16 and the
+      // brand link, the "Open menu" button and the first form field were all underneath it for the
+      // whole 5144ms the notification lived. 5rem is the same line `index.css` already reserves for
+      // focused content (`scroll-padding-top: 5rem`) and clears the tallest phone header, whose box
+      // measures 65px — `h-16` plus its 1px bottom border. `sm:top-auto` still hands tablets and
+      // desktop the bottom-right anchor unchanged.
+      "fixed top-20 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
       className,
     )}
     {...props}
@@ -70,6 +76,9 @@ const ToastClose = React.forwardRef<
       "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 group-[.destructive]:text-red-300 hover:text-foreground group-[.destructive]:hover:text-red-50 focus:opacity-100 focus:outline-none focus:ring-2 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
       className,
     )}
+    // The only child is a decorative X, so without this the button a keyboard user reaches at the
+    // end of every notification announces nothing at all. §31 found it on the live editor page.
+    aria-label="Dismiss this notification"
     toast-close=""
     {...props}
   >
