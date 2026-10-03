@@ -54,7 +54,13 @@ vi.mock("@/integrations/supabase/weddingContent", () => ({
   removeCeremony: (...a: unknown[]) => api.removeCeremony(...a),
 }));
 
-import ContentEditor from "@/components/invitation/ContentEditor";
+import {
+  CeremonyGroup,
+  ContentNotice,
+  PeopleGroup,
+  VenueGroup,
+  useWeddingContentRows,
+} from "@/components/invitation/ContentEditor";
 
 const okList = <T,>(rows: T[]) => ({ data: rows, error: null });
 const okWrite = (id?: string) => ({ data: id === undefined ? null : { id }, error: null });
@@ -165,9 +171,34 @@ beforeEach(() => {
   });
 });
 
+/** The three groups in the platform's own order, over one copy of the row state.
+ *
+ *  Stage 5 split this file's former subject: `ContentEditor` was one component that owned all
+ *  three lists, and a release whose declaration interleaves prose with lists needs the lists
+ *  apart (§19). The behaviour under test did not change — one hook, three views over it, one
+ *  notice for the wedding — so this file keeps every assertion it had and mounts the pieces the
+ *  way a page does. `authoringOutline.test.tsx` is where the ordered mount is proven. */
+const RowEditor = ({
+  weddingId,
+  onContentChanged,
+}: {
+  weddingId: string;
+  onContentChanged: () => void;
+}) => {
+  const rows = useWeddingContentRows({ weddingId, onContentChanged });
+  return (
+    <>
+      <ContentNotice notice={rows.notice} />
+      <PeopleGroup rows={rows} />
+      <VenueGroup rows={rows} />
+      <CeremonyGroup rows={rows} />
+    </>
+  );
+};
+
 const openEditor = async () => {
   const onContentChanged = vi.fn();
-  const result = render(<ContentEditor weddingId={WEDDING} onContentChanged={onContentChanged} />);
+  const result = render(<RowEditor weddingId={WEDDING} onContentChanged={onContentChanged} />);
   await waitFor(() => expect(screen.getByText("Arun Kumar")).toBeInTheDocument());
   return { ...result, onContentChanged };
 };

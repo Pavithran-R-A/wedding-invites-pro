@@ -313,20 +313,87 @@ describe("explaining what the choice now means", () => {
     expect(screen.queryByText(/It supplies the wording for/)).toBeNull();
   });
 
-  it("warns that a retired release refuses a new freeze, in words a host can act on", async () => {
+  it("names an older release, and what does not change because of it", async () => {
     api.listSelectableTraditionReleases.mockResolvedValue(ok([option()]));
     api.getSelectedTraditionRelease.mockResolvedValueOnce(ok(selection({ retired: true })));
     mount();
 
-    const note = await screen.findByText(/has been retired since you chose it/);
-    expect(note.textContent).toContain("a new freeze from it is refused until you choose again");
+    const note = await screen.findByText(/This invitation uses an older release/);
+    // §21's three guarantees, in the one sentence the publication panel prints too — written once
+    // so the two screens cannot reassure a host in different words.
+    expect(note.textContent).toContain("release 1");
+    expect(note.textContent).toContain("keep showing exactly what they show now");
+    expect(note.textContent).toContain("A new version cannot be frozen from this release");
     // The stored lifecycle word is not a host's word.
     expect(spokenText()).not.toContain("deprecated");
   });
 
+  it("offers the newer release of the same pack as a thing to choose, and chooses nothing by itself", async () => {
+    // The catalogue the adapter answers with holds approved releases only, so a wedding on a
+    // retired release finds its own row absent from the picker: the retired selection is a fact
+    // printed in the Chosen block, never an option offered back to anybody.
+    const newer = option({ id: OTHER_RELEASE, releaseNumber: 2 });
+    api.listSelectableTraditionReleases.mockResolvedValue(ok([newer]));
+    api.getSelectedTraditionRelease.mockResolvedValueOnce(ok(selection({ retired: true })));
+    mount();
+
+    await screen.findByText(/This invitation uses an older release/);
+    const offer = screen.getByText(/Release 2 of Tamil \+ English foundation is available to choose/);
+    // The two halves §21 asks for at once: the newer release is pointed out, and moving onto it is
+    // something the host does rather than something that happens to them.
+    expect(offer.textContent).toContain("Choosing it is what moves this invitation onto it");
+    expect(offer.textContent).toContain("nothing moves by itself");
+    const row = radioOf(/release 2 — newer release of the one you chose/);
+    expect(row).not.toBeChecked();
+    expect(api.selectTraditionRelease).not.toHaveBeenCalled();
+  });
+
+  it("writes the newer release when the host picks it, and asks for the document again", async () => {
+    const newer = option({ id: OTHER_RELEASE, releaseNumber: 2 });
+    api.listSelectableTraditionReleases.mockResolvedValue(ok([newer]));
+    // Read 1 answers the retired R1 the wedding stands on; every read after the write answers R2,
+    // which is what the server would say once the column has moved.
+    api.getSelectedTraditionRelease.mockResolvedValueOnce(ok(selection({ retired: true })));
+    api.getSelectedTraditionRelease.mockResolvedValue(ok(
+      selection({ id: OTHER_RELEASE, releaseNumber: 2 }),
+    ));
+    api.selectTraditionRelease.mockResolvedValue(ok(null));
+    mount();
+
+    await screen.findByText(/This invitation uses an older release/);
+    fireEvent.click(radioOf(/release 2 — newer release of the one you chose/));
+
+    await waitFor(() =>
+      expect(api.selectTraditionRelease).toHaveBeenCalledWith(USER, WEDDING, OTHER_RELEASE),
+    );
+    expect(chosen).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByText(/Chosen: Tamil \+ English foundation, release 2/)).toBeTruthy(),
+    );
+    // The older release's notice is gone because the wedding no longer stands on it — not because
+    // this panel remembered to hide a flag it was never given.
+    expect(screen.queryByText(/This invitation uses an older release/)).toBeNull();
+  });
+
+  it("does not call a newer release of a different pack the newer release of yours", async () => {
+    // Same pack key is the whole test: a higher number belonging to another pack is another pack's
+    // news, and a panel that read the catalogue as one long queue would point a host at wording
+    // they never chose between.
+    const unrelated = option({ id: OTHER_RELEASE, packKey: "another-pack", packDisplayName: "Second pack", releaseNumber: 9 });
+    api.listSelectableTraditionReleases.mockResolvedValue(ok([unrelated, option()]));
+    api.getSelectedTraditionRelease.mockResolvedValueOnce(ok(selection({ retired: true })));
+    mount();
+
+    await screen.findByText(/This invitation uses an older release/);
+    expect(screen.queryByText(/is available to choose/)).toBeNull();
+    expect(spokenText()).not.toContain("newer release of the one you chose");
+  });
+
   it("says when the definition is written against a format this build does not read", async () => {
     api.listSelectableTraditionReleases.mockResolvedValue(ok([option()]));
-    api.getSelectedTraditionRelease.mockResolvedValueOnce(ok(selection({ definitionSchemaVersion: 2 })));
+    // 3, not 2: Stage 5 added version 2 to what this build reads, so the only honest way to
+    // reach the "unreadable format" notice is a version beyond the ones it knows.
+    api.getSelectedTraditionRelease.mockResolvedValueOnce(ok(selection({ definitionSchemaVersion: 3 })));
     mount();
 
     await waitFor(() => expect(

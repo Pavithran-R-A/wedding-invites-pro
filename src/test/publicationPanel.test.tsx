@@ -4,11 +4,25 @@
 // so its wording is the contract: an address shown once, no promise of delivery, and no
 // control that pretends a retired link can come back. These assertions are mostly about
 // text, which is deliberate — a claim here is a product claim to a customer.
+//
+// The freeze button adds one claim of its own, and it is the weaker kind: a button held back
+// because the server's own findings say a version cannot be made. That is a courtesy, so the
+// assertions here are that the reason is given, that it points at the server's list instead of
+// restating it, and that the panel still says the database checks again. Nothing in this file
+// pretends a disabled button is an enforcement.
+//
+// The retired-release case is the same shape with the halves swapped. No finding says it (the
+// refusal is the gate at the version INSERT), so the panel has to carry the words itself — and
+// those words promise two things the rest of the panel's buttons depend on: what is already
+// frozen stays readable, and publishing it is still offered.
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import PublicationPanel from "@/components/invitation/PublicationPanel";
-import type { PublicationState } from "@/integrations/supabase/publication";
+import type {
+  PublicationState,
+  SelectedReleaseSummary,
+} from "@/integrations/supabase/publication";
 
 const LIVE: PublicationState = {
   versionNumber: 2,
@@ -26,6 +40,17 @@ const versions = [
   { id: 'v1', versionNumber: 1, createdAt: '2026-09-18T00:00:00+00:00' },
 ];
 
+/** The release behind the document, retired since. `isCurrent` is the server's `status =
+ *  'approved'` answered as a present-tense fact; the panel is shown the whole summary because
+ *  naming the release is itself something §21 asks a host to be able to inspect. */
+const RETIRED_RELEASE: SelectedReleaseSummary = {
+  packKey: 'test-reviewed-fixture',
+  displayName: 'TEST ONLY — Synthetic Reviewed Fixture',
+  releaseNumber: 1,
+  definitionSchemaVersion: 2,
+  isCurrent: false,
+};
+
 const renderPanel = (props: Partial<React.ComponentProps<typeof PublicationPanel>> = {}) =>
   render(
     <PublicationPanel
@@ -33,6 +58,8 @@ const renderPanel = (props: Partial<React.ComponentProps<typeof PublicationPanel
       state={null}
       versions={versions}
       languageChosen
+      serverBlocking={false}
+      retiredRelease={null}
       busy={false}
       message={null}
       notice={null}
@@ -98,6 +125,30 @@ describe("the publication panel", () => {
     expect(screen.getByText(/Choose the invitation language/)).toBeInTheDocument();
   });
 
+  it("holds the freeze button back while the server has a blocking finding, and names where the finding is", () => {
+    renderPanel({ serverBlocking: true });
+    expect(screen.getByRole('button', { name: /Freeze this draft/ })).toBeDisabled();
+    // A disabled button with no reason reads as a broken page. The reason points at the panel
+    // that carries the server's own words rather than repeating a finding this component does
+    // not know, and it says plainly that the database is the one that decides.
+    expect(
+      screen.getByText(/What the server says stands between this and a version/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/makes the same checks again/)).toBeInTheDocument();
+  });
+
+  it("says nothing about blocking findings when the server has none", () => {
+    const { container } = renderPanel();
+    expect(container.textContent).not.toMatch(/stands between this and a version/);
+    expect(screen.getByRole('button', { name: /Freeze this draft/ })).toBeEnabled();
+  });
+
+  it("gives the language reason ahead of the finding reason, because one is a precondition for the other", () => {
+    renderPanel({ languageChosen: false, serverBlocking: true });
+    expect(screen.getByText(/Choose the invitation language/)).toBeInTheDocument();
+    expect(screen.queryByText(/stands between this and a version/)).toBeNull();
+  });
+
   it("freezes before it publishes, and publishes a version it can name", () => {
     const onPublish = vi.fn();
     renderPanel({ onPublish });
@@ -142,5 +193,58 @@ describe("the publication panel", () => {
       'https://wa.me/?text=http%3A%2F%2Flocalhost%3A5173%2Fi%2Fabcdefghijabcdefghijabcdefghijabcdefghijabcde',
     );
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  });
+});
+
+describe("an invitation standing on a retired release", () => {
+  it("names the older release it uses, and says plainly what does not change", () => {
+    renderPanel({ state: LIVE, retiredRelease: RETIRED_RELEASE });
+    expect(
+      screen.getByText(/This invitation uses an older release of TEST ONLY — Synthetic Reviewed Fixture — release 1/),
+    ).toBeInTheDocument();
+    // §21's own requirement: the promise has to be in the copy, because a host told their pack is
+    // out of date will otherwise read it as "the page my guests are looking at is about to
+    // change". Nothing here changes: the frozen versions and the live link both stay.
+    expect(screen.getByText(/keep showing exactly what they show now/)).toBeInTheDocument();
+    expect(screen.getByText(/A new version cannot be frozen from this release/)).toBeInTheDocument();
+    expect(screen.getByText(/A link is live/)).toBeInTheDocument();
+  });
+
+  it("holds the freeze button back and says the release is why", () => {
+    renderPanel({ retiredRelease: RETIRED_RELEASE });
+    expect(screen.getByRole('button', { name: /Freeze this draft/ })).toBeDisabled();
+    expect(
+      screen.getByText(/Not while your invitation stands on that older release/),
+    ).toBeInTheDocument();
+    // The same non-enforcement the finding reason carries: the button is a courtesy, and the
+    // version gate at the database is the rule.
+    expect(screen.getByText(/freeze call refuses it on the server/)).toBeInTheDocument();
+  });
+
+  it("still publishes a version frozen earlier, because retirement does not reach behind itself", () => {
+    const onPublish = vi.fn();
+    renderPanel({ state: LIVE, retiredRelease: RETIRED_RELEASE, onPublish });
+    const publish = screen.getByRole('button', { name: 'Publish' });
+    expect(publish).toBeEnabled();
+    publish.click();
+    expect(onPublish).toHaveBeenCalledWith('v2');
+    // Re-pointing an existing link at an already frozen version writes no new content from the
+    // retired release, so the panel would be wrong to withhold it — and a host holding a live
+    // link needs the rotation that keeps their guests' address working.
+    expect(screen.getByRole('button', { name: 'New link, same version' })).toBeEnabled();
+    expect(screen.getByRole('option', { name: /Version 1/ })).toBeInTheDocument();
+  });
+
+  it("says no word about an older release when the server answered a current one", () => {
+    const { container } = renderPanel({ state: LIVE });
+    expect(container.textContent).not.toMatch(/older release/);
+    expect(screen.getByRole('button', { name: /Freeze this draft/ })).toBeEnabled();
+  });
+
+  it("keeps the lifecycle vocabulary on the server's side of the wire", () => {
+    const { container } = renderPanel({ state: LIVE, retiredRelease: RETIRED_RELEASE });
+    // `deprecated` is the column's word, and `status_is_current` the JSON key it came from. A
+    // host reading either has been shown a schema rather than an invitation.
+    expect(container.textContent).not.toMatch(/deprecated|status_is_current|release_id|isCurrent/);
   });
 });

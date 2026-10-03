@@ -64,6 +64,10 @@ const releaseRow = (overrides: Partial<ReleaseRow> = {}): ReleaseRow => ({
   review_label: null,
   review_basis: null,
   review_scope: null,
+  // No binding: this fixture is a release reviewed before Stage 5 introduced the digest, which
+  // is a state the catalogue legitimately holds. The adapter never selects the column, so its
+  // value cannot reach a screen either way — the point of the test is the projection, not this.
+  review_packet_hash: null,
   approved_at: "2026-09-27T09:00:00+00:00",
   deprecated_at: null,
   author_label: "Automated draft candidate assembly",

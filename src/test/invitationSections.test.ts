@@ -172,6 +172,55 @@ describe("a document frozen from an approved release", () => {
     ]);
   });
 
+  it("reports a release's declared fallback as the release's wording, in the language actually used", () => {
+    // The fourth provenance case. `private.pack_text_for` reaches English only where the
+    // release permits it, and writes both facts into the row it resolves — group R5 of
+    // `supabase/tests/stage5/70_document_resolution.sql` measures that sentence in SQL. This
+    // measures the client reading it without smoothing it: the wording stays the release's, the
+    // language stays `en`, and the request the substitution answered stays in `requested`. A
+    // normalizer that rewrote the language to the requested one would hand the host's preview a
+    // document whose Tamil line is not Tamil, which is the same dishonesty in miniature that
+    // §12 refuses at the level of who wrote a line.
+    const substituted = parsePublicInvitation(
+      payloadOfWith(guestInvitationPacked(), ['invitation', 'sections', 'items', 1, 'body'], {
+        source: 'reviewed_pack',
+        text: '[placeholder English blessing line from the release]',
+        language: 'en',
+        fallback_used: true,
+        overrode_pack_text: false,
+      }),
+    ) as PublicInvitation;
+    const normalized = normalizeDocument(substituted);
+    const blessing = normalized.sections.find(section => section.key === 'blessing');
+    expect(blessing?.content).toBe('[placeholder English blessing line from the release]');
+    expect(blessing?.provenance).toEqual({ source: 'reviewed_pack', language: 'en', fallbackUsed: true });
+    expect(normalized.requested).toBe('ta');
+    // A permitted substitution is not a defect, so it is drawn without an issue beside it.
+    expect(normalized.issues).toEqual([]);
+  });
+
+  it("will not hand a host's line the release's credit, whatever the payload offers it", () => {
+    // The third provenance case, taken as far as it can go. A host body carrying a `language`
+    // and `fallback_used: true` is not a document the projection writes — the platform does not
+    // know what language a person typed in — so this is the shape that would tempt a reader
+    // into reporting the line as reviewed. The arms below are chosen by the source word alone,
+    // so a field cannot buy credit: the host's arm has nowhere to put a language, and the words
+    // `reviewed_pack` and `en` appear nowhere in what this section normalizes to.
+    const odd = parsePublicInvitation(
+      payloadOfWith(guestInvitationPacked(), ['invitation', 'sections', 'items', 0, 'body'], {
+        source: 'host',
+        text: 'With the blessings of our elders',
+        language: 'en',
+        fallback_used: true,
+        overrode_pack_text: true,
+      }),
+    ) as PublicInvitation;
+    const welcome = normalizeDocument(odd).sections.find(section => section.key === 'welcome');
+    expect(welcome?.provenance).toEqual({ source: 'host', hostField: 'welcome', overrodePackText: true });
+    expect(JSON.stringify(welcome?.provenance)).not.toContain('reviewed_pack');
+    expect(JSON.stringify(welcome?.provenance)).not.toContain('en');
+  });
+
   it("says nothing about a section the release left without wording", () => {
     const cleared = parsePublicInvitation(
       payloadOfWith(guestInvitationPacked(), ['invitation', 'sections', 'items', 1, 'body'], null),
@@ -199,6 +248,47 @@ describe("a section this build cannot draw", () => {
     // The message carries the word that caused it, so a content author is not hunting for a
     // spelling mistake in a definition that says nothing about it.
     expect(normalized.issues[0]?.message).toContain('deity_list');
+  });
+
+  it("skips an unknown kind on an optional section and names it, exactly as it does a required one", () => {
+    // The case §22 asks for by name: an *optional* section carrying a kind this build has no
+    // drawing rule for. It is handled by the same two lines as the required case above, and
+    // that is the right answer rather than an oversight — "the release did not require this
+    // paragraph" is not the same fact as "this build can draw it", and a normalizer that
+    // quietly kept only the required failures would drop the one word a content author needs.
+    // Upstream, the same section is a blocking record whatever its `required` flag says
+    // (`kind_unrenderable` in `private.invitation_issue_records`, group I8 of the Stage 5
+    // battery), so nothing new can be frozen on it; a page already published is what this
+    // layer is for.
+    const optional = parsePublicInvitation(
+      payloadOfWith(guestInvitationPacked(), ['invitation', 'sections', 'items', 5], {
+        section_key: 'event_notes',
+        position: 6,
+        kind: 'venue_list',
+        required: false,
+        host_field: 'event_notes',
+        heading: null,
+        body: {
+          source: 'host',
+          text: 'Lunch follows the ceremony.',
+          language: null,
+          fallback_used: null,
+          overrode_pack_text: false,
+        },
+      }),
+    ) as PublicInvitation;
+    expect(optional.sections?.items[5]?.required).toBe(false);
+    const normalized = normalizeDocument(optional);
+    expect(normalized.sections.map(section => section.key)).toEqual([
+      'welcome', 'blessing', 'family', 'ceremonies', 'closing',
+    ]);
+    expect(normalized.issues).toEqual([
+      expect.objectContaining({
+        code: 'render.unknown_kind_skipped',
+        path: 'sections.items[5]',
+        message: expect.stringContaining('venue_list'),
+      }),
+    ]);
   });
 
   it("skips a section whose kind the projection never wrote at all", () => {

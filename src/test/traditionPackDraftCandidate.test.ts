@@ -24,7 +24,11 @@ import { isAbsolute, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseTraditionPackDefinition } from "@/lib/traditionPackDefinition";
 import { resolveTraditionPack } from "@/lib/traditionPackResolver";
-import { PACK_HOST_FIELDS, PACK_SECTION_KEYS, TRADITION_PACK_DEFINITION_SCHEMA_VERSION } from "@/lib/traditionPackContract";
+import {
+  PACK_HOST_FIELDS,
+  PACK_SECTION_KEYS,
+  TRADITION_PACK_DEFINITION_SCHEMA_VERSIONS,
+} from "@/lib/traditionPackContract";
 
 // Resolved from the working directory rather than `import.meta.url`: under this project's jsdom
 // test environment a `file:` base handed to `new URL` comes back as an `http://localhost` URL,
@@ -169,7 +173,10 @@ describe("the envelope is what the database would accept", () => {
     expect(artifact.scope_statement.trim().length).toBeLessThanOrEqual(2000);
     expect(artifact.release_number).toBeGreaterThan(0);
     expect(["draft", "reviewed", "approved", "deprecated"]).toContain(artifact.status);
-    expect(artifact.definition_schema_version).toBe(TRADITION_PACK_DEFINITION_SCHEMA_VERSION);
+    // A membership test, not an equality with the version this build authors: the candidate was
+    // assembled under Stage 4 and claims version 1, and it stays a version-1 artefact until
+    // somebody re-authors it. What has to be true is that this build can read what it claims.
+    expect(TRADITION_PACK_DEFINITION_SCHEMA_VERSIONS).toContain(artifact.definition_schema_version);
     expect(artifact.definition_schema_version).toBeGreaterThan(0);
     expect(artifact.author_label.trim().length).toBeGreaterThanOrEqual(3);
     expect(artifact.author_label.trim().length).toBeLessThanOrEqual(300);

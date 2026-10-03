@@ -129,12 +129,23 @@ describe("a valid definition parses", () => {
 
 describe("the rules the definition itself is under", () => {
   it("refuses a schema version this build does not understand, before looking at the document", () => {
-    const issue = findIssue(validDefinition(), "definition.schema_version", { schemaVersion: 2 });
+    // 3, not 2: Stage 5 taught this build to read version 2, so the unreadable version has to
+    // move with it or the test would be asserting that a supported contract is refused.
+    const issue = findIssue(validDefinition(), "definition.schema_version", { schemaVersion: 3 });
     expect(issue).toBeDefined();
     expect(issue?.path).toBe("definition_schema_version");
-    expect(issue?.message).toContain("2");
+    expect(issue?.message).toContain("3");
     // A version this build cannot read must not be half-validated into a longer list.
-    expect(parse(validDefinition(), { schemaVersion: 2 }).issues).toHaveLength(1);
+    expect(parse(validDefinition(), { schemaVersion: 3 }).issues).toHaveLength(1);
+  });
+
+  it("reads a version-2 definition, and still reads a version-1 one", () => {
+    // Both halves, because the compatibility claim Stage 5 makes is that the old releases keep
+    // meaning what they meant: a build that understood only 2 would invalidate every invitation
+    // its own database already serves.
+    for (const schemaVersion of [1, 2]) {
+      expect(parse(validDefinition(), { schemaVersion }).issues).toEqual([]);
+    }
   });
 
   it("refuses a definition that is not an object", () => {

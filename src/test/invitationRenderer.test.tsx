@@ -27,6 +27,7 @@ import {
   guestInvitation,
   guestInvitationPacked,
   guestPayload,
+  legacyGuestPayload,
   packedGuestPayload,
   payloadOfWith,
   payloadWith,
@@ -444,6 +445,140 @@ describe("the invitation renderer", () => {
     const html = container.innerHTML.toLowerCase();
     for (const leaked of ['wedding_id', 'version_id', 'publication_id', 'token', 'uuid', 'digest']) {
       expect(html).not.toContain(leaked);
+    }
+  });
+});
+
+describe("what a guest's page is not required to notice", () => {
+  /** A release's English line reaching a Tamil wedding, in exactly the shape
+   *  `private.pack_text_for` writes when the release permits the substitution — group R5 of
+   *  `supabase/tests/stage5/70_document_resolution.sql` measures that row in SQL. */
+  const FALLBACK_BODY = {
+    source: 'reviewed_pack',
+    text: '[placeholder English blessing line from the release]',
+    language: 'en',
+    fallback_used: true,
+    overrode_pack_text: false,
+  };
+
+  const packedWith = (path: Array<string | number>, value: unknown): PublicInvitation => {
+    const invitation = parsePublicInvitation(payloadOfWith(guestInvitationPacked(), path, value));
+    if (invitation === null) throw new Error('the document under test no longer parses');
+    return invitation;
+  };
+
+  it("draws a release's English fallback with the page still in the wedding's own language", () => {
+    // The `lang` attribute is the half only a renderer owns. It is what a screen reader
+    // pronounces with and what a browser offers to translate, and one substituted line out of
+    // six is not a reason to announce somebody's Tamil invitation as English. The request is
+    // kept intact by the projection (`sections.requested`) and by the parser
+    // (`language.primary`); nothing in between is allowed to reconcile them.
+    const invitation = packedWith(['invitation', 'sections', 'items', 1, 'body'], FALLBACK_BODY);
+    expect(invitation.language.primary).toBe('ta');
+    expect(invitation.sections?.requested).toBe('ta');
+    const { container } = render(<InvitationRenderer invitation={invitation} />);
+    expect((container.querySelector('article') as HTMLElement).getAttribute('lang')).toBe('ta');
+    // The substituted line is still drawn — the release permitted it, and a guest who cannot
+    // read it was never going to be told about the permission anyway.
+    expect(container.textContent).toContain('[placeholder English blessing line from the release]');
+    // And the substitution stays a fact about the document rather than becoming a caption on
+    // it: no language word, no flag, no provenance key reaches the page.
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('fallback');
+    expect(text).not.toContain('reviewed_pack');
+    expect(container.innerHTML).not.toContain('lang="en"');
+  });
+
+  it("draws one identical page whatever the document names the release and template behind it", () => {
+    // "Keep the renderer pack-agnostic" is a comment until it is measured. So: one document,
+    // four identities for it. `traditionPack` and `designTemplate` are read by this component
+    // for nothing at all, so a renamed pack, a different release number, a different template —
+    // and the pack block's absence, which is what a no-pack wedding really publishes — must all
+    // produce the same article, character for character. A renderer with a per-pack branch in it
+    // would fail here as a diff rather than in a browser as a wrong layout.
+    const baseline = render(<InvitationRenderer invitation={parsedPacked()} />);
+    const variants: Array<[string, Array<string | number>, unknown]> = [
+      ['another release of another pack', ['invitation', 'tradition_pack'], {
+        display_name: 'A wholly different named thing',
+        pack_key: 'z-other-pack-key',
+        release_number: 99,
+      }],
+      ['no pack block at all', ['invitation', 'tradition_pack'], null],
+      ['another template at another revision', ['invitation', 'design_template'], {
+        display_name: 'Plain paper',
+        template_key: 'plain-paper',
+        revision: 7,
+      }],
+    ];
+    for (const [label, path, value] of variants) {
+      const page = render(<InvitationRenderer invitation={packedWith(path, value)} />);
+      expect(page.container.innerHTML, `the page changed shape over ${label}`).toBe(baseline.container.innerHTML);
+    }
+  });
+
+  it("keeps the rest of the page, and its language, when an optional section carries an unknown kind", () => {
+    // The optional half of the forward-compatibility case: the required half is measured above,
+    // where a section the release *did* require is skipped and the page goes on. An optional one
+    // is the same event for a guest — one paragraph they were not promised is missing — and this
+    // build's whole answer is that the invitation still arrives. What the section is called
+    // never reaches the paper, and `render.unknown_kind_skipped` is recorded upstream in
+    // `normalizeInvitationSections` for the host's preview to name.
+    const invitation = packedWith(['invitation', 'sections', 'items', 5, 'kind'], 'venue_list');
+    const { container } = render(<InvitationRenderer invitation={invitation} />);
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Lunch follows the ceremony.');
+    expect(text).not.toContain('venue_list');
+    expect(text).toContain('[placeholder blessing line from the release]');
+    expect(text).toContain('Family of the groom');
+    expect(text).toContain('14 November 2026');
+    expect((container.querySelector('article') as HTMLElement).getAttribute('lang')).toBe('ta');
+  });
+
+  it("renders a Stage 3 document and a Stage 4 document from one code path", () => {
+    // The two historical shapes, from their real fixtures rather than from a hand-removal: the
+    // Stage 3 document has four flat prose slots, no section list, and a pack block pinned to a
+    // `revision` because a release number had not been invented; the Stage 4 document carries a
+    // resolved section list and a `release_number`. Neither is up-converted, and no migration
+    // rewrites a stored snapshot to make them agree — the only writes to `invitation_versions`
+    // in `supabase/migrations/` are INSERTs. What carries a legacy page is this path: the parser
+    // reads whichever keys are present, `normalizeInvitationSections` hands the renderer one
+    // ordered list either way, and the renderer draws that list without asking what produced it.
+    //
+    // What this does *not* say: `private.public_invitation_dto` refuses a stored snapshot whose
+    // section list is missing — C11c of `supabase/tests/stage4/50_pack_release.sql` measures exactly
+    // these bytes returning NULL — so on a database that has applied Stage 4, a link pinned to a
+    // pre-Stage-4 version reaches the guest page's "unavailable" state rather than this code path.
+    // The promise this test keeps is the narrower one that still matters: a v1 *payload* in hand
+    // renders, which is what an already-loaded page and an older bundle both depend on. Audit §20.4
+    // holds the whole of that boundary.
+    const legacy = parsePublicInvitation(legacyGuestPayload());
+    expect(legacy).not.toBeNull();
+    expect(legacy?.sections).toBeNull();
+    const stage3 = render(<InvitationRenderer invitation={legacy as PublicInvitation} />);
+    const stage4 = render(<InvitationRenderer invitation={parsedPacked()} />);
+
+    const legacyText = stage3.container.textContent ?? '';
+    for (const line of [
+      'Arun weds Deepa',
+      'With the blessings of our elders',
+      'Our families invite you',
+      'Arun Kumar',
+      '14 November 2026',
+    ]) {
+      expect(legacyText, `the Stage 3 page is missing ${line}`).toContain(line);
+    }
+
+    for (const [label, page] of [['Stage 3', stage3], ['Stage 4', stage4]] as const) {
+      const article = page.container.querySelector('article') as HTMLElement;
+      expect(article.getAttribute('lang'), `${label} lost the wedding's language`).toBe('ta');
+      expect(page.container.querySelector('h1')?.textContent).toBe('Arun weds Deepa');
+      expect(page.container.querySelectorAll('ul li').length).toBeGreaterThan(0);
+      expect(page.container.querySelector('time')?.getAttribute('datetime')).toBe('2026-11-14T07:30:00');
+      // Which era a document came from is not printed, in either direction.
+      expect(page.container.textContent).not.toContain('Tamil wedding patrika');
+      expect(page.container.textContent).not.toContain('tamil-generic');
+      expect(page.container.textContent).not.toContain('TEST ONLY');
+      expect(page.container.textContent).not.toContain('test-reviewed-fixture');
     }
   });
 });
