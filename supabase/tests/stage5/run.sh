@@ -22,11 +22,12 @@
 #      or its order drifted, they fail. Four of them measure a *shape* Stage 5 intentionally
 #      grew (the closed-walk name list, the two "this version is unknown to this build"
 #      literals, and the function-inventory group), and those four are head-aware rather than
-#      rewritten — see `pg_temp.s5_head()` in `50_pack_release.sql`. An expectation that only
+#      rewritten — see `pg_temp.s4_head()` in `supabase/tests/stage4/50_pack_release.sql`, which
+#      this runner sets to `stage5` through `PGOPTIONS` below. An expectation that only
 #      holds at one head would have to be duplicated; an expectation that names which head it
 #      is measuring is a stronger claim, and it is the one this runner relies on.
-#   2. Do Stage 5's own guarantees hold? That is `70_issue_engine.sql`, `80_review_hash.sql`,
-#      `90_maintenance_surface.sql` and the rest of `supabase/tests/stage5/`.
+#   2. Do Stage 5's own guarantees hold? That is `50_review_binding.sql`,
+#      `60_definition_vocabulary.sql` and `70_document_resolution.sql`.
 #
 # The execution modes are inherited from Stage 4's runner and are not a detail: the document
 # battery commits, because its fixtures are rows an approved release can never be deleted from;
