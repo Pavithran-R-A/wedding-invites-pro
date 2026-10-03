@@ -613,10 +613,24 @@ describe('§17 CATALOGUE', () => {
                                where routine_schema = 'api' order by 1`).join(',');
     assert.deepEqual(exposed.split(','), [
       'create_invitation_version', 'get_invitation_publication_state', 'preview_invitation',
+      'preview_invitation_document',
       'publish_invitation_version', 'resolve_public_invitation', 'revoke_invitation_publication',
       'rotate_invitation_token',
     ], 'the callable surface changed shape; the pack design has no RPC of its own, and adding one '
       + 'without a ruling is exactly what this list is for');
+    // Stage 5 added the eighth name, and there is a ruling: `preview_invitation_document` is the
+    // document-plus-verdict read that §3.5 of
+    // `docs/audits/stage-5-pack-driven-authoring-review.md` recorded before it was built, and the
+    // reason it had to be an RPC at all is that a preview composed from two client calls can
+    // straddle a save. It carries no pack wording beyond what `preview_invitation` already
+    // returned — the release block is one narrow summary object, asserted in
+    // `supabase/tests/stage5/70_document_resolution.sql` group P, at `:1037` and `:1085`.
+    const maintenanceSchema = sqlRows(`select coalesce(string_agg(distinct n.nspname, ',' order by n.nspname), '(none)')
+                                         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                                        where p.proname like '%tradition_pack%'`);
+    assert.deepEqual(maintenanceSchema, ['internal_api,private'],
+      'a tradition-pack function appeared in a schema other than the maintenance surface and the '
+      + 'guard helpers, which is where a browser-exposed door would start');
 
     for (const name of ['resolve_public_invitation']) {
       assert.ok(!/pack|tradition/i.test(name));

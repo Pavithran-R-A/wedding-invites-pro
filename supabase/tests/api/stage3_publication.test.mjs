@@ -1028,7 +1028,32 @@ describe('§6.6 the callable catalogue is closed', () => {
     ['resolve_public_invitation', { args: '', grantees: ['anon', 'authenticated'] }],
     ['revoke_invitation_publication', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
     ['rotate_invitation_token', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    // Stage 5's one new door. Paired like the rest: an SQL wrapper in `api` that a browser may
+    // call, over a SECURITY DEFINER body in `internal_api` that it may not. The parity claim it
+    // exists for — the document and the server's verdict on it arrive from one resolution — is
+    // qualified over PostgREST in `stage5_pack_driven_http.test.mjs`, and at the SQL head in
+    // `supabase/tests/stage5/70_document_resolution.sql`; what this map proves is posture.
+    ['preview_invitation_document', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
   ]);
+
+  // The maintenance surface Stage 5 added, named here rather than left to be discovered: the
+  // assertion below is that all eleven exist in `internal_api`, none of them has a wrapper in
+  // `api`, and none of them is granted to any role but the owner. That is §B's rule stated as
+  // an inventory, and an inventory is the only form in which "a twelfth privileged function
+  // appeared" becomes a failure rather than a surprise.
+  const MAINTENANCE_ONLY = [
+    'approve_tradition_pack_release',
+    'create_tradition_pack',
+    'create_tradition_pack_release',
+    'deprecate_tradition_pack_release',
+    'get_tradition_pack_review_packet',
+    'inspect_tradition_pack_release',
+    'submit_tradition_pack_review',
+    'tradition_pack_catalog',
+    'tradition_pack_retention_report',
+    'update_draft_tradition_pack_release',
+    'validate_tradition_pack_release',
+  ].sort();
 
   // The two halves of the boundary and what each is allowed to be. `definer` and
   // `language` are opposite by design: an exposed body that could act above its caller
@@ -1067,16 +1092,22 @@ describe('§6.6 the callable catalogue is closed', () => {
     });
   };
 
-  test('API33 both RPC schemas hold exactly the seven intended functions, in the posture each is meant to have', () => {
+  test('API33 both RPC schemas hold exactly the intended functions, in the posture each is meant to have', () => {
     const surfaces = SURFACES.map(({ schema }) => ({ schema, rows: readSurface(schema) }));
 
     for (const { schema, rows } of surfaces) {
-      const extra = rows.filter(row => !INTENDED.has(row.name));
+      // `internal_api` is allowed the maintenance names and nothing else; `api` is allowed the
+      // paired wrappers and nothing else. Separating the two is what keeps a *new* privileged
+      // function from passing by having been added to the wrong list.
+      const intended = schema === 'internal_api'
+        ? new Set([...INTENDED.keys(), ...MAINTENANCE_ONLY])
+        : INTENDED;
+      const extra = rows.filter(row => !intended.has(row.name));
       assert.deepEqual(extra.map(row => row.name), [],
         `unexpected callable in ${schema}: ${extra.map(r => `${r.name}(${r.args})`).join(', ')}`);
-      const missing = [...INTENDED.keys()].filter(k => !rows.some(r => r.name === k));
+      const missing = [...intended.keys()].filter(k => !rows.some(r => r.name === k));
       assert.deepEqual(missing, [], `intended callable missing from ${schema}: ${missing.join(', ')}`);
-      assert.equal(rows.length, INTENDED.size, `${schema} does not hold exactly ${INTENDED.size} functions`);
+      assert.equal(rows.length, intended.size, `${schema} does not hold exactly ${intended.size} functions`);
     }
 
     // Paired by name, so a body without a wrapper and a wrapper without a body cannot
@@ -1094,7 +1125,10 @@ describe('§6.6 the callable catalogue is closed', () => {
     for (const { schema, rows } of SURFACES) {
       const wanted = { definer: schema === 'internal_api' ? 'true' : 'false', language: schema === 'internal_api' ? 'plpgsql' : 'sql' };
       for (const row of readSurface(schema)) {
+        // Only the paired surface is checked here: a maintenance function is deliberately not a
+        // wrapper, so its own posture is asserted in API35 rather than bent to fit this loop.
         const intent = INTENDED.get(row.name);
+        if (!intent) continue;
         // PostgREST resolves by signature, so a changed argument type is a different door
         // even under the same name.
         assert.equal(row.args, intent.args, `${schema}.${row.name} has a different signature than audited`);
@@ -1113,6 +1147,78 @@ describe('§6.6 the callable catalogue is closed', () => {
           `${schema}.${row.name} is granted to ${row.grantees.join(', ') || 'nobody'}`);
         assert.ok(!row.grantees.includes('PUBLIC'), `${schema}.${row.name} carries a PUBLIC grant`);
       }
+    }
+  });
+
+  test('API35 the Stage 5 maintenance surface exists, has no wrapper, and is unreachable over HTTP', async () => {
+    // §B's rule as an inventory: privileged functions live in `internal_api`, none of them has a
+    // twin in the exposed `api` schema, none of them is SECURITY DEFINER (every step one of them
+    // takes is one the calling identity could already perform on the row), and none of them is
+    // granted to any role but the owner — not to `anon`, not to `authenticated`, and not to
+    // `service_role` either, because the product never needs to approve a pack.
+    const internal = readSurface('internal_api');
+    const exposed = readSurface('api');
+    const missing = MAINTENANCE_ONLY.filter(n => !internal.some(r => r.name === n));
+    assert.deepEqual(missing, [], `maintenance functions missing from internal_api: ${missing.join(', ')}`);
+
+    for (const row of internal.filter(r => MAINTENANCE_ONLY.includes(r.name))) {
+      assert.equal(row.securer, 'false',
+        `${row.name} is SECURITY DEFINER; the maintenance surface was built to need no escalation`);
+      assert.equal(row.language, 'plpgsql', `${row.name} is written in ${row.language}`);
+      assert.ok(row.config.includes('search_path=""'),
+        `${row.name} does not pin its search_path: '${row.config}'`);
+      assert.equal(row.owner, 'postgres', `${row.name} is owned by ${row.owner}`);
+      assert.deepEqual(row.grantees, [],
+        `${row.name} is granted to ${row.grantees.join(', ')}; a browser role must not be able to execute it`);
+      assert.ok(!exposed.some(r => r.name === row.name),
+        `${row.name} has a wrapper in api, which would put a maintenance act behind an HTTP door`);
+    }
+
+    // The same facts as a client experiences them. The catalogue loop above proves what was
+    // granted; this proves the transport cannot route around it — the distinction Stage 2's
+    // C63c had to learn, because `internal_api` holds schema USAGE for the browser roles so that
+    // nested execution works, and a forgotten revoke there would be SQL-callable even though no
+    // HTTP request can name the schema.
+    //
+    // Measured on this stack, the refusal is PGRST202 / 404 rather than 401 or 403: PostgREST
+    // resolves the name inside the exposed profile before it reaches any privilege check, and
+    // `tradition_pack_catalog` is not in `api` to resolve. That is a stronger answer than a
+    // permission error, and it is the same answer for every credential shape below — including
+    // the server key, which is the role that holds the most elsewhere — so the endpoint is not a
+    // way to learn whether a maintenance function exists.
+    const byName = {};
+    for (const [label, key] of [
+      ['apikey only', anonKey],
+      ['as a bearer token', anonKey],
+      ['the server key', serviceKey],
+    ]) {
+      for (const [target, name] of [
+        ['/rest/v1/rpc/tradition_pack_catalog', 'unqualified'],
+        ['/rest/v1/rpc/internal_api.tradition_pack_catalog', 'schema-qualified'],
+      ]) {
+        const res = await fetch(`${url}${target}`, {
+          method: 'POST',
+          headers: {
+            apikey: key, Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json', 'Content-Profile': 'api',
+          },
+          body: '{}',
+        });
+        const body = await res.json().catch(() => ({}));
+        assert.equal(res.status, 404,
+          `${label} / ${name}: a maintenance call was routed rather than refused (${res.status} ${JSON.stringify(body)})`);
+        assert.equal(body.code, 'PGRST202',
+          `${label} / ${name}: refused with ${body.code}, not the catalogue-miss code: ${JSON.stringify(body)}`);
+        (byName[name] ??= []).push(JSON.stringify(body));
+      }
+    }
+    // One value, byte for byte, whatever the caller presented — per requested name, since the two
+    // names are different questions and their miss messages say which they were asked. A refusal
+    // that varied by credential would be an oracle into whether the function exists.
+    for (const [name, bodies] of Object.entries(byName)) {
+      assert.equal(bodies.length, 3, `${name}: fewer credential shapes probed than this test lists`);
+      assert.ok(bodies.every((b) => b === bodies[0]),
+        `the ${name} refusal differs by credential: ${new Set(bodies).size} distinct bodies`);
     }
   });
 
