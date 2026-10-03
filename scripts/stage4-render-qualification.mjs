@@ -711,6 +711,12 @@ async function openBrowser() {
   let nextId = 1;
   const pending = new Map();
   const listeners = new Map();
+  // This harness's own worst failure mode was silent: a `Runtime.evaluate` that never answered
+  // reported nothing about which shape, which call, or whether the renderer was still alive, so a
+  // hang cost a full re-run to learn nothing. Every send now carries a label, and the timeout
+  // reports what the browser itself said about the target.
+  let label = 'startup';
+  const death = { crashed: null, dialog: null };
   ws.addEventListener('message', (event) => {
     const msg = JSON.parse(event.data);
     if (msg.id !== undefined) {
@@ -726,7 +732,14 @@ async function openBrowser() {
     const id = nextId++;
     pending.set(id, { resolve: (msg) => (msg.error ? err(new Error(`${method}: ${msg.error.message}`)) : ok(msg.result)) });
     ws.send(JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params }));
-    setTimeout(() => { if (pending.has(id)) { pending.delete(id); err(new Error(`${method} timed out`)); } }, 60_000);
+    setTimeout(() => {
+      if (pending.has(id)) {
+        pending.delete(id);
+        err(new Error(`${method} timed out [${label}] websocket=${ws.readyState} `
+          + `renderer=${death.crashed ?? 'reported-no-crash'} `
+          + `dialog=${JSON.stringify(death.dialog).slice(0, 200)}`));
+      }
+    }, 60_000);
   });
   const on = (method, fn) => {
     if (!listeners.has(method)) listeners.set(method, []);
@@ -739,7 +752,23 @@ async function openBrowser() {
   const session = attached.sessionId;
   const s = (method, params) => send(method, params, session);
 
+  // Two ways a page stops answering without the harness learning anything: the renderer dies, and
+  // the page opens a modal dialog, which blocks the main thread until somebody presses a button.
+  // Both are recorded, the dialog is dismissed so the run can keep going and name what it saw, and
+  // a dialog is a product finding rather than an infrastructure mystery — nothing on a guest page
+  // is allowed to ask a guest for one.
+  on('Inspector.targetCrashed', (p) => { death.crashed = p.reason ?? 'crashed'; });
+  on('Page.javascriptDialogOpening', (p) => {
+    death.dialog = p;
+    send('Page.handleJavaScriptDialog', { accept: false }, session).catch(() => { /* already gone */ });
+  });
+  await send('Page.enable', {}, session);
+  await send('Runtime.enable', {}, session);
+  await send('Inspector.enable', {}, session);
+
   return {
+    mark(text) { label = text; return text; },
+    dialogSeen() { return death.dialog; },
     async close() {
       try { await send('Target.closeTarget', { targetId: target.targetId }); } catch { /* already gone */ }
       ws.close();
@@ -912,6 +941,7 @@ async function matrix(browser, docs) {
     const doc = docs[shape.name];
     if (!doc) throw new Error(`no document was built for shape ${shape.name}`);
     for (const v of VIEWPORTS) {
+      browser.mark(`${shape.name} @ ${v.width}x${v.height}`);
       await browser.viewport(v);
       await browser.goto(`${PREVIEW_ORIGIN}/i/${doc.token}`);
       const ready = await browser.waitFor('article');
