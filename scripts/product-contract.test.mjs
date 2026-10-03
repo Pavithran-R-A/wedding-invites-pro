@@ -38,10 +38,14 @@ describe("product contract checker", () => {
         `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
         `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
         `wedding.tradition_pack_release_id = suggestRelease(host.community);`,
+        `const option = suggestTraditionPack(weddingDetail);`,
         `if (person.surname.startsWith("Reddi")) assumeVocabulary();`,
+        `if (wedding.city === "Madurai") packKey = "tamil-english-foundation";`,
         `if (language === "ta") body = "The priest will confirm the auspicious time";`,
         `<p>An authentic Tamil tradition for your invitation.</p>`,
         `{ "human_reviewed": true, "customer_selectable": true }`,
+        `copy = "the Tamil candidate is approved for customer use",`,
+        `copy = "The AI-generated ceremonial wording is human-reviewed",`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());
@@ -109,6 +113,14 @@ describe("product contract checker", () => {
       `title: "Telugu Ceremonial",`,
       `<p>Tradition packs are optional. You can create an invitation without one.</p>`,
       `const isRetired = release.status === "deprecated";`,
+      `? { source: 'reviewed_pack', packKey: source.packKey, releaseNumber: source.releaseNumber, language: lang as string, fallbackUsed },`,
+      `const { packKey, releaseNumber } = selectedRelease;`,
+      `await selectTraditionRelease(user.id, wedding.id, option.id);`,
+      `// if language === "ta" that never selects a pack_key; the host's own click does.`,
+      `if (venue.city.trim() === "") toast("A city is required for the venue");`,
+      `const region = layout.regions.find((entry) => entry.id === section.region);`,
+      `copy = "the Tamil candidate is not approved, is not reviewed, and is not selectable by hosts";`,
+      `copy = "no machine-assisted wording here has been reviewed by a reader of Tamil";`,
     ].join("\n");
     expect(scanContent("src/components/invitation/InvitationRenderer.tsx", honest)).toEqual([]);
 
@@ -116,6 +128,32 @@ describe("product contract checker", () => {
     expect(
       scanContent("src/components/invitation/InvitationRenderer.tsx", branch).map((v) => v.rule),
     ).toEqual(["tradition-pack-identity-branch"]);
+
+    // Each of §24's five identity vocabulary classes, in the shape a real derivation takes.
+    const byRule = {
+      "tradition-selected-from-identity": `if (wedding.primary_language === "ta") releaseId = tamilRelease;`,
+      "pack-selection-derived-by-name": `selectTraditionRelease(user.id, wedding.id, releaseIdFor(host.religion));`,
+      "identity-tested-by-name-shape": `if (person.ethnicity === "Tamil-Brahmin") showVedicSection();`,
+      "place-tested-for-a-tradition": `if (profile.region === "Tamil Nadu") releaseId = TAMIL_RELEASE_ID;`,
+      "tamil-candidate-status-claim": `copy = "the Tamil candidate is approved for customer use",`,
+      "machine-assisted-claimed-approved": `copy = "The AI-generated ceremonial wording is human-reviewed",`,
+    };
+    for (const [ruleId, line] of Object.entries(byRule)) {
+      expect(scanContent("src/pages/Editor.tsx", line).map((v) => v.rule), line).toContain(ruleId);
+    }
+    // And the lines that are not derivations: inside a release the host already picked, a
+    // language is only a lookup key and a fallback comparison. These are the four measured
+    // shapes from `traditionPackResolver.ts` where a language value and a pack identifier sit
+    // close enough to look like one to a vocabulary-only rule.
+    const languageIsNotASelector = [
+      `const readFromMap = (map: Record<string, unknown> | null, language: string): string | null =>`,
+      `  map === null ? null : nonBlank(map[language])`,
+      `    const candidates = candidateLanguages(section, input.requestedLanguage, source.languages)`,
+      `    const fallbackUsed = lang !== null && lang !== input.requestedLanguage`,
+    ];
+    for (const line of languageIsNotASelector) {
+      expect(scanContent("src/lib/traditionPackResolver.ts", line).map((v) => v.rule), line).toEqual([]);
+    }
 
     // The same sentence, in a governance document, is out of scope by construction — which is
     // why the rule cannot be quietly widened to `docs/` later without this assertion moving.

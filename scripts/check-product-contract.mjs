@@ -216,14 +216,38 @@ export const RULES = [
   },
   {
     id: "tradition-selected-from-identity",
-    // An identity or language column named on the same statement as the pack selection —
-    // the shape a "suggest a pack from the couple's details" feature arrives in. Proximity
-    // rather than data flow, because data flow is what the tests in
-    // `src/test/traditionReleases.test.ts` prove absent column by column; this rule is the
-    // tripwire that keeps someone from writing it back in.
-    pattern: /\b(?:religion|caste|community|surname|gotra|family_name|mother_tongue|primary_language|additional_languages)\b[^\n]{0,60}\b(?:tradition_pack_release_id|traditionReleaseId|selectedReleaseId|releaseOptionId|packKey)\b|\b(?:tradition_pack_release_id|traditionReleaseId|selectedReleaseId|releaseOptionId|packKey)\b[^\n]{0,60}\b(?:religion|caste|community|surname|gotra|family_name|mother_tongue|primary_language|additional_languages)\b/gi,
-    message: "connects an identity, name or language field to a tradition pack selection",
-    fix: "a pack is chosen by the host and by nothing else; see docs/product/content-governance.md rule 3 (no inference) and §19 of the Stage 4 directive",
+    // An identity, name, place or language value feeding a pack selection — the shape a
+    // "suggest a pack from the couple's details" feature arrives in. Two things make this a
+    // rule about logic rather than about vocabulary:
+    //
+    //   * It needs a *selection* token on the line. A disclaimer that says "nothing here asks
+    //     about religion, caste or community" names no selection, so it stays writable in the
+    //     source tree; the day a line carries both, the sentence is no longer a disclaimer.
+    //   * The identity word must not be in object-key position (`(?! *:)`), because the honest
+    //     case is a *projection*: `src/lib/traditionPackResolver.ts:273` builds
+    //     `{ source: 'reviewed_pack', packKey: source.packKey, language: lang as string,
+    //     fallbackUsed }`, which is directive §24's permitted half — a language choosing which
+    //     wording a *already host-selected* release draws. Reading `language` there as a
+    //     selection input would forbid the fallback feature.
+    //
+    // Proximity rather than data flow, because data flow is what
+    // `src/test/culturalSafetyDecisionLogic.test.tsx` proves absent profile by profile; this rule
+    // is the tripwire that keeps someone from writing it back in.
+    pattern: /^(?=.*(?:=|&&|\|\||\bif\b|\bswitch\b|\bcase\b|=>|\.includes\(|\.startsWith\(|\.endsWith\())(?=.*\b(?:religion|caste|community|sect|surname|gotra|family_?name|familyName|given_?name|givenName|ethnicity|mother_tongue|primary_language|additional_languages|location|city|district|state|region|language|lang)\b(?! *:)(?![^\n]{0,20}(?:\b(?:not|never|neither|none|nobody|without|cannot)\b|n't\b)))(?=.*\b(?:tradition_pack_release_id|traditionReleaseId|selectedReleaseId|releaseOptionId|releaseId|packKey|pack_key|traditionPackId|SelectedTraditionRelease|selectTraditionRelease)\b(?! *:)).*$/gi,
+    message: "connects an identity, name, place or language field to a tradition pack selection",
+    fix: "a pack is chosen by the host and by nothing else; a language may choose which wording of the host's own release is drawn, never which release (directive §24, docs/product/content-governance.md rule 3)",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "pack-selection-derived-by-name",
+    // The same decision wearing a function name: `deriveRelease(profile)` hides the identity
+    // column inside `profile`, so the proximity rule above cannot see it. These verbs are the
+    // ones that mean "the code decided", and `select` is deliberately absent —
+    // `selectTraditionRelease` is this product's own write, which is the host deciding.
+    pattern: /\b(?:suggest|recommend|infer|derive|guess|predict|assume|auto|automatic(?:ally)?)[A-Za-z]{0,14}(?:Release|Pack|Tradition)[A-Za-z]{0,14}\s*\(|\b(?:release|pack|tradition)[_ ]?(?:suggestion|recommendation|match|matched|derived|derivation)\b|\b[A-Za-z0-9_]*(?:Release|Pack|Tradition)[A-Za-z0-9_]*\s*\((?:[^()]|\([^()]*\))*\b(?:religion|caste|community|sect|surname|gotra|family_?name|familyName|given_?name|givenName|ethnicity|mother_tongue|primary_language|additional_languages|city|district|state|region|location|language|lang)\b/gi,
+    message: "names a function or value that derives a tradition pack, which this product has none of",
+    fix: "delete the derivation: the catalogue is listed for the host and the only writer of a selection is the host's own choice",
     scope: ["src/"],
     exclude: ["src/test/"],
   },
@@ -232,9 +256,20 @@ export const RULES = [
     // `surname === "Iyer"` is the obvious form; `surname.startsWith("Reddi")` is the same
     // decision wearing a call. Both guess a community from a name, which is the invention
     // class this stage exists to make unrepresentable.
-    pattern: /\b(?:surname|gotra|family_name|given_name|caste|community|religion)\s*\.\s*(?:includes|startsWith|endsWith|match|split|toLowerCase|toUpperCase)\s*\(/gi,
-    message: "inspects the shape of a name or an identity field",
+    pattern: /\b(?:surname|gotra|family_?name|given_?name|caste|community|religion|sect|ethnicity)\b\s*(?:\.\s*(?:includes|startsWith|endsWith|match|split|toLowerCase|toUpperCase|charAt|length|trim)|\s*[!=]==?)|\b(?:if|while|switch)\s*\((?:[^()\n]|\([^()]*\))*\b(?:surname|gotra|family_?name|given_?name|caste|community|religion|sect|ethnicity)\b\s*(?:[)!=<>]|\)|\.[^\n]*\))/gi,
+    message: "inspects the shape or value of a name or an identity field",
     fix: "names are data the host types; no code may read a tradition, community or rite out of one",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "place-tested-for-a-tradition",
+    // A place read as a proxy for a community — "if the city is Madurai, assume Tamil rites".
+    // Kept apart from the rule above because it does not need a selection token to be a
+    // violation: inferring a tradition from a district is the invention, whoever consumes it.
+    pattern: /^(?=.*\b(?:traditions?|packs?|releases?|rites?|rituals?|ceremon(?:y|ies|ial)|communit(?:y|ies)|caste|religion|tamil|telugu|kannada|malayalam|brahmin|iyer|reddi|nair|maratha|gujarati)\b)(?:(?=.*\b(?:city|district|state|region|location|pincode|village|town)\b\s*(?:\.\s*(?:includes|startsWith|endsWith|match)|[!=]==?\s*["'`]))|(?=.*\bif\b.{0,40}\b(?:city|district|state|region|location|village|town)\b.{0,40}\b(?:tamil|telugu|kannada|malayalam|brahmin|iyer|reddi|nair|maratha|gujarati)\b)).*$/gi,
+    message: "reads a place as a signal of a tradition, community or rite",
+    fix: "a venue's address is an address; nothing about a couple's origins is derivable from it and nothing may try",
     scope: ["src/"],
     exclude: ["src/test/"],
   },
@@ -278,6 +313,32 @@ export const RULES = [
     scope: ["src/", "index.html", "README.md", "content/"],
     exclude: ["src/test/"],
   },
+  {
+    id: "tamil-candidate-status-claim",
+    // §24's three named claims: the Tamil candidate is reviewed, is approved, is customer
+    // ready. The candidate noun is required, because `release 2 is approved` is true of a
+    // synthetic TEST ONLY fixture and must stay writable in the panel that lists it. A copula
+    // is required too, which is what lets the honest denial — "the Tamil candidate is not
+    // approved" — stay a sentence the product can print rather than a phrase the gate forbids.
+    pattern: /\b(?:tamil[- ]english[- ]foundation|tamil candidate|the candidate|tamil pack|tamil-english)\b[^\n]{0,50}\b(?:is|are|was|were|has been|have been|now|already|becomes?|looks)\s+(?:fully\s+|already\s+)?(?:reviewed|human[- ]reviewed|culturally reviewed|approved|customer[- ]ready|selectable|shippable|live|ready(?: for (?:hosts|customers))?|available(?: to hosts)?)\b|\b(?:is|are|was|has been|now|already)\s+(?:fully\s+)?(?:reviewed|approved|customer[- ]ready|selectable|shippable)\b[^\n]{0,50}\b(?:tamil[- ]english[- ]foundation|tamil candidate|the candidate|tamil pack)\b/gi,
+    message: "claims the Tamil candidate is reviewed, approved or customer ready",
+    fix: "it is a draft, machine-assisted and not selectable, and the copy has to say that — see directive §0's truth status for the candidate",
+    scope: ["src/", "index.html", "README.md", "docs/product/", "docs/content-review/", "content/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "machine-assisted-claimed-approved",
+    // The silently-softened disclosure: machine-assisted wording presented as though the
+    // assistance had been checked into approval. The copula between the two halves is the
+    // whole of the precision — "AI-assisted wording has not been reviewed by a Tamil reader"
+    // and "machine_assisted: true is the disclosure" both stay writable, and the lie
+    // "AI-generated wording is human-reviewed" does not.
+    pattern: /^(?!.*\b(?:no|not|never|neither|none|nobody|without|cannot)\b)(?=.*\b(?:ai|machine|model|llm)[-\s]?(?:generated|assisted|drafted|authored|written)\b)(?:(?:.*\b(?:is|are|was|were|has been|have been|now|already|becomes?|looks)\s+(?:fully\s+|already\s+)?(?:human[- ]reviewed|reviewed|approved|culturally validated|verified|signed[- ]off|finalized|complete|ready)\b)|(?:.*\b(?:treated as|counts as|considered|deemed)\b.{0,20}\b(?:approved|reviewed|final|ready)\b)).*$/gi,
+    message: "lets machine-assisted or AI-generated wording read as reviewed or approved",
+    fix: "say what it is: machine-assisted, human review recorded separately or not at all — directive §24 forbids the silent merge",
+    scope: ["src/", "index.html", "README.md", "docs/product/", "docs/content-review/", "content/"],
+    exclude: ["src/test/"],
+  },
 ];
 
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
@@ -303,6 +364,23 @@ export const MUST_NOT_MATCH = [
   // stays in the repository, so the rule's precision is now a checked fact rather than a
   // claim in a comment.
   'title: "Telugu Ceremonial"',
+  // §24's own controls. The directive asks for near-miss cases so that honest comments and
+  // documentation do not become meaningless findings, and these are the shapes that honest
+  // writing about this feature actually takes: the language projection the resolver performs,
+  // the host's own write, a denial of the candidate's status, and an address being validated.
+  "? { source: 'reviewed_pack', packKey: source.packKey, language: lang as string, fallbackUsed },",
+  "await selectTraditionRelease(user.id, wedding.id, option.id);",
+  "the Tamil candidate is not approved, is not reviewed, and is not selectable by hosts",
+  // The same rule's other half. Its noun requirement is the only reason a synthetic
+  // fixture's own status line stays writable in the panel that lists it, so that line is
+  // asserted here too — otherwise the requirement is a comment that a future widening can
+  // delete without anything going red.
+  'copy = "release 2 is approved",',
+  "no machine-assisted wording here has been reviewed by a reader of Tamil",
+  "AI-assisted wording has not been reviewed by a Tamil reader",
+  'if (venue.city.trim() === "") toast("A city is required for the venue");',
+  "const region = layout.regions.find((entry) => entry.id === section.region);",
+  "a language selects which wording of the host's own release is drawn, never which release",
 ];
 
 export function isScannedPath(relativePath) {
@@ -391,16 +469,48 @@ export function selfTest() {
     "canonical-table-read-outside-the-adapter": `const { data } = await supabase.from('weddings').select('*');`,
     "service-role-key-in-browser-code": `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
     "tradition-pack-identity-branch": `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
-    "tradition-selected-from-identity": `wedding.tradition_pack_release_id = suggestRelease(host.community);`,
-    "identity-tested-by-name-shape": `if (person.surname.startsWith("Reddi")) assumeVocabulary();`,
+    "tradition-selected-from-identity": [
+      `wedding.tradition_pack_release_id = suggestRelease(host.community);`,
+      `if (host.primary_language === "ta") option = releases.find((r) => r.packKey === "tamil-english-foundation");`,
+    ],
+    "pack-selection-derived-by-name": [
+      `const option = suggestTraditionPack(weddingDetail);`,
+      `selectTraditionRelease(user.id, wedding.id, releaseIdFor(host.primary_language));`,
+    ],
+    "identity-tested-by-name-shape": [
+      `if (person.surname.startsWith("Reddi")) assumeVocabulary();`,
+      `if (person.ethnicity === "Tamil-Brahmin") showVedicSection();`,
+    ],
+    "place-tested-for-a-tradition": `if (wedding.city === "Madurai") packKey = "tamil-english-foundation";`,
     "language-gated-rite": `if (language === "ta") body = "The priest will confirm the auspicious time";`,
     "ceremonial-authority-claim": `<p>An authentic Tamil tradition for your invitation.</p>`,
     "draft-candidate-claimed-shippable": `{ "human_reviewed": true, "customer_selectable": true }`,
+    "tamil-candidate-status-claim": [
+      `copy = "the Tamil candidate is approved for customer use",`,
+      `copy = "it is now selectable for the Tamil candidate",`,
+    ],
+    "machine-assisted-claimed-approved": [
+      `copy = "The AI-generated ceremonial wording is human-reviewed",`,
+      `copy = "machine-assisted wording counts as approved content",`,
+    ],
   };
-  for (const [ruleId, text] of Object.entries(fixtures)) {
-    if (!scanContent("src/fixture.tsx", text).some((v) => v.rule === ruleId)) {
-      failures.push(`rule ${ruleId} did not fire on its fixture`);
+  for (const [ruleId, fixture] of Object.entries(fixtures)) {
+    const texts = Array.isArray(fixture) ? fixture : [fixture];
+    for (const text of texts) {
+      if (!scanContent("src/fixture.tsx", text).some((v) => v.rule === ruleId)) {
+        failures.push(`rule ${ruleId} did not fire on ${JSON.stringify(text)}`);
+      }
     }
+  }
+  // §24 asks for a hostile self-test for *every* rule, so the map above cannot be a sample:
+  // a rule added without a fixture is a rule nobody has ever seen fire, and a fixture whose
+  // id has been renamed is an assertion that checks nothing.
+  const fixtureIds = new Set(Object.keys(fixtures));
+  for (const rule of RULES) {
+    if (!fixtureIds.has(rule.id)) failures.push(`rule ${rule.id} has no hostile fixture in selfTest()`);
+  }
+  for (const id of fixtureIds) {
+    if (!RULES.some((rule) => rule.id === id)) failures.push(`selfTest() fixture names an unknown rule: ${id}`);
   }
 
   // The scoped rule must stay a rule about *live* surfaces: the same sentence in a
@@ -483,6 +593,17 @@ export function selfTest() {
     `review_label: "TEST FIXTURE REVIEWER — NOT A REAL CULTURAL REVIEW"`,
     `const isRetired = release.status === "deprecated";`,
     `// a release whose pack_key is unknown to this build is refused by name, not guessed at.`,
+    // §24's permitted half: a language choosing which *wording* of the host's own release is
+    // drawn. This is the real projection at src/lib/traditionPackResolver.ts:273, and it is the
+    // reason the identity rule needs both an operator and a non-key position.
+    `? { source: 'reviewed_pack', packKey: source.packKey, releaseNumber: source.releaseNumber, language: lang as string, fallbackUsed },`,
+    `const { packKey, releaseNumber } = selectedRelease;`,
+    `await selectTraditionRelease(user.id, wedding.id, option.id);`,
+    `// if language === "ta" that never selects a pack_key; the host's own click does.`,
+    `if (venue.city.trim() === "") toast("A city is required for the venue");`,
+    `const region = layout.regions.find((entry) => entry.id === section.region);`,
+    `copy = "the Tamil candidate is not approved, is not reviewed, and is not selectable by hosts";`,
+    `copy = "no machine-assisted wording here has been reviewed by a reader of Tamil";`,
   ].join("\n");
   const culturalHits = scanContent("src/components/invitation/InvitationRenderer.tsx", culturalNearMiss);
   if (culturalHits.length > 0) {

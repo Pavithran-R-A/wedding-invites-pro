@@ -591,7 +591,22 @@ export function checkGeneratedTypesEof(text) {
  * finding, never a skip: a checker that silently stopped looking would report parity forever.
  */
 const CONTRACT_FILE = "src/lib/traditionPackContract.ts";
-const GUARD_ANCHOR = "CREATE FUNCTION private.guard_tradition_pack_release()";
+/**
+ * The guard's own name, matched in either form, because a forward stage re-declares a trigger
+ * with `CREATE OR REPLACE FUNCTION` and the first version of this reader looked only for the
+ * bare `CREATE FUNCTION`. The consequence was not a crash but something worse: the checker kept
+ * reading the Stage 4 body — the one that does not know `override_rule` — and reported perfect
+ * vocabulary parity against a client file that had fallen behind the guard actually running. A
+ * gate that reads the superseded definition of a function is a gate that certifies the past.
+ *
+ * So: every migration that defines it is a candidate, the last one in filename order is the
+ * end state (migrations are forward-only and ordered, which is the same fold
+ * `parseMigrations` relies on), and the ones before it are reported as the history they are.
+ */
+const GUARD_ANCHORS = [
+  "CREATE FUNCTION private.guard_tradition_pack_release()",
+  "CREATE OR REPLACE FUNCTION private.guard_tradition_pack_release()",
+];
 
 const VOCABULARY_SITES = [
   { name: "definition keys", clientConst: "PACK_DEFINITION_KEYS", anchor: "FROM jsonb_object_keys(NEW.definition) k" },
@@ -599,9 +614,25 @@ const VOCABULARY_SITES = [
   { name: "section slots", clientConst: "PACK_SECTION_KEYS", anchor: "(v_section ->> 'section_key') NOT IN" },
   { name: "section kinds", clientConst: "PACK_SECTION_KINDS", anchor: "v_kind IS NULL OR v_kind NOT IN" },
   { name: "host fields", clientConst: "PACK_HOST_FIELDS", anchor: "v_bad NOT IN" },
+  // Stage 5's `override_rule` vocabulary: the guard refuses anything else, and the client list
+  // is what an authoring surface would offer. Left out of this table, the three rules would be
+  // the first vocabulary in this file with no parity rule at all.
+  { name: "override rules", clientConst: "PACK_OVERRIDE_RULES", anchor: "v_rule NOT IN" },
   { name: "event vocabulary entry keys", clientConst: "PACK_EVENT_ENTRY_KEYS", anchor: "jsonb_object_keys(ev) k" },
   { name: "design guidance keys", clientConst: "PACK_DESIGN_GUIDANCE_KEYS", anchor: "FROM jsonb_object_keys(NEW.definition -> 'design_guidance') k" },
 ];
+
+/** The migrations that define `anchors`, in filename order, and the last one's text. */
+function latestDefiner(sources, anchors, what) {
+  const files = Object.keys(sources)
+    .sort()
+    .filter((name) => anchors.some((a) => sources[name].includes(a)));
+  if (files.length === 0) {
+    return { file: null, text: null, findings: [`no migration defines ${what}`] };
+  }
+  const file = files[files.length - 1];
+  return { file, text: sources[file], earlier: files.slice(0, -1), findings: [] };
+}
 
 /** Quoted names inside the first balanced paren group after `from`, or null if there is none. */
 function quotedGroup(sql, from, within) {
@@ -619,29 +650,26 @@ function quotedGroup(sql, from, within) {
 }
 
 export function extractGuardVocabulary(sources) {
-  const files = Object.entries(sources).filter(([, text]) => text.includes(GUARD_ANCHOR));
-  if (files.length !== 1) {
-    return { findings: [`no single migration defines ${GUARD_ANCHOR} (found ${files.length})`], lists: {} };
-  }
-  const [file, text] = files[0];
-  const body = text.slice(text.indexOf(GUARD_ANCHOR));
-  const findings = [];
+  const { file, text, findings, earlier } = latestDefiner(sources, GUARD_ANCHORS, "the release guard");
+  if (!text) return { findings, lists: {} };
+  const body = text.slice(text.indexOf(GUARD_ANCHORS.find((a) => text.includes(a))));
+  const out = [];
   const lists = {};
   for (const site of VOCABULARY_SITES) {
     const at = body.indexOf(site.anchor);
     if (at < 0) {
-      findings.push(`${file}: could not locate the guard's ${site.name} list (anchor "${site.anchor}" is gone)`);
+      out.push(`${file}: could not locate the guard's ${site.name} list (anchor "${site.anchor}" is gone)`);
       continue;
     }
     const fromNotIn = body.indexOf("NOT IN", at + site.anchor.length - "NOT IN".length);
     const found = fromNotIn >= 0 ? quotedGroup(body, fromNotIn + "NOT IN".length, 40) : null;
     if (!found || found.length === 0) {
-      findings.push(`${file}: the guard's ${site.name} list could not be read after anchor "${site.anchor}"`);
+      out.push(`${file}: the guard's ${site.name} list could not be read after anchor "${site.anchor}"`);
       continue;
     }
     lists[site.clientConst] = found;
   }
-  return { findings, lists };
+  return { findings: out, lists };
 }
 
 /** `export const NAME = ['a', 'b'] as const` — the shape every list in the contract file uses. */
@@ -654,7 +682,13 @@ export function extractClientVocabulary(text) {
       findings.push(`${CONTRACT_FILE}: ${site.clientConst} is not an \`as const\` array of quoted names`);
       continue;
     }
-    const names = [...match[1].matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    // Comments are stripped before the names are read. Without this, a line comment inside the
+    // brackets contributes every quoted phrase it contains, so a file that documented its own
+    // vocabulary would report itself as drift — which is exactly what it did on the first run
+    // after Stage 5 added two names. The lists are still compared name for name; only prose
+    // stops counting.
+    const body = match[1].split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n");
+    const names = [...body.matchAll(/'([^']*)'/g)].map((m) => m[1]);
     if (names.length === 0) {
       findings.push(`${CONTRACT_FILE}: ${site.clientConst} is empty`);
       continue;
@@ -699,14 +733,12 @@ const SECTIONS_FILE = "src/lib/invitationSections.ts";
 const DEFAULT_DEFINITION_ANCHOR = "CREATE FUNCTION private.default_invitation_definition()";
 
 export function extractDefaultDefinition(sources) {
-  const files = Object.entries(sources).filter(([, text]) => text.includes(DEFAULT_DEFINITION_ANCHOR));
-  if (files.length !== 1) {
-    return {
-      findings: [`no single migration defines ${DEFAULT_DEFINITION_ANCHOR} (found ${files.length})`],
-      rows: [],
-    };
-  }
-  const [file, text] = files[0];
+  const { file, text, findings } = latestDefiner(
+    sources,
+    [DEFAULT_DEFINITION_ANCHOR, `CREATE OR REPLACE ${DEFAULT_DEFINITION_ANCHOR}`],
+    "the default invitation definition",
+  );
+  if (!text) return { findings, rows: [] };
   const body = text.slice(text.indexOf(DEFAULT_DEFINITION_ANCHOR));
   const open = body.indexOf("'{");
   const close = body.indexOf("'::jsonb");
@@ -795,6 +827,52 @@ function readDataLayerFiles(root) {
     .map((name) => [name, readFileSync(join(root, DATA_LAYER_DIR, name), "utf8")]);
 }
 
+/**
+ * §G's scattering rule, as a gate rather than a convention.
+ *
+ * `src/integrations/supabase` is the only place a table or an RPC may be named, and every rule
+ * this checker enforces about columns and vocabularies is only as wide as that assumption. A
+ * single `supabase.from('tradition_pack_releases').select('*')` typed into a page would put the
+ * governance record — review labels, digests, machine-assistance notes — one keystroke from a
+ * screen, and nothing above would notice, because the column checks read only the data layer.
+ *
+ * Measured on this repository: zero occurrences in `src/pages` and `src/components` today, which
+ * is why the rule can be absolute rather than a growing allowlist.
+ */
+const CONTAINED_DIRS = ["src/pages", "src/components"];
+const SURFACE_CALL = /\.from\(|\.rpc\(/;
+
+export function checkSurfaceContainment(files) {
+  const findings = [];
+  for (const [name, text] of Object.entries(files).sort()) {
+    text.split("\n").forEach((line, index) => {
+      if (!SURFACE_CALL.test(line) || line.trimStart().startsWith("//")) return;
+      findings.push(
+        `${name}:${index + 1} names a table or RPC directly — data access belongs in ` +
+          `${DATA_LAYER_DIR}, where the columns, the vocabularies and the review-sensitive fields ` +
+          `this file checks are actually visible`,
+      );
+    });
+  }
+  return findings;
+}
+
+function readSurfaceFiles(root) {
+  const out = {};
+  for (const dir of CONTAINED_DIRS) {
+    const walk = (rel) => {
+      for (const entry of readdirSync(join(root, rel), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const child = `${rel}/${entry.name}`;
+        if (entry.isDirectory()) { walk(child); continue; }
+        if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+        out[child] = readFileSync(join(root, child), "utf8");
+      }
+    };
+    walk(dir);
+  }
+  return out;
+}
+
 export function readMigrationSources(root) {
   const sources = {};
   for (const name of readdirSync(join(root, MIGRATIONS_DIR)).filter((f) => f.endsWith(".sql")).sort()) {
@@ -846,6 +924,7 @@ export function runChecks(root = REPO_ROOT) {
     ...(sectionsMissing ?? []),
     ...checkTraditionPackVocabulary({ guard, client }),
     ...checkDefaultDefinitionMirror({ sql: defaultSql, client: defaultClient }),
+    ...checkSurfaceContainment(readSurfaceFiles(root)),
   ];
   const publicCount = [...tables.keys()].filter((k) => k.startsWith("public.")).length;
   return {
@@ -856,6 +935,7 @@ export function runChecks(root = REPO_ROOT) {
       nonClientTables: tables.size - publicCount,
       clientTypeTables: typeTables.size,
       dataLayerQueries: queries.length,
+      surfaceFiles: Object.keys(readSurfaceFiles(root)).length,
     },
   };
 }
@@ -1224,6 +1304,9 @@ export function selfTest() {
       "  IF v_bad NOT IN ('welcome', 'closing') THEN",
       "    RAISE EXCEPTION 'unknown host field';",
       "  END IF;",
+      "  IF v_rule NOT IN ('host_may_replace', 'pack_only', 'host_must_supply') THEN",
+      "    RAISE EXCEPTION 'unknown override rule';",
+      "  END IF;",
       "  IF EXISTS (SELECT 1 FROM jsonb_object_keys(ev) k WHERE k NOT IN ('event_key', 'labels')) THEN",
       "    RAISE EXCEPTION 'unknown event entry key';",
       "  END IF;",
@@ -1240,6 +1323,7 @@ export function selfTest() {
     "export const PACK_SECTION_KEYS = ['opening', 'welcome'] as const",
     "export const PACK_SECTION_KINDS = ['text', 'people_list', 'event_list'] as const",
     "export const PACK_HOST_FIELDS = ['welcome', 'closing'] as const",
+    "export const PACK_OVERRIDE_RULES = ['host_may_replace', 'pack_only', 'host_must_supply'] as const",
     "export const PACK_EVENT_ENTRY_KEYS = ['event_key', 'labels'] as const",
     "export const PACK_DESIGN_GUIDANCE_KEYS = ['lead_size', 'motif_reference'] as const",
   ].join("\n");
@@ -1280,18 +1364,23 @@ export function selfTest() {
   if (blindGuard.findings.length !== VOCABULARY_SITES.length) {
     failures.push(`a guard with no readable lists reported ${blindGuard.findings.length}, expected ${VOCABULARY_SITES.length}`);
   }
-  if (extractGuardVocabulary({}).findings.length !== 1) {
-    failures.push("a schema with no guard function at all did not report itself");
-  }
-  if (extractGuardVocabulary({
-    "0001_a.sql": guardFixture["0001_guard.sql"],
-    "0002_b.sql": guardFixture["0001_guard.sql"],
-  }).findings.length !== 1) {
-    failures.push("two migrations defining the same guard did not report themselves");
-  }
   const emptyClient = extractClientVocabulary("");
   if (emptyClient.findings.length !== VOCABULARY_SITES.length) {
     failures.push(`a contract file with none of the lists reported ${emptyClient.findings.length}, expected ${VOCABULARY_SITES.length}`);
+  }
+  // A documented list is the case that used to read as drift: prose inside the brackets is not
+  // vocabulary, and a checker that cannot tell the two apart teaches people to delete comments.
+  const commentedClient = extractClientVocabulary(
+    clientFixture.replace(
+      "export const PACK_SECTION_KINDS = ['text', 'people_list', 'event_list'] as const",
+      "export const PACK_SECTION_KINDS = [\n  // 'text' here is prose about the shape, not a name\n  'text', 'people_list', 'event_list',\n] as const",
+    ),
+  );
+  if ((commentedClient.lists.PACK_SECTION_KINDS || []).join(",") !== "text,people_list,event_list") {
+    failures.push(`an inline comment changed the read vocabulary: ${(commentedClient.lists.PACK_SECTION_KINDS || []).join(",")}`);
+  }
+  if (checkTraditionPackVocabulary({ guard: readGuard, client: commentedClient }).length !== 0) {
+    failures.push("a documented list reported drift against the guard that matches it");
   }
 
   // The default-invitation-definition mirror reads a JSON literal out of a migration and a
@@ -1345,15 +1434,58 @@ export function selfTest() {
   // Silence is the failure mode for every one of these: a reader that found no anchor would
   // compare two empty lists and report parity forever.
   const noAnchor = extractDefaultDefinition({ "0001_a.sql": "CREATE TABLE public.weddings (id uuid);" });
-  if (noAnchor.findings.length !== 1 || !noAnchor.findings[0].includes("no single migration defines")) {
+  if (noAnchor.findings.length !== 1 || !noAnchor.findings[0].includes("no migration defines")) {
     failures.push(`a schema with no default definition reported ${JSON.stringify(noAnchor.findings)}`);
   }
   if (checkDefaultDefinitionMirror({ sql: noAnchor, client: readClient }).length !== 1) {
     failures.push("a missing definition anchor did not reach the report through the checker");
   }
-  const twoAnchors = extractDefaultDefinition({ "0001.sql": sqlFixture["0002_def.sql"], "0002.sql": sqlFixture["0002_def.sql"] });
-  if (twoAnchors.findings.length !== 1 || !twoAnchors.findings[0].includes("(found 2)")) {
-    failures.push(`two migrations defining the default definition reported ${JSON.stringify(twoAnchors.findings)}`);
+  // Two definers is the forward-stage case this reader used to get wrong: the later migration
+  // re-declares the function, so the later migration is the end state, and reading the earlier
+  // one would compare the client against a definition the database no longer runs. The control
+  // is that the last file's list wins — and that a file with no readable lists still reports.
+  const twoAnchors = extractDefaultDefinition({
+    "0001.sql": sqlFixture["0002_def.sql"],
+    "0002.sql": sqlFixture["0002_def.sql"].replace('\\"key\\"', '\\"section_key\\"'),
+  });
+  if (twoAnchors.findings.length !== 0) {
+    failures.push(`a second migration re-declaring the default definition reported ${twoAnchors.findings[0]}`);
+  }
+  const supersededGuard = extractGuardVocabulary({
+    "0001_guard.sql": guardFixture["0001_guard.sql"],
+    "0002_guard.sql": guardFixture["0001_guard.sql"]
+      .replace("CREATE FUNCTION", "CREATE OR REPLACE FUNCTION")
+      .replace("('opening', 'welcome')", "('opening', 'welcome', 'venue')"),
+  });
+  if (supersededGuard.findings.length !== 0) {
+    failures.push(`a forward re-declaration of the guard reported ${supersededGuard.findings[0]}`);
+  }
+  if ((supersededGuard.lists.PACK_SECTION_KEYS || []).join(",") !== "opening,welcome,venue") {
+    failures.push(`the guard reader used the superseded body: ${(supersededGuard.lists.PACK_SECTION_KEYS || []).join(",")}`);
+  }
+  if ((readGuard.lists.PACK_OVERRIDE_RULES || []).join(",") !== "host_may_replace,pack_only,host_must_supply") {
+    failures.push(`override rules read as ${(readGuard.lists.PACK_OVERRIDE_RULES || []).join(",")}`);
+  }
+  if (extractGuardVocabulary({}).findings.length !== 1) {
+    failures.push("a schema with no guard function at all did not report itself");
+  }
+
+  // The containment rule has to fire on the page it exists for, and stay silent on a comment.
+  const scattered = checkSurfaceContainment({
+    "src/pages/EditProject.tsx": [
+      "  const { data } = await supabase.from('tradition_pack_releases').select('*');",
+      "  // supabase.from('weddings') in a comment is not a call",
+    ].join("\n"),
+    "src/components/Thing.tsx": "  await supabase.rpc('rotate_invitation_token', { t });",
+  });
+  if (scattered.length !== 2) {
+    failures.push(`surface containment caught ${scattered.length} of 2 scattered calls`);
+  }
+  if (!scattered.every((f) => f.includes("data access belongs in"))) {
+    failures.push("surface containment reported without naming where the call belongs");
+  }
+  if (checkSurfaceContainment({ "src/pages/Clean.tsx": "  return <p>nothing here</p>;"} ).length !== 0) {
+    failures.push("negative control failed: a page with no data access reported a finding");
   }
   const unquotedLiteral = extractDefaultDefinition({
     "0002_def.sql": sqlFixture["0002_def.sql"].replace("'::jsonb", "jsonb_build_object()"),
