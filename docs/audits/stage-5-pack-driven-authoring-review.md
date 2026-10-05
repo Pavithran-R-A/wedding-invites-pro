@@ -4539,4 +4539,39 @@ and outside the commit.
   word-ban was performed. The sanitised SVG boundary was not weakened: `sanitizeSvg-CfK6a1-E.js` is still in the
   build graph at 29.89 kB.
 
+### 38.8 addendum written after §38 was committed: an eighth drop, and a population reading that re-frames §38.3's
+
+`9bb7dca36ced083b760a9f5355b295a308f57eea` carried §38 — **1 file, 179 insertions**, `git diff --cached --stat`
+before the commit named only `docs/audits/stage-5-pack-driven-authoring-review.md` — and the push printed
+`4ab2e9f..9bb7dca`, read back as branch `9bb7dca36ced083b…` with `refs/heads/main` still
+`328f0e3fef5a39aa5f91182fb54bf0a97d717e69` (`g33-commit-push-38.log`, 15:34:23 +05:30).
+
+- **15:33:08** — the pre-commit probe (`g32-post38-checks.log`) found the tree clean, `product:check` at
+  `179 active file(s) scanned, 0 violation(s)` after the append — confirming §37.10's point that `docs/audits/` is
+  outside the scanned population — and all six npm booleans clean.
+- **15:34:54/55** — `pnpm-lock.yaml` (214689 bytes) and `pnpm-workspace.yaml` (91 bytes) were written into the repo
+  root again, ~31 s after that read-back line, with **the same two SHA-256 values as events 5, 6 and 7**
+  (`0afc0afae24e8252…fd8813a1`, `31ce3e03cd4f1ede…32f444ed`), and `git status --porcelain` printed both as `??` in
+  the same block. They are **not** in `9bb7dca`: the commit staged one explicit path, and `git show --stat` confirms
+  one file. Quarantined to `../q5-logs/pnpm-contamination-8-2026-10-05T1534/` with `PROVENANCE.txt` (`g34`), never
+  deleted, never staged.
+- **This time `node_modules` was converted too.** `g34`'s follow-up probe read `.pnpm present: true`,
+  `.modules.yaml present: true`, `vite is symlink: true` and **363** top-level directories. `npm ci` at 15:39:05
+  restored the locked tree, exit 0, and the six booleans read npm-clean again with **357** directories
+  (`g35-npm-restore-8.log`). No esbuild permission fight this time, because this session had no preview holding the
+  file.
+- **§38.7 said "seven contamination drops", and that was true when it was written.** The count is **eight drops
+  across seven distinct timestamps** as of this addendum, and §38.7 is left exactly as committed rather than
+  corrected after the fact.
+- **What the three directory readings do to §38.3's unexplained 357 → 359.** npm-clean-and-restored trees read
+  **357** (14:45 and 15:39); the pnpm-shaped tree reads **363** (15:36). A reading of **359** therefore sits between
+  the two populations, which is *consistent with* `markers-after` at 14:51:33 having caught a rewrite in progress —
+  all six booleans were still npm-clean at that instant, so nothing in the gate set ran on a pnpm tree, and no test
+  result in §38.3 changes. This is offered as a candidate explanation with its limit stated, not as a finding: the
+  directory count is not a provenance instrument and the booleans are.
+- **What has not changed because of the addendum.** The final gate set still stands at `4ab2e9f`; `9bb7dca` and this
+  addendum touch only `docs/audits/`, which no gate asserts on beyond `git diff --check` and `git status`; the stack
+  is still up; `main` is still `328f0e3f…`; and nothing here merges, deploys, contacts a hosted Supabase project,
+  prints a secret value, approves the Tamil candidate, rewrites history or starts Stage 6.
+
 Stage 5 is qualified on the evidence above and pushed to its branch. It is **not** merged.
