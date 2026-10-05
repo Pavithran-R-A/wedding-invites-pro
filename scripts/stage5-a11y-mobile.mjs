@@ -938,6 +938,9 @@ async function hostHalf(browser) {
     await host.viewport(v);
     await sleep(800);
     const snap = await host.evaluate(`${SNAPSHOT}(${INTERACTIVE})`);
+    check('editor', `editor @ ${v.name}: the host workbench has exactly one main landmark`,
+      snap.landmarks.main === 1,
+      `landmarks=${JSON.stringify(snap.landmarks)}`);
     reportLayout('editor', `editor @ ${v.name}`, snap);
     contrastReport('editor', `editor @ ${v.name}`,
       await host.evaluate(`${CONTRAST}(${JSON.stringify(STAGE5_TEXT)})`));
