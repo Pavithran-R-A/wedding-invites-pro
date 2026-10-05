@@ -66,11 +66,51 @@ The database layer, exercised against throwaway local Postgres containers only:
 - The public and unauthenticated screens again in a browser afterwards: `/`, sign-in, sign-up, the
   three policy pages, and the protected-route redirect
 
-Every number in the two sections above is that stage's own measurement, printed in its audit. The
+Every number in the three sections above is that stage's own measurement, printed in its audit. The
 totals at this branch's head — and the movement between them, suite by suite — are in
 [`docs/product/feature-readiness.md`](docs/product/feature-readiness.md) and
-[`docs/audits/stage-4-tradition-pack-foundation.md`](docs/audits/stage-4-tradition-pack-foundation.md);
+[`docs/audits/stage-5-pack-driven-authoring-review.md`](docs/audits/stage-5-pack-driven-authoring-review.md);
 the older documents are not rewritten when a count moves.
+
+## Verified in Stage 5
+
+The review-binding and pack-driven-authoring work, exercised against throwaway local databases, this
+repository's **local** Supabase stack and a browser on the production bundle — no hosted project, and
+still no customer-visible pack content:
+
+- One forward migration. Its only column is `tradition_pack_releases.review_packet_hash`, a 64-hex
+  digest checked by the database, so an approval is bound to the exact bytes that were reviewed
+  instead of to a claim beside them. No table, no policy and no client-visible column was added
+- **122** review-binding assertions, **50** definition-vocabulary assertions and **124**
+  document-resolution assertions, run on both migration chains (`bash supabase/tests/stage5/run.sh`),
+  each with the positive control beside the refusal — rewriting one character of Tamil wording moves
+  the digest, and reformatting the same JSON does not
+- The digest is computed in Postgres with core `sha256` and `encode`, **not** pgcrypto, so the
+  guarantee does not depend on an extension being installed; the maintenance CLI renders the packet
+  and computes nothing
+- **186 HTTP tests** across five files with real JWTs, including that none of `internal_api`'s nineteen
+  functions is reachable from a browser at all (the requested name never resolves in the exposed
+  profile, so the answer is `404` rather than a permission error that would confirm existence)
+- A maintenance CLI, `node scripts/tradition-pack-admin.mjs`: eleven verbs, deliberately not a web
+  panel, no `delete` verb, and it refuses `--linked`, `--project-ref`, a hosted URL and any mutating
+  command that has not been given `--yes`. The only identity that can reach the surface it drives is
+  the local owner role — **this is not a host feature and there is no customer path to it**
+- Three browser journeys on the production build: a host writing every word with **no pack** chosen,
+  a host choosing a **synthetic approved release** through the panel, and a **retirement** walk where a
+  live guest link points at a release that is later deprecated — the published document moved exactly
+  once, when the host chose the newer release and froze and published a new version to the same address
+- The 10-shape × 4-viewport render sweep re-run at this head (143 checks, 33 measurements, 0 findings),
+  an accessibility and mobile pass over the host editor (59 checks, 48 measurements, 0 findings), and a
+  network and privacy recheck over nine surfaces — which reaches two third-party origins
+  (`fonts.googleapis.com`, `fonts.gstatic.com`) by design, so the honest description is a classified
+  network surface, not "zero network"
+- What is **not** demonstrated, and it is the most important line in this section: **every `reviewed`
+  and `approved` release this stage exercised is a synthetic `TEST ONLY` fixture.** Those synthetic
+  reviewed fixtures are qualification data, not cultural authority. The Tamil/English candidate is
+  still draft, `machine_assisted = true`, `human_reviewed = false` and not selectable by a customer,
+  and no review of it by a named human reader has happened
+  ([`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md)).
+  A host choosing no pack and writing every word is still the only path a real family can take
 
 ## Verified in Stage 4
 
@@ -114,7 +154,12 @@ through the product's own screens against a **local** Supabase stack (see
 
 - Sign-up, log-in, logout and password reset against a Supabase Auth project — the sign-up and
   sign-in round trip was driven from the browser on the local stack; email delivery and the
-  confirmation click were not (that stack auto-confirms), and reset has never been exercised end to end
+  confirmation click were not (that stack auto-confirms), and reset has never been exercised end to end.
+  Stage 5 repaired the sign-up screen's own copy: it asserted an email was on its way whatever the
+  server had actually returned, and it now branches on the session the response carries — when there is
+  no session it says `Check your email to confirm your account`, when there is one it says that nothing
+  was emailed and this stack confirms accounts without email. Both arms are pinned by
+  `src/pages/signupNotificationTruth.test.tsx`; no browser assertion of the new sentence exists
 - A **My invitations** dashboard that reads the signed-in user's drafts
 - Draft creation: name, main language, optional design direction, inserted into `public.weddings`
   through the data adapter
@@ -127,7 +172,13 @@ through the product's own screens against a **local** Supabase stack (see
   It shows no reviewer identity, qualification or machine-assistance note — those columns are not
   grantable to a browser role — and nothing is ever inferred from a name, a community, a language or
   a location. **On a real database the list is empty**, because no reviewed customer content exists
-  yet, so what a host sees today is the no-pack state
+  yet, so what a host sees today is the no-pack state. Stage 5 walked both halves of this in a browser
+  against the production bundle: journey A completes a wedding with the panel left on "No tradition
+  pack", journey B points a real wedding at a synthetic approved release by clicking it. When the
+  release a wedding points at has been retired, the editor says so in the host's own terms, holds the
+  freeze button disabled, and a `create_invitation_version` issued directly as that host is refused
+  `403` and creates no version — the newer release is then offered as an explicit choice, and the only
+  extra words it carries are the UI's own
 - Freeze-time resolution: when a version is frozen, the chosen release's wording (or the host's own,
   against the same default shape) is resolved by the database and stored inside the frozen snapshot
   with its provenance, so a guest's document is explained by the row it came from rather than by a
@@ -190,7 +241,10 @@ ceremonial wording produced by unreviewed generation.
 ## Architecture
 
 React 18 + TypeScript single-page app, built with Vite (`@vitejs/plugin-react-swc`), routed with
-React Router 6, server state through TanStack Query, UI primitives from Radix via shadcn-style
+React Router 7 (the `react-router-dom` compatibility package at 7.18.4 — Stage 5 closed a five-stage
+deferral by taking the version both open moderate advisories are patched in, with no source file
+changed; see [`docs/audits/stage-5-pack-driven-authoring-review.md`](docs/audits/stage-5-pack-driven-authoring-review.md) §24),
+server state through TanStack Query, UI primitives from Radix via shadcn-style
 components, styled with Tailwind CSS over HSL design tokens. Supabase provides auth, the Postgres
 database and row-level security. Database-provided template SVG passes through the central DOMPurify
 sanitisation boundary before DOM insertion; there is no SVG upload feature.
@@ -208,6 +262,7 @@ src/integrations/supabase/      client + generated database types
 supabase/migrations/            schema and RLS history
 supabase/tests/rls/             executable RLS assertions
 scripts/check-product-contract.mjs  scope-aware brand/claims checker
+scripts/tradition-pack-admin.mjs    maintenance-only pack release tool (local owner role, no delete verb)
 docs/product/                   canonical product contract
 docs/architecture/              ADRs and the Stage 2 domain blueprint
 docs/audits/                    stage audit evidence
@@ -236,6 +291,7 @@ No secret belongs in this repository. The app only ever reads a browser-public p
 - [`docs/product/content-governance.md`](docs/product/content-governance.md) — how tradition-pack wording becomes trustworthy
 - [`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md) — the one drafted pack definition, reviewed by nobody, and what a reviewer would need to answer
 - [`docs/architecture/decisions/0007-versioned-reviewed-tradition-pack-releases.md`](docs/architecture/decisions/0007-versioned-reviewed-tradition-pack-releases.md) — why a pack is a concept and a release is the document
+- [`docs/audits/stage-5-pack-driven-authoring-review.md`](docs/audits/stage-5-pack-driven-authoring-review.md) — the review digest that binds an approval to exact bytes, the maintenance-only boundary around it, the browser journeys, and the React Router decision §24
 - [`docs/product/commercial-model.md`](docs/product/commercial-model.md) — target pricing, pilot-validated, not live prices
 - [`docs/product/brand-clearance.md`](docs/product/brand-clearance.md) — brand status and remaining clearance work
 - [`docs/product/design-principles.md`](docs/product/design-principles.md) — visual and editorial rules
@@ -271,13 +327,19 @@ npm audit
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run product:check` is the contract guard: **23 rules** over the active surfaces this tree scans —
-retired brand names, fabricated social proof and per-guest pricing language, the retired scaffold
-vocabulary, which tables may be named outside the data adapter, and the six Stage 4 cultural-safety
-rules that refuse a tradition inferred from a name, a community or a language, or a pack key branched
-on in application code. It intentionally ignores `docs/audits/**`, which records historical evidence
-verbatim, and the cultural-safety rules scan only `src/` and `content/`, so a governance document that
-*quotes* a forbidden shape stays a document rather than becoming a finding.
+`npm run product:check` is the contract guard: **27 rules** over the active surfaces this tree scans
+(181 files at this head) — retired brand names, fabricated social proof and per-guest pricing
+language, the retired scaffold vocabulary, which tables may be named outside the data adapter, and the
+**ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
+pack key branched on in application code, a ceremonial authority claim, and any wording that lets
+machine-assisted draft text read as though it had been reviewed. Nothing was removed to get from 23 to
+27. Two of the four Stage 5 rules deliberately reach into `docs/product/` and `docs/content-review/`,
+because this matrix is itself under the rule that forbids calling the draft candidate shippable; the
+rest still scan only `src/`, `content/` and the two entry documents, so a governance file that *quotes*
+a forbidden shape stays a document rather than becoming a finding. `docs/audits/**` is ignored, which
+records historical evidence verbatim. One named blind spot, because a rule count is not a security
+claim: none of the 27 rules says anything about `innerHTML` or sanitisation, so markup injection has
+never been caught by this checker and is not guarded by it.
 
 ## Database testing
 
@@ -303,11 +365,30 @@ draft-invariant, publication-boundary, attack and catalogue suites on each. It i
 that wrote it and now carries Stage 3's files too.
 
 `bash supabase/tests/stage4/run.sh` runs Stage 4's own document battery over the same two chains
-(426 lifecycle, freeze, resolution and provenance assertions per chain, plus 57 for its fixture
-tooling) and starts its own container. Its totals print apart from the other suites and are never
-added to them, which is deliberate: a runner that folds counts makes a regression in one suite look
-like growth in another. Both runners are informational about their boundary too — plain Postgres plus a
-role/auth shim, so REST-level behaviour is claimed only by the HTTP suites below.
+(426 lifecycle, freeze, resolution and provenance assertions per chain when it is run at the Stage 4
+head it was written for; re-measured **428** at the Stage 5 head, because Stage 5's migration adds a
+column that the battery counts, plus 57 for its fixture tooling) and starts its own container. Its
+totals print apart from the other suites and are never added to them, which is deliberate: a runner
+that folds counts makes a regression in one suite look like growth in another. Both runners are
+informational about their boundary too — plain Postgres plus a role/auth shim, so REST-level behaviour
+is claimed only by the HTTP suites below.
+
+`bash supabase/tests/stage5/run.sh` runs Stage 5's three batteries over those same two chains:
+**122** review-binding assertions (a status step that changes state also pins the digest, so an
+approval cannot be moved onto different bytes after the fact), **50** definition-vocabulary
+assertions and **124** document-resolution assertions. Each refusal is paired with a positive control
+in the same run — rewriting one character of Tamil wording moves the digest and reformatting the same
+JSON does not — because a green refusal line from an instrument that cannot succeed is the failure mode
+this stage was built to catch.
+
+`node scripts/tradition-pack-admin.mjs` is the maintenance operator's tool for authoring and approving
+a release: eleven verbs, no `delete` verb, no web panel, and it refuses to run without an explicit
+local target (`--linked`, `--project-ref`, a wrong container name and a hosted `*.supabase.co` URL are
+each refused with exit 2). It connects by `psql` inside the local container or over loopback from a URL
+read out of an environment variable, never from argv. **`service_role` holds no `USAGE` on
+`internal_api` at all**, so the only identity that can drive it is the local owner role — this is
+content maintenance, not a customer feature. Its HTTP-side counterpart is
+`supabase/tests/api/stage5_admin_cli.test.mjs`.
 
 `node scripts/stage4-render-qualification.mjs` is the browser instrument: it drives a real Chromium
 over the DevTools protocol against the production bundle, and measures the rendered invitation
@@ -319,6 +400,20 @@ it refuses any target that is not loopback. Note what it does to get there: it w
 and credential rows into the **local** database for the duration of a run and deletes them in its
 teardown, so a run interrupted before teardown leaves synthetic rows behind; screenshots go to the OS
 temp directory, not into the repository.
+
+Stage 5 adds three instruments over the same production bundle, with the same three-prerequisite check
+and the same loopback-only refusal. `node scripts/stage5-ui-journeys.mjs` walks three host journeys end
+to end — **A**: sign up, create, write all four passages and the structured rows with **no pack**
+chosen, freeze, publish, then read the guest page in a context with no session; **B**: choose a
+synthetic approved release through the panel and freeze on its wording; **C**: retire the release a
+**live guest link** points at, and measure how many times the published document moves (exactly once,
+and only after the host chooses the newer release and freezes and publishes a new version to the same
+address). `node scripts/stage5-a11y-mobile.mjs` is the host editor on a phone (59 checks, 48
+measurements, 0 findings at this head). `node scripts/stage5-network-privacy.mjs` classifies the
+network surface of nine pages rather than asserting it is empty, and records the guest page's storage
+state as measured: no `localStorage`, no `sessionStorage`, no cookies. All three write synthetic rows
+to the local database and clean up after themselves; **every reviewed and approved release they use is
+a `TEST ONLY` fixture, which is qualification data and not cultural authority.**
 
 ## API testing against the local stack
 
@@ -334,12 +429,20 @@ bash supabase/tests/api/run.sh
 `run.sh` reads `.env.local` (gitignored) and **refuses to run at all** unless `SUPABASE_LOCAL_URL` is a
 loopback host *and* its port matches the `[api]` port in this repository's `supabase/config.toml` — a
 mistaken pointer at someone else's stack fails both gates. It issues real sign-ups, real tokens and one
-tampered JWT, and asserts what comes back through HTTP. Three files, three concerns:
-`stage3_security.test.mjs` (56 tests — isolation, the anonymous surface, what a customer may never
-do), `stage3_publication.test.mjs` (37 — the `api` surface, versions, credentials, the guest door,
-rotation and revocation) and `stage4_tradition_packs.test.mjs` (28 — what a signed-in role may read of
-the catalogue, which release a selection may name, and that a browser has no way to author or approve
-a release). `--local` is always explicit: `supabase link`, `db push`, `db pull` and
+tampered JWT, and asserts what comes back through HTTP. Five files, **186 tests, 0 failed, 0 skipped**
+at this head, each printing its own total:
+`stage3_security.test.mjs` (56 — isolation, the anonymous surface, what a customer may never
+do), `stage3_publication.test.mjs` (38 — the `api` surface, versions, credentials, the guest door,
+rotation and revocation; its 38th test is Stage 5's, which probes `internal_api`'s maintenance verbs and
+gets `404 PGRST202` for every credential shape, and which reuses the case id `API35` that the
+revocation test already owns — recorded as a naming collision rather than renamed, because renaming it
+would mean re-running the tier for a label), `stage4_tradition_packs.test.mjs` (28 — what a signed-in
+role may read of the catalogue, which release a selection may name, and that a browser has no way to
+author or approve a release), `stage5_pack_driven_http.test.mjs` (28 — the review-boundary posture over
+HTTP, including that every reviewer, authorship and machine-disclosure column is refused **by name** at
+the edge) and `stage5_admin_cli.test.mjs` (36 — the maintenance CLI against the real stack, each refusal
+paired with the mutation that proves the refusal is the tool's and not the test's).
+`--local` is always explicit: `supabase link`, `db push`, `db pull` and
 `db reset --linked` are not part of this project's workflow and are never run.
 
 See [`docs/architecture/public-invitation-security.md`](docs/architecture/public-invitation-security.md)

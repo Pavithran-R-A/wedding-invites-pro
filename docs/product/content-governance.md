@@ -7,6 +7,13 @@ needed now.**
 cannot be approved, selected or frozen without the record below — and it still describes content that
 does not exist. Nothing in the local catalogue is customer content; see the last section.)*
 
+*(Stage 5 changed a second word: the tooling sentence below is no longer true. There is now an
+authoring UI, a review workflow with a hash-bound record, and a maintenance CLI — all of them local,
+all of them reachable only by maintenance roles, and all of them qualified against synthetic
+`TEST ONLY` fixtures. Governance is now enforced **and operated**, still over content that does not
+exist. See "What Stage 5 changed", and read it together with the sentence in that section about what
+a fixture review is not.)*
+
 Tradition packs carry devotional text, invocations, blessings, community-specific labels and
 translated phrases. Getting these wrong is not a copy bug — an incorrect invocation or a mistranslated
 family heading appears in the one document announcing a marriage. Content therefore has a lifecycle
@@ -31,6 +38,15 @@ A pack cannot move to `approved` without a human reviewer attached to that speci
 tradition. Reviewers are credited in the pack's metadata, and review is per *release* of the pack,
 not a one-time event. *(Stage 4: it is literally the release that moves — `status` lives on
 `tradition_pack_releases`, and a pack row has none.)*
+
+*(Stage 5, and this is the sentence that has to be read before the table above is quoted at anyone:
+the constraint enforces the **presence and shape** of a review record, not the identity or
+qualification of a reviewer. `reviewed` and `approved` are now reachable through
+`internal_api.submit_tradition_pack_review` and `internal_api.approve_tradition_pack_release`, which a
+maintenance role can call. Every step that got there in this stage came from a suite minting a
+`TEST ONLY` fixture. The rules above are the policy this product intends to hold itself to with real
+reviewers; the mechanism enforces them over the data it is given, and it cannot tell a qualified
+reviewer from a script that typed a plausible `review_basis`.)*
 
 ## Review metadata (conceptual)
 
@@ -86,24 +102,94 @@ What it deliberately does **not** provide, all of it still open:
   draft candidate. The one wording set written as a real artefact —
   `content/tradition-packs/tamil-english-foundation.v1.json` — is `human_reviewed: false`,
   `customer_selectable: false`, machine-assisted, and full of bracketed placeholders. It is not
-  selectable, and the review document beside it is a work order with no answers in it.
-* **No authoring or review tooling.** A release is created by SQL today. There is no UI for a
-  reviewer, no queue, and no way to record a review except writing the columns.
+  selectable, and the review document beside it is a work order with no answers in it. Measured at
+  §35 of the Stage 5 audit: the artefact's four disclosure flags are unchanged, its `review` field is
+  `null`, and in the live local catalogue **0** rows are candidate-shaped. What that catalogue does
+  hold is 11 packs and 17 releases, 8 of them in `approved` state, every one of them named `TEST
+  ONLY` with `reviewed_by IS NULL`. **Those synthetic reviewed fixtures are qualification data, not
+  cultural authority** — they exist so the lifecycle, the hash binding and the privilege boundary can
+  be tested at all, and an `approved` row among them is a state transition under test, not a blessing
+  that anyone read.
+* **Authoring and review tooling now exist locally; the review *community* does not.** Stage 4's
+  sentence here read "A release is created by SQL today. There is no UI for a reviewer, no queue, and
+  no way to record a review except writing the columns." Stage 5 replaced that: the host editor drives
+  itself from a frozen release's resolved contract (`src/lib/invitationAuthoring.ts`,
+  `src/components/invitation/AuthoringOutline.tsx`, `src/components/invitation/AuthoritativeIssues.tsx`),
+  `internal_api.get_tradition_pack_review_packet` hands a reviewer the exact bytes a review binds to,
+  `internal_api.submit_tradition_pack_review` records the review against that hash, and
+  `scripts/tradition-pack-admin.mjs` gives a maintenance operator `list`, `retention`, `inspect`,
+  `validate-release`, `review-packet`, `submit-review`, `create-pack`, `create-release`,
+  `update-draft`, `approve` and `deprecate`. What is still missing is upstream of all of it: there is
+  no queue, no assignment, no reviewer onboarding, and no qualified reader who has agreed to review
+  anything. The tooling is a door into a room that is still empty.
 * **No reviewer identity system.** `reviewed_by` is an optional FK to `auth.users` and
   `review_label`/`review_basis` are free text, because a reviewer who is not a customer of this
   product must still be creditable — and because building an approval workflow was out of scope.
   Consequence to keep in mind: a `review_label` is a claim someone typed, not a verified identity.
-* **Rule 6 is still only prose.** A report of wrong wording has no owner, no route and no tool that
-  lists the affected snapshots. The schema makes the *answer* possible (find the releases that
-  selected a given `release_number`, then the versions frozen from them) and nothing makes it
-  happen. This is the gap to close first when a real pack exists.
+  What Stage 5 did add is *binding*: the review record pins `review_packet_hash`, and the guard keeps
+  that pin (`NEW.review_packet_hash := OLD.review_packet_hash`), so a reviewer can no longer be made to
+  appear to have approved bytes they did not see, and the same record cannot be re-pointed at a later
+  wording. That closes a forgery window about *what was reviewed*; it says nothing about *who*.
+* **Rule 6 is half a tool now.** Stage 4 left it as prose. The answer it needs is queryable today:
+  `internal_api.tradition_pack_retention_report` (and the CLI's `retention` verb) walks releases to
+  the versions frozen from them and the publications that still carry them, so "which guests are
+  reading this wording?" has an output. What is still absent is the other half of a feedback route: no
+  owner, no intake, no SLA, and no human process that would ever run the command. The schema makes the
+  answer possible and Stage 5 made it *askable*; nothing here makes it happen.
 * **Reviewers are not shown to hosts.** The DTO projects `pack_key`, `display_name` and
   `release_number` and nothing else, so the guest's document carries no reviewer name and no
   qualification. That is a privacy decision, not an oversight, and it is written down in
-  [`../architecture/render-contract.md`](../architecture/render-contract.md) §7.6.
+  [`../architecture/render-contract.md`](../architecture/render-contract.md) §7.6. *(Stage 5 re-measured
+  it rather than assuming it: the guest projection still carries "no review record, no hash, no ids",
+  and `InvitationRenderer.tsx:343` states that provenance is deliberately not drawn on the page. A host
+  can see what a document stands on in the authoring outline; a guest cannot.)*
+
+## What Stage 5 changed, in governance terms
+
+Stage 5 was the stage that gave this policy an operator path. Four things are worth naming precisely,
+because each one is a place where a future reader could over- or under-read the mechanism:
+
+1. **A review now binds to bytes.** `internal_api.get_tradition_pack_review_packet` produces the
+   review packet, `private.tradition_pack_review_payload` / `private.tradition_pack_review_hash`
+   digest it (`VIVAAHVARNAM-REVIEW-PAYLOAD/1`, with `private.review_field` escaping each field and
+   `private.canonical_token` fixing the line digest), and the record written by
+   `internal_api.submit_tradition_pack_review` pins `review_packet_hash` — which the release guard then
+   refuses to let anyone re-point (`NEW.review_packet_hash := OLD.review_packet_hash`). Governance
+   consequence: "approved" can no longer mean "approved at some version of this text"; it means that
+   hash.
+2. **The step closes the read-then-write window it had.** The first version compared a handed-in digest
+   against material that had been *read*, not held, so a concurrent draft edit could bind a reviewer to
+   bytes they never saw. The repair is the `FOR UPDATE` lock taken ahead of the comparison. This is
+   recorded in §29–§33 of the Stage 5 audit because it was found by trying to break it, not by reading
+   it.
+3. **`machine_assisted` is enforced at the record and frozen with the wording — and shown to nobody in
+   the interface today.** Rule 1's disclosure requirement bites where the release is written, and the
+   guard's content tuple copies `author_label`, `machine_assisted` and `machine_assistance_notes` into
+   the frozen snapshot so the fact travels with the document. But `src/integrations/supabase/traditionReleases.ts:13-18`
+   deliberately does not select any of those columns, and `InvitationRenderer` prints no provenance, so
+   neither a host nor a guest is told in the UI that a wording was machine-assisted. That is a defensible
+   privacy posture — "what cannot cross the wire cannot leak" is the file's own reason — and it is also a
+   gap against the spirit of Rule 1, which says a machine's hand should be *disclosed*, not merely
+   *recorded*. It is named here rather than left for someone to discover: if disclosure to the reader is
+   the requirement, the work is to decide **who** gets told and to add that read deliberately, not to
+   assume the column's existence already answers it.
+4. **The cultural-safety checker grew four more rules** (`pack-selection-derived-by-name`,
+   `place-tested-for-a-tradition`, `tamil-candidate-status-claim`,
+   `machine-assisted-claimed-approved`), joining the 23 that already existed: 27 now, and
+   `product:check` is the gate that stops a commit from quietly describing the draft candidate as
+   shippable. Its known blind spot is stated in the audit rather than here: none of the 27 rules looks
+   at markup injection, so Rule 3's protection is about *derived tradition selection*, not about
+   rendering safety, which lives in the Stage 0 sanitisation boundary and the Stage 5 refuser instead.
+
+None of the above changes what the product may claim today: the real Tamil-and-English candidate is
+`draft`, machine-assisted, unreviewed and not customer-selectable; no human cultural review has been
+recorded anywhere in this repository; and the synthetic `TEST ONLY` fixtures that make all this
+testable are qualification data, not cultural authority. Nothing is deployed.
 
 ## Deliberately out of scope now
 
-Authoring actual ceremonial text, commissioning reviewers, and building the review tooling. This
-stage records the governance rules so that later work cannot quietly treat generated text as
-trustworthy by default.
+Authoring actual ceremonial text, commissioning reviewers, and the reviewer-facing process around the
+tooling (intake, assignment, qualification, SLA). Stage 5 built the mechanism and stopped at the
+boundary of the judgment: this stage records the governance rules, enforces them, and gives a
+maintenance operator a way to act on them — and still does not decide any wording, name any reviewer,
+or put a single sentence in front of a customer as tradition.

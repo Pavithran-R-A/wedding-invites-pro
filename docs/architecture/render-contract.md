@@ -5,12 +5,17 @@
 > [`../audits/stage-3-public-invitation.md`](../audits/stage-3-public-invitation.md) §7 and §8; the
 > Stage 4 additions — the section list, a release's wording, and the sweep that re-measured all of
 > it — are in [`../audits/stage-4-tradition-pack-foundation.md`](../audits/stage-4-tradition-pack-foundation.md),
-> whose provenance-and-render-model and render-qualification sections carry the numbers. The security
+> whose provenance-and-render-model and render-qualification sections carry the numbers. Stage 5
+> changed no JSX and re-measured the whole matrix; its parity table, its four provenance cases and its
+> sweep are in
+> [`../audits/stage-5-pack-driven-authoring-review.md`](../audits/stage-5-pack-driven-authoring-review.md)
+> §13, §20 and §28. The security
 > half of the same boundary is [`public-invitation-security.md`](public-invitation-security.md).
 >
 > §1–§6 are the contract as Stage 3 left it, with Stage 4's change marked inside a row or a promise
 > where a sentence became conditional; §7 and §8 state the Stage 4 render model and what was measured
-> against it. The Stage 3 wording is kept because it is what a v1 document — one frozen before
+> against it; §9 states what Stage 5 added and re-measured. The Stage 3 wording is kept because it is
+> what a v1 document — one frozen before
 > Stage 4 — still arrives as.
 
 ## 1. The chain, and why there is only one
@@ -26,6 +31,7 @@ live draft (invitation_drafts.content)   frozen snapshot (invitation_versions.sn
                           private.public_invitation_dto(version, jsonb)   ← what a guest may see
                                     |
                  api.preview_invitation (host)  /  api.resolve_public_invitation (guest)
+        api.preview_invitation_document (host's live authoring read, Stage 5)   ← same two functions
                                     |
                     src/lib/publicInvitation.ts  ← parse the wire shape, or refuse it
                                     |
@@ -39,7 +45,12 @@ live draft (invitation_drafts.content)   frozen snapshot (invitation_versions.sn
 Three rules fall out of that shape and all are enforced by tests rather than by review:
 
 * **one projection.** Preview and publication read the *same* two SQL functions, so a preview that
-  flatters its author is not a styling difference but a broken link in this chain;
+  flatters its author is not a styling difference but a broken link in this chain. Stage 5 added a
+  third reader of that pair — the authoring screen — and made the rule measurable rather than
+  structural: `internal_api.preview_invitation_document` calls `build_invitation_snapshot` and
+  `public_invitation_dto(2, …)` once each, hands the same value to the issue computation, and the
+  freeze call re-resolves under `SELECT … FOR UPDATE` on the wedding row, so the verdict the host saw
+  and the verdict that gated the freeze come from one read of one row (§9);
 * **one renderer.** `InvitationRenderer` has exactly two app callers — `src/pages/EditProject.tsx` and
   `src/pages/PublicInvitation.tsx` — and no second copy of the layout exists in `src/`. A "quick"
   guest-only template would silently void §1's first rule.
@@ -194,10 +205,19 @@ a note surviving an empty ceremony list, `lang`, and the map link's attributes.
 * the renderer decides how it appears, and its *absence* has to be decided in the same change: "draws
   nothing" is a design decision, not a fallback;
 * if it carries host text, it goes in as a JSX child. Nothing in the invitation chain uses
-  `dangerouslySetInnerHTML`; the three uses left in the repository are the Stage 0 boundary for
-  **platform** SVG (`src/components/ui/chart.tsx`, `CreateProject.tsx:117`, `EditProject.tsx:532`),
-  each fed by `sanitizeSvg`, and none of them can receive a host's words — the editor even labels that
-  artwork "Catalogue artwork — guests do not see this";
+  `dangerouslySetInnerHTML`. Three uses exist in `src/` at this head and they are not all the same
+  thing, which the earlier version of this bullet got wrong: `CreateProject.tsx:117` and
+  `EditProject.tsx:845` are the Stage 0 boundary for **platform** SVG, each fed by `sanitizeSvg`, and
+  neither can receive a host's words — the editor even labels that artwork "Catalogue artwork — guests
+  do not see this". The third is `src/components/ui/chart.tsx:70`, a generated `shadcn/ui` component
+  that injects a `<style>` block of CSS custom properties built from its own `ChartConfig`; it is
+  *not* the SVG boundary, nothing sanitises it, and no module in `src/` imports it (searched at the
+  §36 pass), so it is dead scaffolding rather than a live hole. Both halves are disclosed rather than
+  assumed away, and the mechanism that used to be claimed here is named: **none of the
+  `npm run product:check` rules says anything about `innerHTML` or sanitisation**, so a future change
+  that wires that component to a screen is stopped by review, not by the checker. Deleting the unused
+  component, or pinning it with a rule, is the forward repair; neither was done on a documentation
+  pass.
 * if it carries a link, `https`-only at the column, at the projection, and again in the client parser.
 
 Stage 4 adds two more, because a field can now arrive as part of a release's wording rather than only
@@ -372,3 +392,76 @@ filename beside each one — a reader who needs the pixels has to re-run the ins
 * Every pack in the local catalogue during these runs is a `TEST ONLY` fixture or a draft candidate.
   The wording the Tamil shapes drew is machine-assisted and unreviewed, so what §8.3 verifies is
   **rendering**, not language: **nothing here was read by a native speaker of any supported script.**
+
+## 9. Stage 5: the same promises, over a v2 document
+
+### 9.1 What moved and what did not
+
+`InvitationRenderer.tsx` was not changed by Stage 5, and that is a measured statement rather than an
+impression: the document battery pins the renderer's 13-key section input at both heads (426 assertions
+at Stage 4's head, 428 at Stage 5's — the two added lines are the head-aware inventory and column
+counts, not new JSX expectations), and the audit's renderer section records the chunk size beside it
+([`../audits/stage-5-pack-driven-authoring-review.md`](../audits/stage-5-pack-driven-authoring-review.md)
+§13, §19, §20). What Stage 5 changed sits *above* the renderer:
+
+* the host's authoring screen now reads the **server's** document and the **server's** verdict through
+  `api.preview_invitation_document`, whose envelope is `{invitation, issues, authoring,
+  selected_release}` — the same `public_invitation_dto(2, …)` output a guest receives, an issue
+  **record** list rather than formatted sentences, the release's authoring rules with no words in
+  them, and the release the wedding is standing on reduced to `pack_key`, `display_name`,
+  `release_number`, `definition_schema_version` and `status_is_current`;
+* a v2 definition may declare required sections and per-section authoring rules, which is why the
+  contract version is a membership test (`1` or `2`) and an unknown version refuses by name;
+* the four provenance combinations §7.6 describes are now *derived from one document* and asserted
+  rather than enumerated, including the two refusals that make the display honest: a host's own words
+  never carry `reviewed_pack` credit, and `override_rule` / `requires_venue` appear at no depth of
+  either the frozen snapshot or the preview.
+
+### 9.2 Preview/freeze parity, measured
+
+§1's "one projection" rule became a property you can fail. The claims and the assertions that hold
+them (audit §6, SQL groups in `supabase/tests/stage5/70_document_resolution.sql`):
+
+| Claim | Assertion |
+| --- | --- |
+| The preview document equals the frozen guest document byte for byte | **P1** |
+| The freeze's refusal *is* the projection of the preview's own records, as exact strings | **F4** |
+| No wedding can freeze while its preview reports a blocking issue | **F8**, over every wedding in the battery |
+| A draft edit after a freeze changes version 1 by nothing | **P4** (md5 before and after) |
+| The live preview and the frozen version disagree by exactly the edit | **P4c** |
+| A retirement, a newer approval and a re-selection leave version 1's bytes alone | **H2**, **H2b**, **H9c** |
+| The freeze RPC takes one argument, so no verdict or snapshot is sendable by a caller | **F8b** |
+
+The mechanism behind the fifth row is §1's chain, not a test trick: the preview resolves once and
+passes the same value to both consumers, and the freeze re-resolves under `SELECT … FOR UPDATE` on the
+wedding row, which is what closes the window Stage 4 left open (a selection change landing between two
+unlocked reads of `weddings.tradition_pack_release_id` could have pinned one release over a snapshot
+resolved from another).
+
+### 9.3 The sweep, re-run at this head
+
+`scripts/stage4-render-qualification.mjs` on the Stage 5 production bundle: **143 checks, 33
+measurements, 0 findings**, exit 0, 10 shapes × 4 viewports (audit §28). 0 px horizontal overflow in
+all 40 cells, no clipped element inside the article, no injected internal key or provenance string in
+the rendered text, no unsafe link scheme, the frozen `lang` present, the lead size clamped where a size
+was saved (30 → 30, 60 → 44, 8 → 22, 3 → 22) and the stated default drawn where none was, and shape 10's
+out-of-vocabulary style values refused rather than applied. Contrast and tap size are still
+**reported, not asserted**, and the two §8.2-class instrument facts stand: the guest document is
+almost entirely non-interactive, so a render sweep says nothing about keyboard behaviour (§31's work),
+and the first two attempts at this head hung at shape 3's `document.fonts` probe — reproduced as an
+observability gap, not a document defect, with the diagnosis and its limits in audit §28.3.
+
+### 9.4 Disclosed limits, restated at the Stage 5 head
+
+* English date and time text on a non-English document (§7.4) — still unfixed, deliberately.
+* `document.title` unbounded (§5.2) — unchanged.
+* `reviewed_pack` and `host` provenance are drawn for the host's benefit only; a guest page shows no
+  badge, and the sweep checks for that in the rendered text rather than trusting the intent.
+* A v1-shaped *payload* still renders (`normalizeFlatInvitation`), while this build's projection
+  refuses to hand a v1 *snapshot* to a guest link at all — the split is real, it is asserted by C11c
+  and C11d, and a pre-Stage-4 link therefore reaches the unavailable state. Whether any such row exists
+  anywhere is a deployment question this repository cannot answer; audit §20.4 owns the record.
+* Markup injection is not covered by any automated product rule (§6's last bullet), and the unused
+  `chart.tsx` injector is dead scaffolding rather than a reviewed boundary.
+* Nothing here was read by a native speaker of any supported script, and **no WCAG conformance is
+  claimed for the product.**

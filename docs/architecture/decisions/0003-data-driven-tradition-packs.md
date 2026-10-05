@@ -80,3 +80,32 @@ Hard constraints:
 - Not one canonical "traditional" ordering with deviations treated as wrong.
 - Not an unmoderated user-contributed content library in V1.
 - Not implementing the pack engine, schema or authoring UI in this stage.
+
+## Cross-stage status — where the six hard constraints stand after Stage 5 (closure, 2026-10-03)
+
+**Status:** Accepted, unchanged. The header sentence — "No pack engine is implemented in this stage" — was
+true of Stage 1 and is the one line in this file a reader can now take the wrong way, so it is answered here
+rather than edited away: [ADR 0007](0007-versioned-reviewed-tradition-pack-releases.md) is the decision that
+built the engine, and Stage 5 moved inside it. Nothing below adds a rule.
+
+| Rule | What enforces it now |
+| --- | --- |
+| 1 — no identity branching in the renderer | The renderer's vocabulary is three section kinds and a resolved value; six `src/`-scoped shape rules in `npm run product:check` (`tradition-pack-identity-branch` `:207`, `language-gated-rite` `:277`, and Stage 5's `pack-selection-derived-by-name` `:243`, `place-tested-for-a-tradition` `:266`) fire on the *shape* of a derivation, not on a banned word, and the checker's self-test carries a firing example for each (`scripts/check-product-contract.mjs:466–480`) |
+| 2 — nothing inferred from a name, language, place or guest list | Same two shape rules, plus the selection being one explicit write (`weddings.tradition_pack_release_id`) that no browser code reaches by default, measured end to end by the no-pack journey — a wedding with `none` selected freezes, publishes and renders with no section claiming pack wording |
+| 3 — language and tradition are independent axes | The resolver reports a fallback (`body_fallback_used`) instead of silently substituting English, and the request for `ta` that falls back to `en` is a frozen fact beside the wording, not a runtime accident |
+| 4 — machine-assisted wording cannot silently become approved | `machine_assisted` + `machine_assistance_disclosure_required`, the guard's refusal of a lifecycle step that restates a review, and now a digest: a review binds to `review_packet_hash`, the guard pins it, and a submission against a stale digest is refused naming both. Stage 5's `machine-assisted-claimed-approved` rule is the documentation half — a machine-written pack cannot be called approved in prose either |
+| 5 — published invitations pin the exact pack version | `versions_pack_release_gate` plus the snapshot's own copy of the release's wording, re-measured at the Stage 5 head: retiring the release behind a live publication, approving a newer one and re-selecting it all leave version 1's bytes unchanged |
+| 6 — variants presented as variants | Still `scope_statement` and the release's own words; no mechanism decides this one, and it remains a content-judgment rule with no enforcement to claim |
+
+The cost this file named first — "we need real reviewers with real language/tradition qualification, and
+that costs money and time before any revenue" — is **still unpaid**, and Stage 5 made it easier to lose
+sight of: the mechanism now records a review that is complete in every queryable field while the reviewer
+behind it is a script and the wording is a `TEST ONLY` fixture. The second cost ("non-technical authoring
+requires tooling") is partly paid at the maintenance boundary — `scripts/tradition-pack-admin.mjs` gives an
+operator create/validate/review/approve/deprecate verbs and refuses to point at a hosted project — and
+entirely unpaid at the reviewer boundary: no queue, no assignment, no onboarding, no qualified reader.
+
+No release in this repository is customer content, none has been read by a native speaker for approval, and
+nothing is deployed. See
+[`../../audits/stage-5-pack-driven-authoring-review.md`](../../audits/stage-5-pack-driven-authoring-review.md)
+§10 and §35 for the counts and the corrections.

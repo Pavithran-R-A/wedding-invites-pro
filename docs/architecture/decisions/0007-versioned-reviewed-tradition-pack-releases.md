@@ -190,3 +190,80 @@ identity branch), §26 (every destination the bundle reaches), §27 (ten shapes 
 (HTTP, against the real local API), and
 [`scripts/stage4-render-qualification.mjs`](../../../scripts/stage4-render-qualification.mjs)
 (real Chromium, real bundle, real stack).
+
+## Deviation record — what Stage 5 moved inside this boundary (closure, 2026-10-03)
+
+**Status:** Accepted, unchanged in its rules and its rejections. This records where Stage 5 departed
+from what this file asserted about the *future*, in the same form ADR 0006 uses: the original sentences
+are quoted rather than quietly corrected, because they were true of Stage 4's head and one of them is
+the reason Stage 5 built what it built.
+
+1. **"No new exposed surface … the exposed `api` schema is still exactly the seven publication
+   wrappers ADR 0006 qualified."** Measured at the Stage 5 head: **eight** — the addition is
+   `api.preview_invitation_document`, whose body is one fully-qualified delegation
+   (`SELECT internal_api.preview_invitation_document(p_wedding_id);`, migration `:1520–1526`). I3
+   (`supabase/tests/stage4/50_pack_release.sql:3888–3910`) expects `api_invoker 8 / api_pinned 8 /
+   internal_definer 8 / internal_pinned 19` at this head and `7/7/7/7` at Stage 4's, and I4
+   (`:3913–3930`) counts `api 8 / internal_api 19 / private 27`. This does not reverse the decision,
+   because the decision was about *what a wrapper may hold*: an eighth name is permitted by the same
+   test the other seven passed — one `SELECT`, no logic, no privilege of its own, and the ownership
+   check living in the privileged body. What forced it is this ADR's own pinning rule: a snapshot, a
+   verdict, an authoring declaration and a release posture cannot be composed by row policies into one
+   read, and read separately they can describe two different releases. The freeze re-resolves under
+   `SELECT … FOR UPDATE` on the wedding row for the same reason, which is why the preview the host saw
+   and the verdict that gated the freeze are now one resolution (`stage5/70_document_resolution.sql`
+   P1, F4, F8, P4c).
+2. **"a maintenance RPC would either be unreachable over HTTP or would widen the browser-callable
+   surface to make a test easier."** Both halves of that dilemma happened, and the first is the one
+   that was chosen: eleven maintenance verbs were added to `internal_api` and given **no** `api`
+   wrapper, so they are unreachable over HTTP — measured as `404 PGRST202` on all six probes, byte-identical
+   per requested name (`supabase/tests/api/stage3_publication.test.mjs:1152`; the schema-qualified
+   spelling fails at name resolution, before any privilege check, so it is not an oracle into whether
+   the function exists). The refusal this sentence encoded is why Stage 5's tool is a CLI rather than a
+   panel.
+3. **"content authoring is a privileged database write with no UI … unacceptable for a team, so an
+   authoring tool is a real later cost."** Partly paid, at the maintenance boundary and not the
+   customer one. `scripts/tradition-pack-admin.mjs` is the operator's tool — `list`, `retention`,
+   `inspect`, `validate-release`, `review-packet`, `submit-review`, `create-pack`, `create-release`,
+   `update-draft`, `approve`, `deprecate` — with **no delete verb**, a refusal (exit 2) for any flag
+   that would point it at a hosted project, and a `--yes` requirement on every mutating command; it
+   must connect as the local **owner** identity because `service_role` holds no `USAGE` on
+   `internal_api` at all. On the host side, the editor now lays its sections out from the server's
+   `authoring` declaration (`src/lib/invitationAuthoring.ts`, `AuthoringOutline.tsx`,
+   `AuthoritativeIssues.tsx`) instead of from product code — a screen, not a table write, and not a
+   catalogue for a customer to shop.
+4. **A review now binds to bytes, and that needed a privilege change this table does not predict.**
+   The one column Stage 5 added is `review_packet_hash text` with a `^[0-9a-f]{64}$` CHECK
+   (`review_metadata_is_mandatory`'s neighbour, not a replacement for it), and the guard pins it
+   (`NEW.review_packet_hash := OLD.review_packet_hash`), so problem 1 in the Context section —
+   "approval could be restated" — is closed one step further than Stage 4 left it: a stored review can
+   no longer be re-pointed at different wording, and submitting against a stale digest is refused by the
+   database naming both digests. The cost is the enforcement-layer table's neatness: Stage 4's guard
+   "calls no other `private` function, because it is SECURITY INVOKER and a nested call would be
+   privilege-checked against whoever issued the statement", and Stage 5's guard must call the digest and
+   the three serialisation primitives it is built from, or the definition of "what a review covers"
+   would exist twice. So `service_role` holds `EXECUTE` on **exactly those five names and nothing else**
+   in `private` (`stage5/50_review_binding.sql` M6 `:1262–1271`, which compares a name array rather
+   than a count), `anon` and `authenticated` hold `EXECUTE` on no function in `private` at all (M6b) and
+   are refused at the schema (M6c), no trigger on either pack table became `SECURITY DEFINER` (M7), and
+   none of the eleven maintenance verbs is one (M7b). The RLS-and-grants row of the table above still
+   describes what a browser may read; what it no longer describes by itself is what the trusted backend
+   may execute, and that set is now named.
+5. **Unchanged, deliberately:** the status vocabulary, the refusal of `approved → reviewed`, the refusal
+   to `DELETE` a release that left `draft`, the three fields that reach a guest's DTO, the structural
+   optionality of a pack, and the independence of language from tradition. Stage 5 added no policy, no
+   table, no foreign key and no index — one column and one constraint — and re-measured the rest.
+6. **The honesty limit in this file is still exactly true, and Stage 5 made it easier to violate in
+   appearance.** The mechanism now accepts a review record that looks complete from any query: a
+   `reviewed_by`, a date, a basis, and a digest that provably binds it to stated bytes. What it cannot
+   tell is whether a qualified human read those bytes. Every step this stage took through it came from a
+   suite minting a `TEST ONLY` fixture, and the synthetic reviewed fixtures are **qualification data,
+   not cultural authority**. The real Tamil/English candidate is the same draft it was when this ADR was
+   written.
+
+Evidence for this section:
+[`../../audits/stage-5-pack-driven-authoring-review.md`](../../audits/stage-5-pack-driven-authoring-review.md)
+§5 (schema delta), §5.1 (the nested call), §6 (preview/freeze parity), §7 (provenance), §8 (the
+maintenance surface and the CLI), §9 (the review packet and its digest), §29 (the forgery window and the
+lock that closed it), §35 (the truth-sync corrections, including the count corrections this addendum's
+numbers supersede in §5's own table).
