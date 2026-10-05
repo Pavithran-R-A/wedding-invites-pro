@@ -68,7 +68,17 @@ function localEnv(rel) {
 }
 
 const env = localEnv('.env.local');
-const dotenv = localEnv('.env');
+/** `.env` is the gitignored file that carries a *hosted* project URL, and this stage never contacts
+ *  one, so a qualification clone has no reason to hold it. The needle this file supplies is a bonus
+ *  identification, not the defence: `supabase.co` and `supabase.in` are in `TELEMETRY_HOSTS` on
+ *  their own terms, so a hosted origin reaching the page is a finding with or without `.env`. */
+const dotenv = (() => {
+  try {
+    return localEnv('.env');
+  } catch {
+    return {};
+  }
+})();
 const apiUrl = assertLoopback(env.SUPABASE_LOCAL_URL, 'SUPABASE_LOCAL_URL');
 const anonKey = env.SUPABASE_LOCAL_PUBLISHABLE_KEY;
 const serviceKey = env.SUPABASE_LOCAL_SERVICE_ROLE_KEY;

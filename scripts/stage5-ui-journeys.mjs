@@ -1304,11 +1304,32 @@ async function main() {
   };
   collect(join(ROOT, 'dist'));
   const bundleText = bundleFiles.join('\n');
-  const hostedUrl = readFileSync(resolve(ROOT, '.env'), 'utf8')
-    .match(/^VITE_SUPABASE_URL\s*=\s*"?(.+?)"?\s*$/m)?.[1];
+  /** `.env` is the gitignored file that carries a *hosted* project URL, and a qualification clone
+   *  that never touches a hosted project has no reason to hold one. Reading it unconditionally made
+   *  this instrument die on `ENOENT` before any journey ran, so the same question is now answered
+   *  twice: against `.env` when a reviewer's clone has one, and against the built bundle with a
+   *  pattern that needs no credential to exist. The second answer is the stronger one — it refuses
+   *  *any* hosted origin, not only the one this machine happens to declare. */
+  let hostedUrl = null;
+  try {
+    hostedUrl = readFileSync(resolve(ROOT, '.env'), 'utf8')
+      .match(/^VITE_SUPABASE_URL\s*=\s*"?(.+?)"?\s*$/m)?.[1];
+  } catch {
+    hostedUrl = null;
+  }
   check('prelude', 'the shipped bundle calls the loopback target', bundleText.includes(browserApiUrl));
+  measure('prelude', 'whether this clone declares a hosted project URL at all',
+    hostedUrl ? 'a .env exists and declares one (value not printed)'
+      : 'no .env in this clone — no hosted project URL is declared here');
   check('prelude', 'the hosted project URL .env declares is absent from the bundle',
     !hostedUrl || !bundleText.includes(hostedUrl), 'the hosted value is not printed here');
+  const hostedOrigins = [
+    ...new Set(bundleText.match(/https:\/\/[A-Za-z0-9._-]+\.supabase\.(?:co|in)(?=[\s"'`,:)?\]}]|$)/g) ?? []),
+  ];
+  check('prelude', 'no hosted Supabase origin of any shape is baked into the shipped bundle',
+    hostedOrigins.length === 0,
+    hostedOrigins.length ? `origins found (host names only): ${hostedOrigins.join(', ')}`
+      : `scanned ${(bundleText.length / 1024).toFixed(0)} KB of shipped JS/CSS/HTML`);
 
   const browser = await openBrowser({ cdpPort: CDP_PORT });
   let outcome = null;

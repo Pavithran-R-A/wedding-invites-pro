@@ -1258,14 +1258,30 @@ async function main() {
       + '`npm run preview -- --host 127.0.0.1 --port 4173 --strictPort`.');
   }
   const bundleText = bundleSources();
-  const hostedUrl = readFileSync(resolve(ROOT, '.env'), 'utf8')
-    .match(/^VITE_SUPABASE_URL\s*=\s*"?(.+?)"?\s*$/m)?.[1];
+  /** A qualification clone that never touches a hosted project has no `.env` to read — the file is
+   *  gitignored and holds the hosted URL. Reading it unconditionally threw ENOENT before any shape
+   *  was rendered, so the hosted question is now answered twice: against `.env` when a reviewer's
+   *  clone has one, and against the built bundle with a pattern that needs no credential to exist. */
+  let hostedUrl = null;
+  try {
+    hostedUrl = readFileSync(resolve(ROOT, '.env'), 'utf8')
+      .match(/^VITE_SUPABASE_URL\s*=\s*"?(.+?)"?\s*$/m)?.[1];
+  } catch {
+    hostedUrl = null;
+  }
   check('prelude', 'the built bundle calls the loopback API target',
     bundleText.includes(browserApiUrl), 'the URL baked into dist/ is the one .env.local declares');
   if (hostedUrl) {
     check('prelude', 'the hosted target .env declares is absent from the built bundle',
       !bundleText.includes(hostedUrl), 'the hosted value is not printed here');
   }
+  const hostedOrigins = [
+    ...new Set(bundleText.match(/https:\/\/[A-Za-z0-9._-]+\.supabase\.(?:co|in)(?=[\s"'`,:)?\]}]|$)/g) ?? []),
+  ];
+  check('prelude', 'no hosted Supabase origin of any shape is baked into the built bundle',
+    hostedOrigins.length === 0,
+    hostedOrigins.length ? `origins found (host names only): ${hostedOrigins.join(', ')}`
+      : `scanned ${(bundleText.length / 1024).toFixed(0)} KB of shipped JS/CSS/HTML`);
 
   psqlFile('supabase/tests/api/fixtures/stage4_http_pack.sql');
   hosts.hostA = await signUp('s4r-host-a');
