@@ -651,8 +651,24 @@ async function main() {
   check('prelude', 'the shipped bundle calls the loopback API target',
     bundle.includes(browserApiUrl), `the URL baked into dist/ is the one .env.local declares`);
   if (hostedIsLoopback) {
-    check('prelude', 'a hosted project reference exists for the bundle to be searched for', false,
-      '.env declares no non-loopback VITE_SUPABASE_URL, so this pass has nothing to compare against');
+    /** This branch used to print a finding on purpose: no `.env` needle meant "nothing to compare
+     *  against", and a vacuous pass was refused. But the needle is a *hosted project URL*, and a
+     *  clone that never contacts a hosted project has no reason to hold one — so the instrument was
+     *  asserting a property of the environment, not of the product, and it could never go green
+     *  here. The search is now pattern-shaped, which is strictly wider than one needle: any
+     *  `*.supabase.co` / `*.supabase.in` host baked into the shipped bundle is a finding with or
+     *  without a needle, and observed requests were already refused against those same two hosts by
+     *  `TELEMETRY_HOSTS`. */
+    const hostedNeedles = [
+      ...new Set(bundle.match(/[A-Za-z0-9._-]+\.supabase\.(?:co|in)\b/g) ?? []),
+    ];
+    check('prelude', 'no hosted Supabase host of any shape is baked into the shipped bundle',
+      hostedNeedles.length === 0,
+      hostedNeedles.length ? `hosts found: ${hostedNeedles.join(', ')}`
+        : `searched ${(bundle.length / 1024).toFixed(0)} KB of shipped JS/CSS/HTML for `
+          + '*.supabase.co and *.supabase.in');
+    measure('prelude', 'whether this clone declares a hosted reference at all',
+      'no .env needle — the pattern-shaped search above is the whole answer');
   } else {
     check('prelude', 'the hosted project reference .env declares is absent from the bundle',
       !bundle.includes(hostedRef), 'the hosted value is not printed here');
