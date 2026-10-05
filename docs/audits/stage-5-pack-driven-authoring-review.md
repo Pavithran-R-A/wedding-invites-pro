@@ -4624,6 +4624,27 @@ on a missing `.env`, any hosted origin refused) · `be1ae37` (that refusal made 
 `9bb7dca` · `e01eaec`. **Thirteen commits**, each pushed immediately with an explicit refspec, `git rev-list --count
 328f0e3f..HEAD` = **27** ahead of `main`, which is the branch's full history rather than this pass alone.
 
+### 38.10 correction to §38.9's chain: whose commits they are
+
+§38.9 wrote "The closure chain, oldest first, is the record of this pass … **Thirteen commits**", and that
+attribution is wrong in a way this audit cannot leave standing. `git rev-list --count c6cf0c7..HEAD` = 14, and the
+split is: **`1594bcc`, `4fb6990`, `f62b190`, `5889218` are the four commits ChatGPT added on top of `c6cf0c7`** —
+handed to this pass as its starting tip, preserved, and never reset, exactly as instructed; the qualification clone
+this pass measured everything in was created **at `5889218`**. **Authored by this pass, in order:** `60cb331`, `6a67157`,
+`344c3b1`, `f494f76`, `0216cae`, `be1ae37` (the six repair/test commits §37.1 describes) plus the documentation
+commits `4ab2e9f`, `9bb7dca`, `e01eaec`, `1a2b543` and this one — **eleven authored by this pass, fifteen from
+`c6cf0c7`**. §38.9's enumeration is kept as written rather than edited after the fact; this section is the
+correction.
+
+The contamination tally moved again while these closure sections were being written: `stat` on the quarantined locks
+now shows a **tenth** write at **16:19:57** (`pnpm-contamination-10-2026-10-05T1624/`, same two SHA-256 values,
+36 s after the `1a2b543` push), and the tree was restored by `npm ci` once more (exit 0, 357 directories, all six
+booleans npm-clean — `g42-quarantine-10-restore.log`). This is the reason §38.9 switched the count to mtimes: a
+per-drop section would be obsolete before it committed, whereas the measurement method is stable and the invariant
+that matters held every single time — **no `pnpm` path, log, screenshot, `.env` or credential appears in any commit
+of this pass**, which `git log --format='' --name-only c6cf0c7..HEAD` confirms over all fifteen, and which is why
+every commit here stages one explicit path and never `git add .`.
+
 Nothing here merges, deploys, contacts a hosted Supabase project, prints a secret value, approves the Tamil
 candidate, rewrites history or starts Stage 6. `refs/heads/main` is `328f0e3fef5a39aa5f91182fb54bf0a97d717e69` at
 every read-back in this section.
