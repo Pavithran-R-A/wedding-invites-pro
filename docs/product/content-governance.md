@@ -180,9 +180,13 @@ because each one is a place where a future reader could over- or under-read the 
    shippable. Stage 5's fifth rule (`main-landmark-absence-claim`, added while assembling the Stage 5
    report after a stale current-state sentence about the host editor had survived the truth sync) takes
    the total to 28; it guards documentation truth rather than culture, so it is not one of the ten above.
-   Its known blind spot is stated in the audit rather than here: none of the 28 rules looks
-   at markup injection, so Rule 3's protection is about *derived tradition selection*, not about
-   rendering safety, which lives in the Stage 0 sanitisation boundary and the Stage 5 refuser instead.
+   The blind spot this row used to record — that no rule looked at markup injection, so Rule 3's
+   protection said nothing about rendering safety — is closed as of the 29th rule
+   (`markup-injection-sink`, scoped to `src/`, with the three already-audited SVG and chart boundaries
+   registered in the checker rather than exempted by path). Rule 3's protection remains about *derived
+   tradition selection*, and rendering safety remains the Stage 0 sanitisation boundary's job; what the
+   checker adds is that a new injection sink, or the removal of a registered sanitisation, now fails
+   `product:check` instead of waiting for a reviewer to notice.
 
 None of the above changes what the product may claim today: the real Tamil-and-English candidate is
 `draft`, machine-assisted, unreviewed and not customer-selectable; no human cultural review has been

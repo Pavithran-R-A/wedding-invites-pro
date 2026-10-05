@@ -48,6 +48,8 @@ describe("product contract checker", () => {
         `copy = "The AI-generated ceremonial wording is human-reviewed",`,
         // `main-landmark-absence-claim` — the sentence this rule was added to refuse.
         `| Host editor on a phone | the page a host works on has no main landmark |`,
+        // `markup-injection-sink` — a new, unaudited write of markup into the live DOM.
+        `element.innerHTML = weddingDetail.hostNoteHtml;`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());

@@ -57,6 +57,55 @@ const SCANNED_EXTENSIONS = new Set([
   ".html", ".css", ".json", ".md", ".yml", ".yaml", ".txt",
 ]);
 
+/**
+ * The only markup-injection boundaries this product has been audited against.
+ *
+ * `markup-injection-sink` exempts a line when two things hold at once: the file is exactly the one
+ * named here, and the named sanitisation witness is still present in that file. Each `sink` string
+ * vouches for one line, and only one — so a second sink in an audited file is a finding, and so is
+ * an audited file that drops the sanitisation its entry names. The exemption therefore cannot be
+ * widened from inside the exempted file, which is why this is a table rather than a path exclusion.
+ *
+ * Add an entry only with the review that earns it: what crosses the boundary, and what sanitises
+ * it before the DOM sees it. Both SVG entries cross with database-authored artwork and sanitise it
+ * through `src/lib/sanitizeSvg.ts`; the chart entry crosses with the theme block this package
+ * generates itself and carries no host or database text at all.
+ */
+const AUDITED_HTML_SINKS = [
+  {
+    path: "src/pages/CreateProject.tsx",
+    witness: "sanitizeSvg(tmpl.previewSvg)",
+    sinks: ["__html: sanitizeSvg("],
+  },
+  {
+    path: "src/pages/EditProject.tsx",
+    witness: "sanitizeSvg(design.previewSvg)",
+    sinks: ["__html: artwork"],
+  },
+  {
+    // The shadcn chart primitive's own generated custom-property block: CSS text assembled from
+    // `THEMES` and the chart config's colour values, never host or database prose. It opens the
+    // tag on one line and puts `__html` on the next, so both lines are named.
+    path: "src/components/ui/chart.tsx",
+    witness: "__html: Object.entries(THEMES)",
+    sinks: ["dangerouslySetInnerHTML={{", "__html: Object.entries(THEMES)"],
+  },
+];
+
+/** Which audited sink lines exist in `text` at `path`. Line indexes, 0-based. */
+function auditedSinkLines(path, lines, text) {
+  const claimed = new Set();
+  for (const entry of AUDITED_HTML_SINKS) {
+    if (entry.path !== path) continue;
+    if (!text.includes(entry.witness)) continue;
+    for (const sink of entry.sinks) {
+      const index = lines.findIndex((line, i) => !claimed.has(i) && line.includes(sink));
+      if (index !== -1) claimed.add(index);
+    }
+  }
+  return claimed;
+}
+
 /** Detection rules. `id` is stable and referenced by reports and tests. */
 export const RULES = [
   {
@@ -348,7 +397,25 @@ export const RULES = [
     pattern: /\b(?:has no|does not have|lacks|had no)\s+(?:`main`|main)\s+landmark\b/gi,
     message: "states that a page has no `main` landmark",
     fix: "check the source before repeating it — the editor's success branch renders `<main>` at `src/pages/EditProject.tsx:654`; if what is missing is a measurement, say that",
-    scope: ["src/", "index.html", "README.md", "docs/product/", "docs/content-review/", "content/"],
+    scope: ["src/", "index.html", "README.md", "docs/product/", "docs/architecture/", "docs/content-review/", "content/"],
+    exclude: ["src/test/"],
+  },
+  {
+    id: "markup-injection-sink",
+    // Writing HTML into the live DOM is the one place where this product's sanitisation boundary
+    // can be deleted with a one-line change. Every shape below is a *write*: `container.innerHTML`
+    // read back in a test is not a finding, `el.innerHTML = x` is. The three boundaries that
+    // legitimately write are named in `AUDITED_HTML_SINKS`, each with the sanitisation that must
+    // still be present for the exemption to hold, so adding a fourth sink anywhere — including in
+    // an audited file — is a build failure rather than a silent trust extension.
+    //
+    // Scoped to `src/` because the directive's concern is the active app bundle. `src/test/` is
+    // out: a test may attach markup to a detached node to prove a sanitizer works, and the hostile
+    // shapes are pinned by this file's own fixtures, which live under the excluded `scripts/`.
+    pattern: /(?:__html\s*:|dangerouslySetInnerHTML\s*=\s*\{\{|insertAdjacentHTML\s*\(|\.innerHTML\s*[+]?=[^=]|\.outerHTML\s*[+]?=[^=]|document\.write(?:ln)?\s*\()/g,
+    message: "writes HTML into the live DOM",
+    fix: "render the value as text, or sanitise it at the boundary and register the one line that writes it in AUDITED_HTML_SINKS with the sanitisation as its witness",
+    scope: ["src/"],
     exclude: ["src/test/"],
   },
 ];
@@ -396,6 +463,12 @@ export const MUST_NOT_MATCH = [
   // The sentence that replaced the claim the new rule below forbids. It talks about the same
   // element, so it is the case a future widening of that pattern would break.
   "the `main` landmark on the page a host works on is measured from source and pinned by a unit test, but has not been re-read in a browser since the repair",
+  // The markup guard is about *writing* HTML. Reading serialized markup back is how the renderer's
+  // own tests assert what they rendered (`src/test/invitationRenderer.test.tsx:445`), and
+  // `src/lib/sanitizeSvg.ts` names the sink in the JSDoc that documents the boundary. Both shapes
+  // are real lines in this repository, so the guard's narrowness is a checked fact, not a claim.
+  "const html = container.innerHTML.toLowerCase();",
+  "dangerouslySetInnerHTML). Every DB-provided SVG must pass through",
 ];
 
 export function isScannedPath(relativePath) {
@@ -414,14 +487,19 @@ export function isScannedPath(relativePath) {
 /** One violation per rule match in `text`, with 1-based line and column numbers. Rules
  *  that carry a `scope` are checked only against paths under one of those prefixes, and
  *  a rule's own `exclude` removes a path again — which is how the one module allowed to
- *  write a shape can stay in the repository while the same shape elsewhere is a finding. */
+ *  write a shape can stay in the repository while the same shape elsewhere is a finding.
+ *  `markup-injection-sink` additionally honours `AUDITED_HTML_SINKS`, which can vouch for
+ *  specific lines of specific files and for nothing else. */
 export function scanContent(relativePath, text) {
   const path = posix(relativePath);
+  const lines = text.split(/\r?\n/);
+  const auditedLines = auditedSinkLines(path, lines, text);
   const violations = [];
-  text.split(/\r?\n/).forEach((line, index) => {
+  lines.forEach((line, index) => {
     RULES.forEach((rule) => {
       if (rule.scope && !rule.scope.some((prefix) => path.startsWith(prefix))) return;
       if (rule.exclude && rule.exclude.some((prefix) => path.startsWith(prefix))) return;
+      if (rule.id === "markup-injection-sink" && auditedLines.has(index)) return;
       const re = new RegExp(rule.pattern.source, rule.pattern.flags);
       re.lastIndex = 0;
       let match = re.exec(line);
@@ -509,6 +587,12 @@ export function selfTest() {
       `copy = "machine-assisted wording counts as approved content",`,
     ],
     "main-landmark-absence-claim": `| Host editor on a phone | the page a host works on has no \`main\` landmark |`,
+    "markup-injection-sink": [
+      `element.innerHTML = weddingDetail.hostNoteHtml;`,
+      `<div dangerouslySetInnerHTML={{ __html: section.body }} />`,
+      `node.insertAdjacentHTML("beforeend", importedMarkup);`,
+      `document.write(response.markup);`,
+    ],
   };
   for (const [ruleId, fixture] of Object.entries(fixtures)) {
     const texts = Array.isArray(fixture) ? fixture : [fixture];
@@ -626,6 +710,67 @@ export function selfTest() {
     failures.push(
       `honest cultural-safety language produced ${culturalHits.length} violation(s): ${culturalHits.map((v) => `${v.rule} on ${v.matched}`).join(", ")}`,
     );
+  }
+
+  // The markup-injection guard is only worth having if the table is the *whole* exemption. Each
+  // pair below is one audited boundary as it really appears in the shipped file, read at its own
+  // path, and the four assertions after them are the ways an exemption could be quietly widened:
+  // a second sink in an audited file, a sink whose file stopped sanitising, the same line at an
+  // unaudited path, and a read-only `innerHTML` test assertion mistaken for an injection.
+  const auditedBoundaries = {
+    "src/pages/CreateProject.tsx": `dangerouslySetInnerHTML={{ __html: sanitizeSvg(tmpl.previewSvg) }}`,
+    "src/pages/EditProject.tsx": [
+      `const artwork = design ? sanitizeSvg(design.previewSvg) : null;`,
+      `<div className="h-full w-full" dangerouslySetInnerHTML={{ __html: artwork }} />`,
+    ].join("\n"),
+    "src/components/ui/chart.tsx": [
+      `      <style`,
+      `        dangerouslySetInnerHTML={{`,
+      `          __html: Object.entries(THEMES)`,
+      `        }}`,
+      `      />`,
+    ].join("\n"),
+  };
+  for (const [path, text] of Object.entries(auditedBoundaries)) {
+    const hits = scanContent(path, text);
+    if (hits.length > 0) {
+      failures.push(`the audited markup boundary ${path} was flagged: ${hits.map((v) => v.rule).join(", ")}`);
+    }
+  }
+  const sinkChecks = [
+    [
+      "a second, unaudited sink in an audited file",
+      "src/pages/CreateProject.tsx",
+      [
+        auditedBoundaries["src/pages/CreateProject.tsx"],
+        `dangerouslySetInnerHTML={{ __html: tmpl.previewSvg }}`,
+      ].join("\n"),
+    ],
+    [
+      "a sink in a file that no longer carries its sanitisation witness",
+      "src/pages/EditProject.tsx",
+      `<div dangerouslySetInnerHTML={{ __html: artwork }} />`,
+    ],
+    [
+      "an audited sink shape written at an unaudited path",
+      "src/pages/SomeNewPage.tsx",
+      auditedBoundaries["src/pages/EditProject.tsx"],
+    ],
+  ].map(([label, path, text]) => {
+    if (!scanContent(path, text).some((v) => v.rule === "markup-injection-sink")) {
+      return `the guard let through ${label}`;
+    }
+    return null;
+  });
+  for (const failure of sinkChecks) {
+    if (failure) failures.push(failure);
+  }
+  const readOnlyMarkup = scanContent(
+    "src/pages/Reading.tsx",
+    `const html = container.innerHTML.toLowerCase();`,
+  );
+  if (readOnlyMarkup.some((v) => v.rule === "markup-injection-sink")) {
+    failures.push("the guard flagged reading innerHTML, which is not an injection");
   }
 
   for (const phrase of MUST_NOT_MATCH) {

@@ -327,23 +327,34 @@ npm audit
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run product:check` is the contract guard: **28 rules** over the active surfaces this tree scans
-(181 files at this head) — retired brand names, fabricated social proof and per-guest pricing
-language, the retired scaffold vocabulary, which tables may be named outside the data adapter, and the
+`npm run product:check` is the contract guard: **29 rules** over the active surfaces this tree scans
+(179 files at this head) — retired brand names, fabricated social proof and per-guest pricing
+language, the retired scaffold vocabulary, which tables may be named outside the data adapter, the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets
-machine-assisted draft text read as though it had been reviewed. Nothing was removed to get from 23 to
-28. Three of the five Stage 5 rules deliberately reach into `docs/product/` and `docs/content-review/`,
-because this matrix is itself under the rule that forbids calling the draft candidate shippable; the
-last of the three (`main-landmark-absence-claim`) was added while assembling the Stage 5 report, after
-that report's own truth pass had left a stale current-state sentence about the host editor standing —
-it refuses an absence claim about a page's `main` landmark, and its positive control is the honest
-replacement sentence, so a future widening has to break that sentence to pass unnoticed. The rest still
-scan only `src/`, `content/` and the two entry documents, so a governance file that *quotes*
-a forbidden shape stays a document rather than becoming a finding. `docs/audits/**` is ignored, which
-records historical evidence verbatim. One named blind spot, because a rule count is not a security
-claim: none of the 28 rules says anything about `innerHTML` or sanitisation, so markup injection has
-never been caught by this checker and is not guarded by it.
+machine-assisted draft text read as though it had been reviewed, and one rule about writing HTML into
+the DOM. Nothing was removed to get from 23 to 29. Three of the five Stage 5 rules deliberately reach
+into `docs/product/` and `docs/content-review/`, because this matrix is itself under the rule that
+forbids calling the draft candidate shippable; the last of the three (`main-landmark-absence-claim`)
+was added while assembling the Stage 5 report, after that report's own truth pass had left a stale
+current-state sentence about the host editor standing — it refuses an absence claim about a page's
+`main` landmark, and its positive control is the honest replacement sentence, so a future widening has
+to break that sentence to pass unnoticed. Its scope now also covers `docs/architecture/`, which is
+where that same claim would be repeated if anyone wrote it back; the ADR and blueprint files there
+stay writable for every other rule, so a governance file that *quotes* a forbidden shape stays a
+document rather than becoming a finding. `docs/audits/**` is ignored, which records historical evidence
+verbatim. The markup rule (`markup-injection-sink`) is the newest, and it exists because the count
+above used to carry a named blind spot: no rule looked at `innerHTML` or sanitisation, so injection was
+guarded only by `src/lib/sanitizeSvg.ts` and the discipline of whoever edited the pages beside it. It
+fires on the *write* shapes — `__html:`, `dangerouslySetInnerHTML={{`, `insertAdjacentHTML(`,
+`.innerHTML =`, `.outerHTML =`, `document.write(` — anywhere in `src/`, and exempts exactly the three
+lines registered in `AUDITED_HTML_SINKS` at the top of the checker, each of which stays exempt only
+while the sanitisation its entry names is still in that same file. Reading `innerHTML` back is not a
+finding, and `src/test/` is out of scope, because a test may attach markup to a detached node to prove
+the sanitiser works. What the rule still cannot do, stated rather than implied: it cannot prove the
+sanitiser is correct (that is `src/test/sanitizeSvg.test.ts`), it cannot tell whether a registered
+boundary's witness is the right one — adding an entry is a review act, not a grep — and it does not
+watch `dist/`, which is a build artifact rather than a source of decisions.
 
 ## Database testing
 
