@@ -4361,3 +4361,182 @@ no `engines`, and the process that performed it was not this session's. It does 
 `Runtime.evaluate` hang, which did not recur in this window. Nothing here approves the Tamil candidate, contacts a
 hosted Supabase project, deploys, merges, rewrites history, or starts Stage 6; the `git ls-remote` read-back after
 each push (`be1ae37` for the branch, `328f0e3f…` for main, unchanged by this pass) is the evidence for that.
+
+## 38. Closure: the truth-sync commit, contamination events 6 and 7, the final coherent gate set, and what is left running
+
+Everything below is a record of what was measured after §37 was written. Nothing in §37's numbers was rewritten.
+
+### 38.1 the truth-sync commit, and the four claims in my own draft that it refused
+
+`4ab2e9fdbd04d643e8e271953ec7c5e4a6e434f2` — `docs(truth): append audit §37 and sync the matrix to what it now
+measures` — is **4 files, 290 insertions, 6 deletions**: `docs/audits/stage-5-pack-driven-authoring-review.md`
+(+273), `docs/product/feature-readiness.md` (10 lines touched), `docs/product/design-principles.md` (+8),
+`README.md` (5 lines touched). It was pushed with an explicit refspec (`be1ae37..4ab2e9f`) and read back; §38.6
+prints the latest read-back.
+
+Four statements in the uncommitted draft were wrong and each was corrected against a primary source before the
+commit was made, because the alternative — a section that reads well and does not match its own logs — is the
+failure mode this whole pass is guarding against:
+
+- **`build:dev` was in the gate list.** It is not. `gates3.summary.log` has twelve entries and none of them is a
+  dev-graph build; §37.10 now says plainly that `npm run build:dev` was not run in this window and claims no result
+  for it.
+- **"nine pushes"** was not supportable. `ci.yml` fires only on `push`/`pull_request` to `main`, so the pushes this
+  branch has had — including the ten commits §37.1 lists, each pushed immediately with an explicit refspec — started
+  no workflow. §37.10 states it that way instead.
+- **Two commits were described by the wrong files.** `git show --stat` says `60cb331` is `package.json` +1/−1 with
+  `package-lock.json` +117, and `6a67157` is the `markup-injection-sink` rule (+151), its self-test fixture (+2) and
+  **three** docs it made honest — not two. The draft's cells were replaced with those numbers.
+- **Two causal stories were invented.** "19 = 18 workbench targets + the band" is a coincidence, not a derivation
+  (§30.10's 18 came from the earlier 59-check capture; `g8`'s extra member is the band's dismiss control), and the
+  draft's explanation for the 181 → 179 `product:check` drift was replaced by the measured one: `walk()`
+  (`scripts/check-product-contract.mjs:524-532`) reads the filesystem, `.yaml` is a scanned extension
+  (`:474-485`), both clones track the same **246** files and each clone's tracked-and-scanned subset is **179**
+  (`node ../q5-logs/scannedcount.mjs <clone>`), and the on-disk difference is exactly
+  `pnpm-lock.yaml, pnpm-workspace.yaml` in the legacy worktree with nothing in `s5qual`. So an **181 reading is
+  itself evidence of the contamination's footprint**, which retroactively corroborates §35.9 and §36.6.
+
+The matrix rows it synced were rewritten to the authoritative runs rather than padded: the a11y row now carries
+**63/52/0** from `g13-a11y-shrink.log`, the 19-target closure list, the `43x44` flex-shrink defect and its
+`shrink-0` fix at `src/pages/EditProject.tsx:631`, and the browser `<main>` re-read printing
+`{"main":1,"header":1,"nav":0}`; journey A now carries tag `stage5ui-muuyzpt2-6ugfk` at **89/12/0**, explicitly
+superseding 86/11/0 rather than deleting it; the renderer row carries the §37.7 npm re-run at **143/33/0**, marked
+"superseded, not deleted". `README.md:162` pointed at `src/pages/signupNotificationTruth.test.tsx`, a file that has
+never existed; it now names `src/test/signupNotificationTruth.test.tsx` and the per-host browser assertion that
+actually exists (`scripts/stage5-ui-journeys.mjs:411-437`, which waits on the no-confirmation copy and checks it).
+`docs/product/design-principles.md` gained the scoping paragraph for the Stage 1 40 px deviation, and the shared
+defaults in it are now quoted from source rather than from memory: `src/components/ui/button.tsx:20-23` ships
+`default: "h-10 px-4 py-2"`, `sm: "h-9 rounded-md px-3"`, `icon: "h-10 w-10"`, and `input.tsx:11` ships `h-10` —
+all unchanged by this pass.
+
+### 38.2 events 6 and 7: the same two files came back 58 seconds after being removed
+
+- **14:40:26/27 +05:30** — `s5qual/node_modules` was rewritten by an external `pnpm install` and
+  `pnpm-lock.yaml` + `pnpm-workspace.yaml` appeared in the repo root, **26 s after** the `g26` `markersafter` gate
+  printed npm-clean and **86 s after** `4ab2e9f`. Recorded as event 6, moved to
+  `../q5-logs/pnpm-contamination-6-2026-10-05T1440/` with their SHA-256 taken first: `0afc0afae24e8252…fd8813a1`
+  (lock) and `31ce3e03cd4f1ede…32f444ed` (workspace) — byte-identical to event 5's pair, so no npm lock was lost
+  from the repository, and the workspace file is three lines — an `allowBuilds:` block whose two values are the
+  literal placeholder text `set this to true or false`, for `@swc/core` and `esbuild`, which only an interactive
+  `pnpm install` writes.
+- **Restoring the tree required one kill, and it was this session's.** `npm ci` refused to run while esbuild was
+  held: this session's `vite preview` (PID 28932; its recorded parent 36912 was already gone) was stopped, and
+  another session's `node serve.js` (PID 36064) was left running untouched. `npm ci` then exited 0
+  (`g27-npm-restore-6.log`).
+- **14:43:24 +05:30** — the identical pair re-materialised in the repo root, **58 s after** event 6 was quarantined
+  and while `node_modules` had just been restored to the locked npm tree. Moved to
+  `../q5-logs/pnpm-contamination-7-2026-10-05T1443/` (7th drop, 6th distinct timestamp, same two SHA-256 values).
+- **What that sequence establishes.** A write that returns byte-identically after its target has been deleted, in a
+  tree that had just been rebuilt by npm, cannot be caused by that tree. It also cannot be caused by this session's
+  preview server, which was stopped before the reappearance. The actor is outside this repository and outside this
+  pass; its identity is still not known, and no root-cause claim is made here.
+- **Quarantine, never deletion.** Both pairs are kept with `PROVENANCE.txt`, neither was staged, neither was
+  committed, and `git status --porcelain` is empty at every measurement point in this section.
+
+### 38.3 the final coherent gate set, run entirely on an npm-provenanced tree
+
+`g28-final-gates.log`, HEAD `4ab2e9fdbd04d643e8e271953ec7c5e4a6e434f2`, 14:49:00 → 14:51:33 +05:30. **Sixteen
+entries, one non-zero exit**, and the installer markers are npm-clean on both sides of the set —
+`npm .package-lock.json: true`, `.pnpm present: false`, `.modules.yaml present: false`, `vite is symlink: false`,
+`pnpm-lock.yaml in repo root: false`, `pnpm-workspace.yaml in repo root: false`, before and after:
+
+| tier | exit | what the output says |
+| --- | --- | --- |
+| `markers-before` | 0 | all six npm-clean booleans above |
+| `typecheck` | 0 | clean |
+| `lint` | 0 | `✖ 9 problems (0 errors, 9 warnings)`, all nine `react-refresh/only-export-components` in `src/components/ui/*` |
+| `dbtypes` | 0 | `Database contract OK — 19 migration file(s)`; 19 public + 10 non-client tables; 29 query column groups reconciled, 0 findings |
+| `productcheck` | 0 | `Product contract OK — 179 active file(s) scanned, 0 violation(s).` |
+| `selftest` | 0 | `Product contract self-test OK — 29 rule(s) verified.` |
+| `unit` | 0 | `Test Files 30 passed (30)`, `Tests 440 passed (440)` |
+| `build` | 0 | `✓ 2204 modules transformed`; `dist/assets/index-CNMnmIrw.js 509.23 kB │ gzip: 154.57 kB` |
+| `chunk` | 0 | `-rw-r--r-- … 509226 Oct 5 14:51 dist/assets/index-CNMnmIrw.js` |
+| `audit-production` | 0 | `found 0 vulnerabilities` |
+| **`audit-dev`** | **1** | `13 vulnerabilities (2 moderate, 11 high)` — the dev graph; the split §37.10 records |
+| `diffcheck` | 0 | `git diff --check` clean |
+| `status` | 0 | `git status --porcelain` empty |
+| `secret-scan` | 0 | 487 added lines, ten rules — see §38.4 before trusting this row |
+| `markers-after` | 0 | all six npm-clean booleans again |
+| `head-final` | 0 | `git rev-parse HEAD` → `4ab2e9f…` |
+
+One number in that log is a measurement without an explanation and is recorded as such: `node_modules` top-level
+directories read **357** at `markers-before` and **359** at `markers-after`, while `g26`'s identical probe at 14:39
+read 358. The
+restore that produced 357 is itself in evidence — `g27-npm-restore-6.log`, npm ci at 14:45:10, exit 0, 357 top-level
+directories after, pnpm markers all false — and no install ran inside the gate set, so nothing accounts for the last
+two. The **six booleans** are the provenance signal and the directory count is not; do not treat it as one.
+
+### 38.4 two credential sweeps, and the rule that silently did not run
+
+The `secret-scan` tier above printed a blank where a count should have been, and the reason is in the same lines of
+the log: `grep: unknown option -- -----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----`. The pattern begins with a
+`-`, so grep parsed it as an option, and the `|| true` in my own script converted that failure into an empty value —
+which, in a table, looks exactly like a clean rule. **A rule that did not run is not a rule that passed.** Two
+fixes followed, and both are visible rather than tidied away: the pattern is now passed after `-e`, and the sweep was
+re-run wider at 14:54:07 (`g29-secretscan-widened.log`, same HEAD) over **every** line this window added, **760
+lines including `docs/audits`**, which the narrower pass had excluded. Ten rules — `jwt-like`, `sb-secret-shape`,
+`service-role-jwt-text`, `aws-key`, `github-token`, `pem-private-key`, `url-userinfo`, `long-base64`,
+`hosted-supabase`, and the deliberately broad `any-eyJ-prefix` — **0 each**. The scanner counts and never prints a
+matched value, and no `.env` or `.env.local` content was read into any log in this window.
+
+### 38.5 what was not re-run at the final HEAD, and the limit of the reason given
+
+The SQL batteries, HTTP battery, the four browser journeys, the 10×4 render sweep, the a11y/mobile instrument and the
+network/privacy observation were **not** re-executed after `4ab2e9f`. The reason is testable rather than assumed:
+the last commits to touch shipped source are `344c3b1` (editor CSS) and `be1ae37`/earlier (`scripts/` instruments,
+which are not in the bundle), `4ab2e9f` changes only four documentation files, and the build produced for this gate
+set is the same artefact the browser tiers were run against — `g16-rebuild-npm3.log` (13:34:47),
+`g20-npm-restore-4.log` (13:49:11) and `g28-final-gates.log` (14:51) each `ls -l` `dist/assets/index-CNMnmIrw.js` at
+**509226 bytes**, same name same length, and every full build logged in this window reports `✓ 2204 modules
+transformed` (`build.log` 12:23, `build2.log`, `g3-build.log`, `g28-final-gates.log`). **The limit:** name and byte
+length are not byte identity — and the older logs in this very set prove chunk names do move when sources move
+(`g3-build.log` printed `index-BWDFhgPY.js` at 509.19 kB) — while no digest was taken for the earlier builds because
+every `npm run build` cleans `dist/`. So the first digest at this HEAD is now recorded, in `g30-chunk-hash.log`:
+`index-CNMnmIrw.js` = `54324db6d00e5fb52ca4f9d4bff69726e3a03813cf5bfd2e237d00ec72d0d7d2`,
+`EditProject-BXWprzJ9.js` = `2baf774b5e2f97c913f73a505f37458fac67d343a22dda32c8176597c65a5cc0`. A later pass can
+compare against those instead of against a name. The claim this supports is "the browser tiers ran against a bundle
+whose chunk name and byte length match the one measured at this HEAD", and no stronger claim is made.
+
+### 38.6 what is left running, and the final remote read-back
+
+`../q5-logs/g31-final-readback.log`, 15:04:24 +05:30:
+
+```
+328f0e3fef5a39aa5f91182fb54bf0a97d717e69	refs/heads/main
+4ab2e9fdbd04d643e8e271953ec7c5e4a6e434f2	refs/heads/stage5/pack-driven-authoring-review
+```
+
+Local `HEAD` equals the branch tip, `refs/heads/main` is the same SHA §37 recorded, and the only local branch is
+`stage5/pack-driven-authoring-review`. `git status --porcelain` is empty. **main was not pushed to, touched or
+rewritten; nothing was merged; no PR was opened** — `ci.yml` triggers only on `main`, so opening one or pushing
+there would spend the exhausted Actions quota, and no hosted-CI PASS is claimed anywhere in this audit.
+
+The local stack is left running, as instructed: `supabase_kong_localvivaahvarnam` (0.0.0.0:54400→8000, healthy),
+`supabase_db_localvivaahvarnam` (54401→5432, healthy), `supabase_inbucket_localvivaahvarnam` (54403→8025, healthy),
+`supabase_auth_localvivaahvarnam` and `supabase_rest_localvivaahvarnam`. `DueWeave` was not reset, stopped or
+read. This session's `vite preview` was stopped as a precondition for `npm ci` and was not restarted — `netstat`
+shows **0** listeners on 4173 — while the other session's `node serve.js` (PID 36064) was left alone. The
+quarantine directories, the `.mjs`/`.sh` instruments and every gate log live in `../q5-logs`, outside the repository
+and outside the commit.
+
+### 38.7 what this pass leaves open
+
+- **Cultural approval of the Tamil candidate is withheld.** It needs a human reviewer and this pass did not
+  substitute for one.
+- **The `enable_confirmations = true` arm is untested.** The local stack confirms accounts without email, which is
+  exactly what the sign-up copy and `stage5-ui-journeys.mjs:411-437` assert; the opposite configuration's behaviour
+  is unevidenced.
+- **44 px is not a product-wide rule.** §37 raised the host workbench and the notification band and the instrument
+  asserts a 24 px floor (`MIN_TARGET_PX`, `scripts/stage5-a11y-mobile.mjs:89`, assertion at `:700`); 32–40 px pill
+  buttons remain on other surfaces and `src/components/ui/*` still ships 40 px defaults. The `pr-8 → pr-14`
+  change also narrows the band's text column by 24 px, and no screenshot of the band was captured.
+- **Landmarks are printed, not asserted.** The `<main>` that §30.10 found missing from the success branch now
+  exists (`src/pages/EditProject.tsx:654`, landed in `344c3b1`), but the instrument still asserts nothing on
+  landmark counts.
+- **Two causes remain unknown:** the §30 `Runtime.evaluate` hang, which did not recur in this window, and the
+  external process behind seven contamination drops whose output is byte-identical every time.
+- **No Stage 6 work was started**, and no deployment, hosted-Supabase contact, history rewrite, secret printing or
+  word-ban was performed. The sanitised SVG boundary was not weakened: `sanitizeSvg-CfK6a1-E.js` is still in the
+  build graph at 29.89 kB.
+
+Stage 5 is qualified on the evidence above and pushed to its branch. It is **not** merged.
