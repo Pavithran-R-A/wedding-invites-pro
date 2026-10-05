@@ -3888,3 +3888,203 @@ to paths this task created, and the standing instruction is "Do not touch pnpm f
 tree means `npm ci`, which deletes `node_modules` while another process is writing into it, so it is not
 attempted unasked; it is listed for the user's decision before any further browser, HTTP or SQL tier is
 measured on this host.
+
+---
+
+## 36. §37–§40 closure: the push, the cleanup inventory, and the truth defect the report assembly found (appended, not a rewrite)
+
+### 36.1 What §37 committed, and what it never staged
+
+Twelve commits sit between `origin/main` and this branch's head: `git rev-list --count origin/main..HEAD` →
+**12**, with `git merge-base origin/main HEAD` → `328f0e3fef5a39aa5f91182fb54bf0a97d717e69`, i.e. the branch
+starts where §0 measured it starting. Ten are Stage 5's implementation, dated 2026-10-03:
+
+| SHA | Subject |
+| --- | --- |
+| `801e693` | feat(supabase): make a review bind to the bytes it reviewed |
+| `5c137ec` | feat(pack-admin): give release maintenance an operator path that cannot invent a review |
+| `e6924d6` | fix(deps): close the five-stage router deferral by moving to React Router 7 |
+| `3a23b12` | docs(supabase): point the Stage 5 runner at instruments that exist |
+| `c134e29` | test(api): qualify the pack-driven document and maintenance surface over PostgREST |
+| `228e1a1` | fix(ui): put the notification where the header is not, and say what signup did |
+| `4135c26` | feat(editor): build the authoring surface from the server's resolved document |
+| `cb15e25` | test(unit): cover the resolved document, the outline it drives, and the rules that bind it |
+| `ca1e253` | test(contracts): add the cultural-safety rules, and stop the DB checker certifying the past |
+| `0cffc2e` | test(browser): drive the four journeys, the sweep, the a11y pass and the network classification against a production build |
+
+Two are the truth sync, dated 2026-10-05: `93c8329` "docs: state what Stage 5 built without claiming what it did
+not" and `37df916` "docs(audit): record Stage 5 as measured, including the measurements that moved". Every one
+was staged by explicit path with `git diff --cached --stat` read before the commit; `git add .` and `git add -A`
+were never invoked. The evidence that the rule held is this window's own `git status --short`: the two pnpm
+files are the only untracked entries besides the ignored logs, and they are still untracked.
+
+### 36.2 §38's push, and the two ways it was verified
+
+The push named a full refspec — this branch on the left, this branch's `refs/heads/…` path on the right — and
+created the branch on the remote; `-u` was not used, because §0 recorded the branch's upstream as
+`origin/main` and setting a new upstream would have made a later bare `git push` able to reach main. Two
+independent reads:
+
+* `git reflog show refs/remotes/origin/stage5/pack-driven-authoring-review` → one entry,
+  `37df916 … @{2026-10-05 08:49:16 +0530}: update by push`.
+* `git ls-remote origin`, read in full this window:
+  `refs/heads/stage5/pack-driven-authoring-review` = **`37df916b0f8262d370d0ee11085b098cea415b4a`** (equal to local HEAD),
+  and `refs/heads/main` = **`328f0e3fef5a39aa5f91182fb54bf0a97d717e69`** — the same SHA as `origin/HEAD` and as
+  `refs/heads/stage4/tradition-pack-foundation`, so main has not moved since Stage 4's closure and this stage
+  never touched it. The three earlier stage branches (`stage1` `e93912d`, `stage2` `a51856f`, `stage3` `b4b2022`)
+  are also unchanged.
+
+### 36.3 §39's inventory: what was measured, what was kept, and why nothing was deleted
+
+§39's mandate is to delete token-bearing scratch files **by exact path**, which requires a scan rather than an
+assumption. Root-level logs now number **26** (22 `s37-*`/`s39-*`/`s40-*`/`s41-*` gate captures and 4
+`stage5-*.scratch.log` battery captures), all listed by `git status --short --ignored=matching` as `!!` and all
+ignored by `.gitignore:3`'s `*.log`. Every one was scanned for nine classes: `service_role`, a JWT-shaped
+`eyJ…` run of ≥ 10 characters, `sb_secret|sb_pat|github_pat_|ghp_…`, any
+`SUPABASE_(PUBLISHABLE|ANON|SERVICE|URL|PROJECT)…` assignment carrying a value, `eyJhbGciOi`, a
+`BEGIN … PRIVATE KEY` block, and the words `password` and `secret`. The result is **four hits, all in two files,
+all inside a test's own name**: `stage5-official-run1.scratch.log` and `run2` at `:56`
+("API30 republishing mints a different secret instead of waking the revoked one") and `:141`
+("no answer the API gives a customer contains key material or the run password") — the second being the leak
+assertion succeeding, printed as its passing name. No log matches any credential-shaped pattern. **Nothing was
+deleted**, because on the measured evidence there is no token-bearing scratch file to delete; the logs stay as
+the citations §34–§36 point at.
+
+Two env files were inventoried rather than assumed. `.env` holds 3 keys
+(`VITE_SUPABASE_PROJECT_ID`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL`) and mtime
+2026-09-24 21:30:19; `.env.local` holds 7, including `SUPABASE_LOCAL_SERVICE_ROLE_KEY` and
+`SUPABASE_LOCAL_DB_URL`, and mtime 2026-09-26 09:52:47. Both predate Stage 5, both are git-ignored and neither
+is in any tree, and both are read by instruments this stage wrote (`supabase/tests/api/run.sh`, the
+`stage5_*.test.mjs` battery, `scripts/stage5-ui-journeys.mjs`, and README's setup section). They are local-stack
+configuration, not this task's scratch, so §39 leaves them and names their class here — the privileged values in
+`.env.local` are the local stack's own, issued by `supabase start` on this machine.
+
+`pnpm-lock.yaml` and `pnpm-workspace.yaml`: untouched, untracked, unstaged, exactly as §35.9 left them.
+`artifacts/stage4-render` (5 entries, directory mtime 2026-09-28 21:18) is Stage 4's evidence and was not this
+task's to remove. `dist/`, `node_modules/`, `supabase/.branches/` and `supabase/.temp/` are tool-owned and left.
+
+Servers: `netstat -ano -p TCP` lists **39** listeners, and **none** of them is on 3000, 4173, 5173 or 8000 — so
+no dev server, no `vite preview` and no ad-hoc static server was left behind by the browser tiers. The only
+listeners in this project's port range are 54400, 54401 and 54403, which `supabase/config.toml:24`, `:37` and
+`:61` assign to kong, db and inbucket; `docker port supabase_kong_localvivaahvarnam` confirms
+`8000/tcp -> 0.0.0.0:54400`. The stack itself was found running (containers created 2026-10-02 by §34, started
+2026-10-05T03:05:55Z by a process this task did not run), the user chose **"Leave it running"**, and its state was
+then read only. A row count over every table `pg_tables` lists under `public` — **19** tables, one query per
+table, no write — returns **0** for all of them except two: `tradition_packs` **11** and
+`tradition_pack_releases` **17**. That includes `weddings`, `invitation_drafts`, `invitation_versions`,
+`publications`, `guest_households`, `rsvp_responses`, `venues`, `wedding_people`, `wedding_events`,
+`wedding_assets`, `profiles`, `user_roles`, `entitlements`, `approval_requests`, `approval_feedback`,
+`household_event_scopes` and `design_templates`. The 11 pack keys are all qualification names —
+`stage4_http_*`, `stage5_http_*`, `stage5_cli_*`, `stage5_retire_*` — and no cultural pack name is among them, so
+the real Tamil candidate is not a row in this database at all. Across the 17 releases: `status` counts
+7 approved / 6 deprecated / 2 draft / 2 reviewed, `machine_assisted` is true on **all 17**, `reviewed_by` is NULL
+on **all 17** (no row is attributed to a user account — and note that Stage 4's
+`review_metadata_is_mandatory` CHECK at `20260927120000_stage4_tradition_pack_releases.sql:158` does not require
+that column, which is why a NULL there is a measurement rather than a proof), and `approved_at` is non-null on
+exactly the 13 rows whose status makes it mandatory per `:166`. These are the synthetic approvals the HTTP and CLI
+tiers minted through the maintenance verbs; they are qualification data, and §34.6's four flags on the real
+candidate are unchanged because no step after it wrote to that row. `docker ps` this window printed exactly five
+containers, every one named `*_localvivaahvarnam`; no DueWeave container appears in that output at all, which is a
+stronger statement than "untouched by this stage".
+
+### 36.4 The finding §40's assembly produced, its repair, and the gate that caught the repair being incomplete
+
+The directive asks the final report field by field, and filling in the ACCESSIBILITY RESULT field meant reading
+the readiness row against the source rather than trusting the row. It did not match. `docs/product/feature-readiness.md:171`
+still stated, as a live limitation, that "**the page a host actually works on has no `main` landmark**",
+citing `EditProject.tsx`'s success branch opening a `<div>` at `:625`. The branch has rendered `<main>` since
+Stage 5's own one-element repair at `src/pages/EditProject.tsx:654`, committed in `4135c26`. §36's truth sync
+passed over that row because the sentence is true-looking, internally consistent, and names real line numbers —
+for its other two branches, which are still `<main>` at `:584` and `:598`.
+
+What is actually missing is not the element but a measurement. The three instrument runs that printed
+`{"main":0,"header":1,"nav":0}` all predate the repair; `scripts/stage5-a11y-mobile.mjs:232-233` and `:697`
+report the landmark count as a *measurement* and assert nothing on it; the only current-state evidence is
+`src/test/editInvitationPage.test.tsx:938`, a jsdom assertion that the loaded workbench names its content region
+as the page's main landmark (it passed in §36.5's run). The `header:1` beside it is the invitation document's own
+`<header>` (`src/components/invitation/InvitationRenderer.tsx:387`), not page chrome. So the row was rewritten to
+say exactly that — measured from source and pinned by a unit test, **not re-read in a browser since the repair** —
+and the honest sentence replaces the false one rather than the claim being deleted.
+
+A second instrument change follows the directive's rule that a real issue gets a fix *and* a regression test at
+the level the defect lives at. The level here is documentation truth, so the checker gained rule
+**`main-landmark-absence-claim`** (`scripts/check-product-contract.mjs`, the 28th), pattern
+`/\b(?:has no|does not have|lacks|had no)\s+(?:`main`|main)\s+landmark\b/gi`, scoped to the document prefixes the
+other doc-facing rules use. It is deliberately narrow — an absence verb directly on the landmark — because the
+replacement sentence is about the same element and must not fire; that near-miss is pinned as a `MUST_NOT_MATCH`
+entry, and the old false sentence is pinned as the rule's positive-control fixture. The derived counts moved
+with it: README's rule list 27 → **28** ("Three of the five" Stage 5 rules, since this one guards documentation
+rather than culture) and `docs/product/content-governance.md`'s history row and blind-spot sentence to match.
+Writing that README sentence produced the first near-miss by hand: the draft said the rule refuses text claiming
+a page "lacks a `main` landmark", which the new pattern matches, so the wording was changed before the checker
+ran. Note the asymmetry this section is exposed to as well: `docs/audits/**` is outside `isScannedPath`, so this
+file can quote the forbidden sentence freely, which is why the quote above is safe to leave in an audit and was
+not safe to leave in a product document.
+
+Then the unit tier failed, and it failed **for a different reason than the one §35.7 recorded**. The checker's
+own inventory test (`scripts/product-contract.test.mjs:18-51`) scans a fixture corpus and asserts that the set of
+rule ids it detects equals `RULES`' full id list — so adding a rule without adding a line that fires it is a gate
+failure by design. `s40-unit-1.log` printed exactly that: **439 of 440 in 30 files**, one failure,
+`expected [ 'ad-hoc-supabase-client', …(26) ] to deeply equal [ 'ad-hoc-supabase-client', …(27) ]` at
+`scripts/product-contract.test.mjs:51:62`, with the diff naming `main-landmark-absence-claim`. That is a real,
+reproducible, deterministic failure caused by this tranche's incomplete instrument change — not host contention,
+and the contrast is measured rather than asserted: `appRoutingAuthIsolation.test.tsx`, §35.7's timing-sensitive
+assertion, passed in the same run.
+
+The repair went the only honest way: a fixture line was **added** to the corpus so rule 28 must fire, the
+equality was left exactly as strict as it was, and no `scope`, `exclude`, `pattern` or `message` was relaxed
+anywhere. The rule can refuse more text than §35.9's checker could, and never less. Re-run in isolation first —
+`npx vitest run scripts/product-contract.test.mjs` → **14 passed (14)** (`s40-unit-pc-1.log`) — then as a tier.
+
+### 36.5 The Node tier at the repaired tree
+
+Each command captured to its own file, read in full, with the exit code taken from an adjacent `$?` written into
+the same log rather than from a pipeline. These runs are on the **content** of §36.4's five files as they will be
+committed, taken before the two closure commits existed; §40 carries the confirmation run at the final SHA, so no
+number below is claimed to be post-commit.
+
+| Gate | Command | Result | Log |
+| --- | --- | --- | --- |
+| product contract scan | `node scripts/check-product-contract.mjs` | `181 active file(s) scanned, 0 violation(s)`, exit 0 | `s41-productcheck-1.log` |
+| product contract self-test | `… --self-test` | `28 rule(s) verified`, exit 0 | `s41-selftest-1.log` |
+| lint | `npm run lint` | exit 0, **0 errors / 9 warnings**, same nine files as §34 | `s41-lint-1.log` |
+| typecheck | `npm run typecheck` | exit 0, no diagnostics | `s41-typecheck-1.log` |
+| unit | `npx vitest run --maxWorkers=1` | **440 passed (440)** in **30 files**, 84.50 s, `unit_exit=0` | `s41-unit-1.log` |
+| db contract | `npm run dbtypes:check` | `Database contract OK — 19 migration file(s)`, schema 19 public + 10 non-client tables, client types 19 tables, 29 query column groups reconciled, **0 findings** (the report line is the success marker; no exit code was appended to this log) | `s40-dbtypes-1.log` |
+| build | `npm run build` | `✓ 2212 modules transformed`, **29** `assets/*.js` chunks, entry `index-D4iQch0t.js` 577.43 kB (172.27 kB gzip), `✓ built in 40.80s`, plus vite's own >500 kB chunk warning | `s40-build-1.log` |
+
+Same 181 files scanned as §35.9, so the repair added a rule without changing the scan's population. In §36.5's
+unit run `editInvitationPage.test.tsx` took 4110 ms for its 34 tests and `appRoutingAuthIsolation.test.tsx`
+824 ms for 5 — the second is a data point for §35.7: the assertion that timed out twice at the default worker
+count passed comfortably here, and the tier's worker policy is still uncommitted, so the margin remains a live
+product-instrument limitation rather than a fixed one.
+
+### 36.6 The one number this section cannot attribute, and what attributing it costs
+
+Two build measurements now stand on record for the same source tree: §34's on a locked npm tree — **2204 modules,
+29 chunks, entry `index-BWDFhgPY.js` 509.19 kB / 154.55 kB gzip, `dist` 990K** — and §36.5's on the substituted
+tree — **2212 modules, entry `index-D4iQch0t.js` 577.43 kB / 172.27 kB gzip**. The delta is +68.24 kB raw /
++17.72 kB gzipped, and it is not yet attributed to anything in this branch's source: markers read again this
+window show `node_modules/.package-lock.json` at its §34 mtime 2026-10-02 17:53:20 sitting alongside
+`node_modules/.pnpm` (467 directories) and `node_modules/.modules.yaml` at 2026-10-05 08:49:13, with
+`node_modules/vite` a symlink — a pnpm-shaped tree written on top of the npm one, which is §35.9's recurrence,
+still present. Every browser tier in this stage qualified the **locked-tree** bundle. Deciding which number the
+report should carry requires `npm ci`, and `npm ci` deletes `node_modules` while another process is writing into
+it on this host; it is therefore listed for the reviewer's decision and §40 prints both numbers without choosing.
+
+### 36.7 What this section does not claim
+
+It does not claim the last two commits re-qualified any tier that their inputs could affect. Their inputs are
+`README.md`, two files under `docs/product/**`, the checker, the checker's unit test, and this file — so the
+tiers that read them (product contract scan, self-test, unit) re-ran in §36.5, and the tiers that do not (SQL
+battery, HTTP battery, browser journeys, render sweep, a11y and network runs) were not re-run. No `src/` path and
+no `supabase/migrations/**` path is in the diff, which is why their numbers still describe this tree; what those
+tiers carry forward, unaltered, is §35.5's "measured-then-comment-corrected" status for the SQL battery and §35.4's
+two open browser items — the post-repair `<main>` re-read and the sign-up-copy assertion — plus §35.4's duplicated
+`API35` test id, which needs a stack run to rename safely.
+
+It does not claim the substituted-tree build is the bundle the stage qualified; §36.6 says explicitly that it is
+not, and that the qualified bundle is §34's. It does not claim the running stack's 11 packs or 17 releases are
+anything other than synthetic qualification data: the Tamil candidate's four flags were last measured in §34.6
+and no step after it wrote to that row. And nothing here merges, deploys, contacts hosted Supabase, approves a
+Tamil release, or starts Stage 6. `git ls-remote` in §36.2 is the evidence that main did not move.
