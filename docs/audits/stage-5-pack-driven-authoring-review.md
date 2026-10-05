@@ -4574,4 +4574,58 @@ before the commit named only `docs/audits/stage-5-pack-driven-authoring-review.m
   is still up; `main` is still `328f0e3f…`; and nothing here merges, deploys, contacts a hosted Supabase project,
   prints a secret value, approves the Tamil candidate, rewrites history or starts Stage 6.
 
+### 38.9 the node gate set re-run at the final HEAD, and the one thing that measurement changed
+
+One more drop landed after §38.8 was pushed: the identical pair at **15:46:41** (`g38`), within half a minute of the
+`e01eaec` read-back printed at 15:46:16, again with `node_modules` converted (`.pnpm present: true`, 361 top-level
+directories), again **not** in any commit — `git diff --cached --stat` for `e01eaec` printed one file, and the
+pre-commit probe at 15:46:01 had seen both markers clean. Every one of the nine drops is
+byte-identical (`0afc0afae24e8252…`, `31ce3e03cd4f1ede…`), each within roughly half a minute of this session's last
+write. `stat` over the nine quarantined locks is the authoritative tally of the writes themselves — 12:31:25,
+12:51:39, 13:30:14, 13:44:16, 14:04:22, 14:40:26, 14:43:24, 15:34:54, 15:46:41, **nine distinct timestamps, every
+file 214689 bytes** — which supersedes the drop-versus-timestamp counts §38.2 and §38.8 reached by counting
+quarantine directories instead of mtimes. §38.2's "the actor is outside this repository" is therefore understated:
+it tracks this session's activity, and nothing this pass does can stop it, so the defence this pass relies on is that
+the files are never staged and the tree is re-provenanced before every gate set. The npm tree was restored again
+(`npm ci`, exit 0, 357 dirs).
+
+The node tier was then re-run whole at `e01eaec2a1a29cef35d798bba2d01198c64e0de9` (`g39-final-node-gates.log`,
+15:52:32 → 15:56:18, **seventeen entries, one non-zero**): npm-restore 0 · markers-before 0 · typecheck 0 · lint 0
+(`✖ 9 problems (0 errors, 9 warnings)`, all `react-refresh/only-export-components`) · dbtypes 0 (`19 migration
+file(s)`) · productcheck 0 (`179 active file(s) scanned, 0 violation(s)`) · selftest 0 (`29 rule(s) verified`) ·
+unit 0 (`30 files / 440 tests`) · build 0 (`2204 modules`, `index-CNMnmIrw.js 509.23 kB │ gzip: 154.57 kB`) ·
+chunk 0 · audit-production 0 (`found 0 vulnerabilities`) · **audit-dev 1** (`13 vulnerabilities (2 moderate, 11
+high)`, the dev graph only, §37.10's split) · diffcheck 0 · status 0 (empty) · secret-scan 0 · markers-after 0 ·
+head-final 0. `markers-before` read 357 directories and `markers-after` again read **359** — the same +2 §38.3
+recorded, and §38.8's population note now has a second instance of it.
+
+The chunk tier is the one place this run bought real information. `ls -l` printed
+`509226 Oct 5 15:56 dist/assets/index-CNMnmIrw.js` and `sha256sum` printed
+`54324db6d00e5fb52ca4f9d4bff69726e3a03813cf5bfd2e237d00ec72d0d7d2` — **exactly the digest §38.5 recorded for the
+14:51 build at `4ab2e9f`**. So the two documentation-only commits between them left the shipped bundle unchanged in
+every way a rebuild can detect: rebuilding at the final HEAD reproduces the earlier artefact byte for byte, which is the strongest
+statement the surviving evidence allows about why the browser tiers were not re-run (it is still not a digest of the
+build they *did* run against — §38.5's limit stands, and `dist/` is cleaned by every build).
+
+The credential sweep re-ran widened over **974 added lines** (`c6cf0c7..HEAD`, `docs/audits` included) and returned
+0 on ten of its twelve rules, with two non-zero counts that are both this audit talking about itself and are classified here
+rather than smoothed away: `long-base64-loose` **2** — the two §38.5 lines carrying 64-hex-digit build digests, which
+is why `long-base64-gated`, the same rule requiring a `+` or `/`, printed **0**; and `any-eyJ-prefix` **1** — the
+line naming the `any-eyJ-prefix` rule. No rule failed to run this time: `check()` now distinguishes grep exit 1
+("no match") from exit >1 ("did not run") and would print `DID NOT RUN` instead of a blank. §38.4's sentence remains
+the governing one.
+
+The closure chain, oldest first, is the record of this pass: `1594bcc` (unique API id for the Stage 5 maintenance
+boundary) · `4fb6990` (truthful sign-up notification asserted) · `f62b190` (editor `<main>` landmark asserted in the
+browser) · `5889218` (the qualified worker limit becomes the default) · `60cb331` (Tailwind build plugin out of the
+production graph) · `6a67157` (a new HTML injection sink fails the build) · `344c3b1` (every host control raised to
+44 px) · `f494f76` (the 44 px floor asserted, overlays read only at rest) · `0216cae` (three instruments stop dying
+on a missing `.env`, any hosted origin refused) · `be1ae37` (that refusal made pattern-shaped) · `4ab2e9f` ·
+`9bb7dca` · `e01eaec`. **Thirteen commits**, each pushed immediately with an explicit refspec, `git rev-list --count
+328f0e3f..HEAD` = **27** ahead of `main`, which is the branch's full history rather than this pass alone.
+
+Nothing here merges, deploys, contacts a hosted Supabase project, prints a secret value, approves the Tamil
+candidate, rewrites history or starts Stage 6. `refs/heads/main` is `328f0e3fef5a39aa5f91182fb54bf0a97d717e69` at
+every read-back in this section.
+
 Stage 5 is qualified on the evidence above and pushed to its branch. It is **not** merged.
