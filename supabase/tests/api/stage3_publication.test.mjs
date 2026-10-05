@@ -1150,7 +1150,7 @@ describe('§6.6 the callable catalogue is closed', () => {
     }
   });
 
-  test('API35 the Stage 5 maintenance surface exists, has no wrapper, and is unreachable over HTTP', async () => {
+  test('API38 the Stage 5 maintenance surface exists, has no wrapper, and is unreachable over HTTP', async () => {
     // §B's rule as an inventory: privileged functions live in `internal_api`, none of them has a
     // twin in the exposed `api` schema, none of them is SECURITY DEFINER (every step one of them
     // takes is one the calling identity could already perform on the row), and none of them is
