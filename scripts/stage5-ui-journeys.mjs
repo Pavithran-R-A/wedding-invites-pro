@@ -420,6 +420,14 @@ async function signUpAndEnterHost(browser, who) {
   check('prelude', `${who}: the sign-up button was pressable`, pressed === 'pressed', pressed);
   const landed = await waitForUrl(page, '/login') ?? await page.currentUrl();
   check('prelude', `${who}: sign-up routed into the real login screen`, landed.includes('/login'), landed);
+  const signupTruth = await page.waitForText(
+    'Nothing was emailed — this stack confirms accounts without email. Log in to continue.',
+    10_000,
+  );
+  check('prelude', `${who}: sign-up copy matches the local stack's no-confirmation behaviour`,
+    Boolean(signupTruth),
+    signupTruth ? 'truthful no-email notification rendered'
+      : `page said: ${(await page.bodyText()).replace(/\\s+/g, ' ').slice(0, 220)}`);
   const loginPressed = await fillAndSubmit(page, {
     '#email': emailFor(who),
     '#password': PASSWORD,
