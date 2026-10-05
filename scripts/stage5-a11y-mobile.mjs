@@ -459,6 +459,27 @@ async function submitForm(page, fields, buttonWords) {
   return 'never-ready';
 }
 
+/** The cards arrive on a CSS entrance animation, and `waitForText` answers the moment the words
+ *  exist — mid-slide, when the card's painted box is still above the list that will hold it.
+ *  Sampling the layer then says a bare overlay covers a control that the settled card covers, which
+ *  is a race in this harness rather than a property of the page: hit-testing follows the painted
+ *  position while the band's own box comes from the card's layout position. So the pass reads the
+ *  overlay only once nothing inside it is still animating, and prints what that cost. */
+async function waitForOverlayToSettle(page, timeoutMs = 4_000) {
+  let waited = 0;
+  for (;;) {
+    const running = await page.evaluate(`(() => {
+      const ol = [...document.querySelectorAll('ol')]
+        .find((o) => String(o.className).includes('z-[100]'));
+      if (!ol || !ol.getAnimations) return 0;
+      return ol.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length;
+    })()`);
+    if (running === 0 || waited >= timeoutMs) return waited;
+    await sleep(120);
+    waited += 120;
+  }
+}
+
 const describe = (c) => `${c.sel} "${c.name ?? c.text}" own ${c.own.w}x${c.own.h}`
   + (c.insideLabel ? ` label ${c.effective.w}x${c.effective.h}` : '')
   + ` at ${c.x},${c.y}`;
@@ -495,6 +516,9 @@ async function bandProbe(page, v, { path, fields, button, toastWords }) {
     return;
   }
 
+  const settledMs = await waitForOverlayToSettle(page);
+  measure('toast-band', `${path} @ ${v.name}: the overlay was sampled at rest`,
+    `${settledMs}ms waiting for animations inside the overlay to stop`);
   const live = await page.evaluate(`${SNAPSHOT}(${INTERACTIVE})`);
   const band = live.band;
   measure('toast-band', `${path} @ ${v.name}: overlay geometry with a live notification`,
@@ -664,10 +688,21 @@ function reportLayout(area, label, snap) {
     small.length === 0,
     small.length ? small.map(describe).join(' | ')
       : `smallest effective target is ${smallest ? `${smallest.effective.w}x${smallest.effective.h} (${smallest.sel})` : '(none)'}`);
-  measure(area, `${label}: effective targets below 44 CSS px`,
-    snap.controls.filter((c) => !c.disabled && (c.effective.w < 44 || c.effective.h < 44))
-      .map((c) => `${c.sel} "${(c.name ?? c.text).slice(0, 22)}" ${c.effective.w}x${c.effective.h}`)
-      .join(' | ') || 'none');
+  // 44x44 is this product's own acceptance target for a touch target, stated in
+  // `docs/product/design-principles.md` ("Touch target | >=44x44px") and repeated in its principles
+  // list — not merely the AAA ask §30 assumed. The surface a host works in is therefore asserted
+  // against it. The sweep-wide `MIN_TARGET_PX` floor stays at 24 because the auth pages and the guest
+  // document are measured by passes that have not been raised, and raising them here would silently
+  // move a threshold that belongs to those pages' own qualification.
+  const undersized = snap.controls.filter((c) => !c.disabled
+    && (c.effective.w < 44 || c.effective.h < 44));
+  const enabledCount = snap.controls.filter((c) => !c.disabled).length;
+  check(area, `${label}: no enabled control in the host workbench is smaller than 44x44 CSS px`,
+    undersized.length === 0,
+    undersized.length
+      ? undersized.map((c) => `${c.sel} "${(c.name ?? c.text).slice(0, 22)}" `
+          + `${c.effective.w}x${c.effective.h}`).join(' | ')
+      : `${enabledCount} enabled control(s) tested, all at least 44x44`);
   const dead = snap.controls.filter((c) => !c.disabled && c.pointerEvents === 'none');
   check(area, `${label}: no enabled control is taken out of the pointer by its own styling`,
     dead.length === 0, dead.map((c) => `${describe(c)} pointer-events=none`).join(' | ') || 'none');
@@ -897,6 +932,9 @@ async function hostHalf(browser) {
   const saved = await host.waitForText('Saved', 25_000);
   check('toast-band', `/project/:id/configure @ ${phone.name}: the app raised its own notification`,
     Boolean(saved), saved ?? flat(await host.bodyText()).slice(0, 180));
+  const configureSettledMs = await waitForOverlayToSettle(host);
+  measure('toast-band', `/project/:id/configure @ ${phone.name}: the overlay was sampled at rest`,
+    `${configureSettledMs}ms waiting for animations inside the overlay to stop`);
   const configureSnap = await host.evaluate(`${SNAPSHOT}(${INTERACTIVE})`);
   const configureCovered = configureSnap.controls.filter((c) => !c.disabled
     && (c.cover === 'band-only' || c.cover === 'toast-card'));
