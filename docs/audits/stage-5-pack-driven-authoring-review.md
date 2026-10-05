@@ -4088,3 +4088,276 @@ not, and that the qualified bundle is §34's. It does not claim the running stac
 anything other than synthetic qualification data: the Tamil candidate's four flags were last measured in §34.6
 and no step after it wrote to that row. And nothing here merges, deploys, contacts hosted Supabase, approves a
 Tamil release, or starts Stage 6. `git ls-remote` in §36.2 is the evidence that main did not move.
+
+## 37. Closure pass: the 44 px floor becomes an assertion, three instruments stop requiring a hosted
+### credential, and every browser tier is re-qualified on a tree whose installer is proved before it runs
+
+§36's own commit is `c6cf0c7`. Everything written after it is recorded in this section — ten commits, their
+measurements, the two instrument defects they exposed, and the third, fourth and fifth times the host's
+`node_modules` was replaced under this branch while a gate was reading it. Nothing above this line is edited.
+
+### 37.0 Starting state, re-measured rather than carried forward
+
+| Fact | Measured value at this window | How to re-measure |
+| --- | --- | --- |
+| Branch HEAD at the window's first commit | `1594bcc` (parent `c6cf0c7`, §36's commit) | `git log --format='%h %s' c6cf0c7..HEAD` |
+| Branch HEAD at the window's last code commit | `be1ae37`, pushed | `git ls-remote origin refs/heads/stage5/pack-driven-authoring-review` |
+| `origin/main` | `328f0e3fef5a39aa5f91182fb54bf0a97d717e69` — and it **is an ancestor** of the branch | `git fetch origin refs/heads/main:refs/remotes/origin/main && git merge-base --is-ancestor origin/main HEAD && echo yes` |
+| Commits the branch holds over `origin/main` | 24 | `git rev-list --count origin/main..HEAD` |
+| Local stack | `localvivaahvarnam`, kong `:54400` (REST answers 200), db `:54401`, inbucket `:54403` — **not** 54321 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:54400/rest/v1/` |
+| Preview | `vite preview --host 127.0.0.1 --port 4173 --strictPort`, serving `dist/assets/index-CNMnmIrw.js` | `netstat -ano \| grep 4173` |
+| Shipped entry chunk | `index-CNMnmIrw.js`, **509226 bytes**, `509.23 kB │ gzip: 154.57 kB`, `✓ 2204 modules transformed` | `ls -l dist/assets/index-*.js` and `npm run build` |
+
+Two things in §0 are now superseded by measurement, and §0's text is left exactly as written. First, §0 expected
+`origin/main` at `b4b2022c…`; main has since moved to `328f0e3f` (Stage 4's closure) and this branch contains it,
+so "main untouched" now means *this pass wrote nothing to it*, which §37.10's read-back evidences. Second, §0A
+described `pnpm-lock.yaml` and `pnpm-workspace.yaml` as "deliberately left in place and never staged"; that
+practice has been replaced by **quarantine** — the files are moved out of the repository into
+`../q5-logs/pnpm-contamination-<n>-<timestamp>/` with their SHA-256 recorded in a `PROVENANCE.txt`, never
+deleted and never staged, because §37.7 shows the same two files reappearing three times in one window and a
+silent `git status` check cannot tell a stale pair from one written mid-run.
+
+### 37.1 The ten commits this section exists to describe
+
+| SHA | Subject | What it changed |
+| --- | --- | --- |
+| `1594bcc` | test(api): give Stage 5 maintenance boundary a unique API id | one line of `supabase/tests/api/stage3_publication.test.mjs` — §37.8 evidences that the 38 ids are now distinct |
+| `4fb6990` | test(browser): assert truthful signup notification | +8 in `scripts/stage5-ui-journeys.mjs`: the prelude reads the rendered sentence per host (§37.9) |
+| `f62b190` | test(a11y): assert editor main landmark in browser | +3 in `scripts/stage5-a11y-mobile.mjs`, now at `:979-981`: `snap.landmarks.main === 1` (§37.9) |
+| `5889218` | test(config): make the qualified worker limit the default | +4 in `vitest.config.ts`: `maxWorkers: 1` moves from a CLI flag into the committed config |
+| `60cb331` | fix(deps): keep the Tailwind build plugin out of the production graph | `tailwindcss-animate` leaves `dependencies` (`package.json` +1/−1, `package-lock.json` +117) |
+| `6a67157` | fix(contract): make a new HTML injection sink fail the build | rule `markup-injection-sink` in `scripts/check-product-contract.mjs` (+151), its self-test fixture (`scripts/product-contract.test.mjs`, +2), and the **three** docs it made honest (`README.md`, `docs/product/content-governance.md`, `docs/product/feature-readiness.md`) — 5 files, 185 insertions, 23 deletions |
+| `344c3b1` | fix(editor): raise every host control to the product's own 44px target | 5 files, +40/−35: `EditProject.tsx`, `ContentEditor.tsx`, `PublicationPanel.tsx`, `TraditionPackPanel.tsx`, `ui/toast.tsx` (§37.2) |
+| `f494f76` | test(a11y): assert the 44px target floor… | `scripts/stage5-a11y-mobile.mjs` +42/−4: the assertion at `:700` and the at-rest overlay read (§37.2, §37.4) |
+| `0216cae` | fix(browser): stop three instruments dying on a missing .env… | the three browser instruments, +52/−5 (§37.5) |
+| `be1ae37` | fix(browser): make the hosted-bundle refusal pattern-shaped… | `scripts/stage5-network-privacy.mjs` +18/−2 (§37.6) |
+
+Every one reached the remote through a push that named an explicit refspec and never `-u`. The read-back taken
+after the last of them, at 14:03 local:
+
+```
+$ git push origin refs/heads/stage5/pack-driven-authoring-review:refs/heads/stage5/pack-driven-authoring-review
+   0216cae..be1ae37  stage5/pack-driven-authoring-review -> stage5/pack-driven-authoring-review
+$ git ls-remote origin refs/heads/stage5/pack-driven-authoring-review refs/heads/main
+328f0e3fef5a39aa5f91182fb54bf0a97d717e69        refs/heads/main
+be1ae3751872f9addcb85d1c9a0a05ee21316ae2        refs/heads/stage5/pack-driven-authoring-review
+$ git rev-parse HEAD
+be1ae3751872f9addcb85d1c9a0a05ee21316ae2
+```
+
+Remote branch equals local HEAD, `refs/heads/main` equals the value §37.0 measured and was not written by this
+pass, and the refspec line shows a fast-forward (`0216cae..be1ae37`) rather than a forced update.
+
+### 37.2 The 19 sub-44 px targets were closed in the product, and the instrument got stricter first
+
+`docs/product/design-principles.md:97` has carried `| Touch target | ≥44×44px, ≥8px apart |` as this product's own
+acceptance target since Stage 1, yet the workbench shipped controls at 32–40 px and §30.10 recorded the shortfall
+as a measurement with the words "44 px is the AAA ask, not this product's rule" — a claim that contradicted the
+repo's own stated rule. The correction went in this order, deliberately:
+
+1. **`g8-a11y-baseline.log`** — `==> checks 61, measurements 49, findings 0`, `PASS`. Still passing, because the
+   shortfall was only printed. It lists **19** enabled controls under 44 CSS px at 375×740 (18 at 768×1024): the
+   band's `Dismiss this notificat… 24x24`, `Back to invitation dra… 40x40`, `Save Draft 124x36`, `Add a person
+   101x32`, `Add a venue 96x32`, `Add a ceremony 119x32`, the `Font` disclosure `342x36`, `Font size (px)`
+   `342x36`, six `h-9 w-9` swatches at `36x36`/`40x40`, `Custom colour 342x36`, the three alignment buttons
+   `111x34`, and `Freeze this draft as a… 215x36`. §30.10 recorded **18** at phone width from the earlier,
+   59-check capture; `g8`'s list has one more member than that count, and it is the band's own dismiss control —
+   which is why this section says 19 and why the readiness row's "18" is corrected rather than contradicted.
+2. **`f494f76` made it a check** (`scripts/stage5-a11y-mobile.mjs:700`), scoped to the host workbench: the
+   sweep-wide `MIN_TARGET_PX = 24` at `:89` stays, because the auth screens and the guest document are not the
+   workbench and this pass measured no under-44 control there.
+3. **`g10`–`g13`** then show the check biting before it passes: `60/48/1 exit 1` (a band-coverage false positive,
+   §37.4), `63/52/1 exit 1` (the real defect, §37.3), then `g13-a11y-shrink.log` — **`checks 63, measurements 52,
+   findings 0`, `STAGE 5 §31 ACCESSIBILITY / MOBILE: PASS`** — printing at both viewports
+   `ok … no enabled control in the host workbench is smaller than 44x44 CSS px — 32 enabled control(s) tested, all
+   at least 44x44` (phone) and `31 enabled control(s) tested, all at least 44x44` (tablet), and independently
+   `no enabled control is smaller than 24x24 CSS px — smallest effective target is 44x44`.
+   **The instrument measured the effective press rect, so the fix had to grow the element**; adding padding to a
+   label would have shown up as a pass without anything changing under the finger.
+4. `344c3b1` grew them: `h-8`/`h-9` → `h-11` on the add/cancel/save buttons, row inputs, native selects, the
+   share-link anchor and the pack retry; `size="icon"` anchors to `h-11 w-11`; the colour swatch became a 44×44
+   button with the painted `h-8 w-8` chip inside it (`scale-110` keeps the visual size); the alignment trio to
+   `flex h-11 flex-1`; and the band's `ToastClose` to `flex h-11 w-11` with the card's right gutter widened
+   `pr-8` → `pr-14` so the larger box lands in reserved space rather than over the message. Shared
+   `src/components/ui/*` defaults (`button.tsx` `default h-10`, `sm h-9`, `icon h-10 w-10`; `input.tsx` `h-10`)
+   are **unchanged** — public and marketing screens still inherit 40 px until something reviews them.
+5. What the pass cost in the other direction is recorded too: the card's text column is now 24 CSS px narrower on
+   a phone, and no screenshot of the raised band is carried by this branch.
+
+`g14-node-post-shrink.log` re-ran the Node tiers on that tree: typecheck `code=0`; lint `code=0` with
+**0 errors / 9 warnings** (the same nine files as §34); `product:check` → `179 active file(s) scanned, 0
+violation(s)`; unit → **`Test Files 30 passed (30)`, `Tests 440 passed (440)`**, `code=0`.
+
+### 37.3 A real product defect, found by the assertion this section added
+
+Between the sizing commit and the green run, `g12-a11y-settled.log` printed
+`FAIL [editor] editor @ 375x740 phone: no enabled control in the host workbench is smaller than 44x44 CSS px —
+a.inline-flex.items-center "Back to invitation dra" **43x44**`. The anchor declared `h-11 w-11` and got 43 px wide,
+because it sits in a `flex items-center gap-3 min-w-0` row and flex-shrink squeezed it at phone width — the tablet
+reading was 44×44, which is why the same control passed at 768 px and failed at 375 px. Root cause was confirmed by
+reading `src/pages/EditProject.tsx:631`, not guessed: the fix is `shrink-0` on that element, and `g13` is the green
+capture. **The old measurement-only line would never have caught this**, since it printed shortfalls and passed
+anyway; this is the argument for assertions over readouts, recorded in the audit because it is the reason the
+assertion exists.
+
+### 37.4 The notification band's coverage read was sampling mid-animation, and the repair was to the read
+
+`g10`'s single finding was `[toast-band] /login @ 375x740 phone: the notification band covers no control —
+a.inline-flex.rounded-sm "VivaahVarnam…" own 225x48 at 75,145`. On the live page the brand link genuinely sits at
+y≈145 and the settled card genuinely lands below the header (`band top y=80` against `top chrome bottom y=65`, §31),
+so the two facts only coexist if the card was read **while it was still translating in**:
+`getBoundingClientRect()` follows the painted, transformed box while the viewport parent's box follows layout, and
+the band's entrance animation is running for the first frames after mount. The repair is a settle primitive, not a
+relaxation: `waitForOverlayToSettle()` enumerates `getAnimations({ subtree: true })` and returns when no animation
+under the overlay has `playState === 'running'`, and every band snapshot now prints
+`the overlay was sampled at rest — 0ms waiting for animations inside the overlay to stop` (0 ms in `g13`'s six band
+sites, which is the honest statement that the check did not have to wait there, not that waiting is unnecessary).
+The covered-control check itself is unchanged and still requires `band.y >= topChrome.bottom`.
+
+### 37.5 Three browser instruments required a file that only a hosted credential could supply
+
+`g18-journeys.log` is two lines: `Error: ENOENT: no such file or directory, open
+'C:\Users\…\s5qual\.env'` from `readFileSync` at `scripts/stage5-ui-journeys.mjs:1307`. No product code was
+involved. The prelude reads `.env` to obtain a hosted `VITE_SUPABASE_URL` as a *needle* to search the shipped
+bundle for, so a clone that has never held a hosted credential could not run the tier at all — which is precisely
+the clone this qualification is performed in (§35's cleanup inventory removed `.env` from the repository, and this
+branch has never contacted a hosted project). Repaired in `0216cae` in all three instruments
+(`stage5-ui-journeys.mjs`, `stage4-render-qualification.mjs`, `stage5-network-privacy.mjs`) by a tolerant read that
+yields `{}` and a measurement stating which case the run is in, **and by making the refusal wider than the needle**:
+each prelude now searches `dist` for any `*.supabase.co` / `*.supabase.in` origin and fails on a hit, so the
+assertion no longer depends on possessing a hosted value. The current captures print
+`ok [prelude] no hosted Supabase origin of any shape is baked into the shipped bundle — scanned 901 KB of shipped
+JS/CSS/HTML` (journeys), `… in the built bundle — scanned 901 KB …` (render), and in §32
+`searched 901 KB of shipped JS/CSS/HTML for *.supabase.co and *.supabase.in`. The needle branch is still there for a
+clone that does declare a hosted URL.
+
+### 37.6 §32's finding was the instrument asserting a property of the environment
+
+`g22-network.log`: `==> checks 115, measurements 89, findings 1`, `exit_code=1`, and the one failure is
+`FAIL [prelude] a hosted project reference exists for the bundle to be searched for — .env declares no non-loopback
+VITE_SUPABASE_URL, so this pass has nothing to compare against`. That branch was written to refuse a vacuous pass,
+and it did — permanently, on every clone shaped like this one, which is an assertion about the *environment*, not
+the product. `be1ae37` replaced it with the pattern-shaped refusal described in §37.5 plus a measurement stating
+that no needle exists here; the check is now true of the bundle and false if a hosted host is ever baked into it.
+`g23-network2.log`: **`==> checks 115, measurements 90, findings 0`, `STAGE 5 §32 NETWORK / PRIVACY: PASS`,
+`exit_code=0`**, with the npm installer probes clean before and after, and the same host/editor/guest request
+classification §32 recorded previously (every host data call on the host's own bearer, the anonymous key used only
+for `/auth/v1/token`, no cookie session, no request carrying the guest credential, the browser profile deleted, and
+`the rows and the account this pass created are gone — left 0`).
+
+### 37.7 The third, fourth and fifth substitution, and the four byte-identical builds that answer §36.6
+
+§35.9 and §36.6 recorded `node_modules` being rewritten by pnpm underneath this branch. It happened three more
+times in this window, always with the same fingerprint — `node_modules/.pnpm`, `node_modules/.modules.yaml`,
+`node_modules/vite` as a symlink, and in the repo root a `pnpm-workspace.yaml` whose body is the interactive
+`allowBuilds:` prompt text (`'@swc/core': set this to true or false`), which nothing in this repository writes:
+
+| Event | Root files' mtime | Quarantined to | Consequence |
+| --- | --- | --- | --- |
+| 3rd | 2026-10-05 ≈13:30 | `../q5-logs/pnpm-contamination-3-2026-10-05T1330/` | `g15-npm-restore-3.log` (`npm ci`), `g16-rebuild-npm3.log` → `index-CNMnmIrw.js` 509226 B at 13:34:47 |
+| 4th | ≈13:44 | `../q5-logs/pnpm-contamination-4-2026-10-05T1344/` | `g20-npm-restore-4.log` → same chunk, same 509226 B at 13:49:11; **`g19-render.log` (143/33/0) is labelled as captured on a pnpm-shaped tree and is superseded by `g24`** |
+| 5th | 14:04:22 / 14:04:23 | `../q5-logs/pnpm-contamination-5-2026-10-05T1404/` + `PROVENANCE.txt` with both SHA-256 (`0afc0af…`, `31ce3e0…`) | `g25-npm-restore-5.log` records the failed attempt: `EPERM: operation not permitted, unlink node_modules\@esbuild\win32-x64\esbuild.exe`, because a live esbuild child held the file. Releasing **this session's own** preview (`vite preview`, PID 34876, and its `npm run preview` parent 30352 — identified by command line, not by image name; a third `node serve.js` PID 36064 belonging to another session was left running) freed it, and `g25b`/`g25c` gave `npm ci` code 0 and `npm run build` code 0 → `index-CNMnmIrw.js`, **509226 bytes**, `509.23 kB │ gzip: 154.57 kB`, `✓ 2204 modules transformed` at 14:18:24 |
+
+The consequence worth stating plainly: **the locked npm tree reproduced the identical chunk name and byte size four
+times** (13:23:59, 13:34:47, 13:49:11, 14:18:24) across two interruptions, while §36.5's substituted tree gave
+`index-D4iQch0t.js` at 577.43 kB. §36.6's unattributed +68.24 kB is therefore attributed: it belongs to the
+substituted dependency tree, not to anything in this branch's source. Relative to §34's locked-tree number
+(`index-BWDFhgPY.js`, printed 509.19 kB), the current 509.23 kB differs by tens of bytes and one hash, which is the
+`h-11`/`w-11` class strings `344c3b1` added to the workbench — the same tree, the same installer, a different HEAD.
+Re-measure: `node ../q5-logs/markers.cjs` before and after any gate, and `ls -l dist/assets/index-*.js`.
+
+That is also why the two browser captures after the 4th event are the authoritative ones for §37: `g23` (network,
+ended 14:01:35) and `g24-render-npm.log` (render, tag `stage4render-muuzqwes-61zmzr`, `==> checks: 143,
+measurements: 33, findings: 0`, `STAGE 4 RENDER QUALIFICATION: PASS`, ended 14:03:14) each printed the npm probe
+**after** they finished, showing `.pnpm present: false`; the substitution landed 70 seconds later. `g18b`
+(journeys, §37.9) brackets itself the same way, with clean markers on both sides.
+
+### 37.8 The loopback HTTP battery, measured twice, and one truncation of my own making
+
+The first run of this window (`g17-http-battery.log`) was piped through `tail -40`, which destroyed four of the five
+per-file summaries; the numbers from it are **not** used anywhere. `g21-http-battery-full.log` re-ran
+`bash supabase/tests/api/run.sh` with the whole stream captured: `ℹ tests 38 / pass 38 / fail 0`,
+`56 / 56 / 0`, `28 / 28 / 0`, `36 / 36 / 0`, `28 / 28 / 0` across the five files — **186 cases, 186 passed, 0
+failed**, `exit_code=0` — and its footer re-asserts the stack's own boundary:
+`weddings back to 0 rows`, `auth.users back to 0 rows`, `invitation_drafts back to 0 rows`. The runner started,
+stopped and reset nothing; the reset was a separate step (`g5-dbreset.log`), and the base URL is refused unless it
+is loopback. `g6-api.log`, run earlier in the window at a different HEAD, printed the **same five tallies**, so the
+total is stable across the two runs rather than a one-off count.
+
+§35.4's duplicated `API35` id is closed by the same run: the ids printed across the five files are
+`API01 … API38` with **38 distinct values** for 38 cases in the publication file, so no id is carrying two tests.
+Re-measure: `grep -aoE "API[0-9]{2}" ../q5-logs/g21-http-battery-full.log | sort -u | wc -l`.
+
+### 37.9 §35.4's three open items, each closed with the line that closes it
+
+| Open item | Closing measurement | Where |
+| --- | --- | --- |
+| The post-repair `<main>` had never been re-read in a browser | `ok [editor] editor @ 375x740 phone: the host workbench has exactly one main landmark — landmarks={"main":1,"header":1,"nav":0}`, and the same at `768x1024`, against the production bundle; asserted at `scripts/stage5-a11y-mobile.mjs:979-981` (`f62b190`) | `g10`, `g12`, `g13` |
+| The sign-up copy had no browser assertion | `ok [prelude] s5a-host: sign-up copy matches the local stack's no-confirmation behaviour — truthful no-email notification rendered`, and the same for `s5b-host` (`4fb6990`) | `g18b-journeys.log` |
+| `API35` named two tests | 38 distinct ids over 38 cases, `API01`–`API38` | §37.8 / `g21` |
+
+`g18b-journeys.log` (run tag `stage5ui-muuyzpt2-6ugfk`) is the journeys tier's authoritative capture:
+**`==> checks 89, measurements 12, findings 0`, `STAGE 5 BROWSER JOURNEYS: PASS`**, superseding §30's 86/11/0. All
+three journeys (no-pack, synthetic approved pack, retirement + R2) ran on it, and the browser tier's own cleanup
+printed that the accounts and rows it made were deleted. The SQL batteries in the same window were re-measured on a
+freshly reset stack at this head: Stage 0 RLS `STAGE0 RLS TESTS PASSED (24)`; Stage 2's chain
+`draft invariant (49)`, `publication boundary (284)`, `privilege + RLS attacks (464)`, `catalog conformance (103)`,
+`migration outcome (historical rows) (76)`; Stage 4's runner `PASSED (426)` + `§8 fixture tooling PASSED (57)`;
+Stage 5's `50_review_binding (122)`, `60_definition_vocabulary (50)`, `70_document_resolution (124)` and, at the
+Stage 5 head, `stage 4 pack documents PASSED (428)` + `(57)` — each runner printing its own head and none adding
+itself to another's totals, as §34 required. All `exit_code=0`.
+
+### 37.10 Conditions a reviewer needs before reading any "PASS" here as "CI is green"
+
+- **GitHub Actions has not been used as evidence for this stage and cannot be, at the account's current quota
+  state.** `.github/workflows/ci.yml` triggers only on `push`/`pull_request` to `main` (`on: push: branches:
+  [main]`), so the pushes this branch has had — including the ten commits §37.1 lists, each pushed immediately with
+  an explicit refspec — started no workflow. That is a fact about the trigger, not a passing run. No hosted-CI PASS
+  is claimed anywhere in this file, and no PR was opened to manufacture one.
+- **The dependency-audit condition is split, and both halves are printed here.** At this head,
+  `npm audit --omit=dev --audit-level=high` → `found 0 vulnerabilities`, `exit_code=0`; `npm audit
+  --audit-level=high` over the dev graph → `13 vulnerabilities (2 moderate, 11 high)`, `exit_code=1`, the chains
+  being `@vitest/mocker` (`Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock —
+  GHSA-82fw-gwwq-j7x9`) and the `@typescript-eslint/*` family. The shipped product graph is clean; the local test
+  tooling is not, and the second command's non-zero exit is part of the gate record, not a suppressed detail.
+  Measured after `60cb331` moved `tailwindcss-animate` out of `dependencies`; no causal claim is made for the
+  0-vulnerability result.
+- **Node tiers were re-run on the clean clone and each exit is in the log.** `gates3.summary.log` (working tree at
+  `60cb331`, timestamps 12:27–12:45 +05:30) records exactly twelve entries and **exactly one non-zero exit**:
+  `g3-markers-before 0`, `g3-lint 0`, `g3-typecheck 0`, `g3-dbtypes 0`, `g3-selftest 0`, `g3-productcheck 0`,
+  `g3-unit 0`, `g3-build 0`, `g3-audit 0`, **`g3-auditdev 1`** (the dev-graph audit, the split condition above),
+  `g3-diffcheck 0`, `g3-markers-after 0`. The individual outputs give the numbers those exits cover —
+  `product:check` → `179 active file(s) scanned, 0 violation(s)`, the checker's `--self-test` → `29 rule(s)
+  verified` (28 in §36.5; the extra pair belongs to the `markup-injection-sink` rule `6a67157` added), unit →
+  `30 files / 440 tests`. `g9-node.log` (13:09, at `6a67157`) re-ran markers + typecheck + lint + build on the
+  injected-sink guard, and `g14-node-post-shrink.log` (≈13:27, working tree carrying `344c3b1`) re-ran markers +
+  typecheck + lint + `product:check` (`179 … 0 violation(s)`) + unit (`30 / 440`) after the tap-target shrink, all
+  `code=0`. **`npm run build:dev` was not run in this window and no result for it is claimed here.**
+- **The `product:check` file count is a filesystem measurement, and the 181 → 179 move is now explained rather
+  than left as a discrepancy.** §33.7, §35.9 and §36.5 each recorded `181 active file(s) scanned`; every run in
+  this window prints `179`. `walk()` in `scripts/check-product-contract.mjs:524-532` reads the directory tree, not
+  the git index, and `.yaml` is in `SCANNED_EXTENSIONS` (`:474-485`), so any untracked root file with a scanned
+  extension joins the population. Measured at this head: both clones track the **same 246 files**, and each
+  clone's tracked-and-scanned subset is **179** (`node ../q5-logs/scannedcount.mjs <clone>`, run against both).
+  The legacy worktree (`../wedding-invites-pro`) currently scans **181** while this clone scans **179**, and the
+  set difference between the two on-disk populations is exactly two named files — the comparison printed
+  `in legacy only: pnpm-lock.yaml, pnpm-workspace.yaml` and `in s5qual only:` (empty). **So an 181 reading is
+  itself evidence that the two pnpm files were sitting in the scanned root when it was taken**, which is what
+  §35.9/§36.6 describe, and 179 is what a clean npm-only clone measures with nothing of the kind in its root. The
+  two numbers therefore agree about the repository: the gap is the contamination's footprint, not a source change,
+  and no tracked file was added or removed to produce it.
+
+### 37.11 What this section does not claim
+
+It does not claim the raised targets were reviewed by a designer, or that 44 px is now met anywhere except the host
+workbench and the notification band — `src/components/ui/*` still ships 40 px defaults, and no public, marketing,
+configure-screen or guest-page control was raised by this pass. It claims no WCAG conformance: `g13`'s contrast
+assertion covers the 35 (phone) / 34 (tablet) text runs the editor paints, its 24 px floor covers every enabled
+control, and neither is an audit. It does not claim the overlay-settle primitive makes animation timing
+deterministic — it makes the read wait for the browser's own animation state, which is a different claim, and
+`g13` printed 0 ms of waiting. It does not claim the fifth substitution's cause is inside this repository: the
+`allowBuilds` prompt text is written by an interactive `pnpm install`, this branch declares no `packageManager` and
+no `engines`, and the process that performed it was not this session's. It does not claim a root cause for §30's
+`Runtime.evaluate` hang, which did not recur in this window. Nothing here approves the Tamil candidate, contacts a
+hosted Supabase project, deploys, merges, rewrites history, or starts Stage 6; the `git ls-remote` read-back after
+each push (`be1ae37` for the branch, `328f0e3f…` for main, unchanged by this pass) is the evidence for that.

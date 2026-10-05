@@ -115,6 +115,14 @@ Recorded rather than hidden, so a later pass can close them:
   under the 44px target. Navigation links, the mobile menu and the footer were raised to 44px;
   the control height is a system-wide change deliberately not made here, because it would
   re-density screens that cannot be reviewed without a running backend.
+  **Scope has since moved, and this bullet is about the shared defaults only.** Stage 5 raised the
+  host workbench — `/project/:id/edit` and its content, publication and pack panels, plus the
+  notification band's dismiss control — control by control to ≥44×44 CSS px, and
+  `scripts/stage5-a11y-mobile.mjs` now *asserts* that floor on the page a host works on rather than
+  printing it as a measurement (audit §37.2–§37.3). The shared defaults in
+  `src/components/ui/button.tsx` (`default h-10`, `sm h-9`, `icon h-10 w-10`) and
+  `src/components/ui/input.tsx` (`h-10`) are unchanged, so a public or marketing screen still
+  inherits the 40px height described above until something reviews it and raises it on purpose.
 - Inline links inside a sentence (`Don't have an account? Sign up`) stay at text height. They are
   exempt from a minimum target size by convention; standalone controls are not.
 - `lang` is set on the document only. Per-script `lang` on invitation content is a Stage 2 item

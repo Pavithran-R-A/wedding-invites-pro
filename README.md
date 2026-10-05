@@ -159,7 +159,10 @@ through the product's own screens against a **local** Supabase stack (see
   server had actually returned, and it now branches on the session the response carries — when there is
   no session it says `Check your email to confirm your account`, when there is one it says that nothing
   was emailed and this stack confirms accounts without email. Both arms are pinned by
-  `src/pages/signupNotificationTruth.test.tsx`; no browser assertion of the new sentence exists
+  `src/test/signupNotificationTruth.test.tsx`, and both host accounts of the Stage 5 browser journey
+  assert the rendered sentence in the page itself (`scripts/stage5-ui-journeys.mjs`, the
+  `sign-up copy matches the local stack's no-confirmation behaviour` check), so the copy is measured
+  on the production bundle and not only in a unit test
 - A **My invitations** dashboard that reads the signed-in user's drafts
 - Draft creation: name, main language, optional design direction, inserted into `public.weddings`
   through the data adapter
