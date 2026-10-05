@@ -327,18 +327,22 @@ npm audit
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run product:check` is the contract guard: **27 rules** over the active surfaces this tree scans
+`npm run product:check` is the contract guard: **28 rules** over the active surfaces this tree scans
 (181 files at this head) — retired brand names, fabricated social proof and per-guest pricing
 language, the retired scaffold vocabulary, which tables may be named outside the data adapter, and the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets
 machine-assisted draft text read as though it had been reviewed. Nothing was removed to get from 23 to
-27. Two of the four Stage 5 rules deliberately reach into `docs/product/` and `docs/content-review/`,
+28. Three of the five Stage 5 rules deliberately reach into `docs/product/` and `docs/content-review/`,
 because this matrix is itself under the rule that forbids calling the draft candidate shippable; the
-rest still scan only `src/`, `content/` and the two entry documents, so a governance file that *quotes*
+last of the three (`main-landmark-absence-claim`) was added while assembling the Stage 5 report, after
+that report's own truth pass had left a stale current-state sentence about the host editor standing —
+it refuses an absence claim about a page's `main` landmark, and its positive control is the honest
+replacement sentence, so a future widening has to break that sentence to pass unnoticed. The rest still
+scan only `src/`, `content/` and the two entry documents, so a governance file that *quotes*
 a forbidden shape stays a document rather than becoming a finding. `docs/audits/**` is ignored, which
 records historical evidence verbatim. One named blind spot, because a rule count is not a security
-claim: none of the 27 rules says anything about `innerHTML` or sanitisation, so markup injection has
+claim: none of the 28 rules says anything about `innerHTML` or sanitisation, so markup injection has
 never been caught by this checker and is not guarded by it.
 
 ## Database testing

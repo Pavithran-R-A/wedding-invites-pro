@@ -46,6 +46,8 @@ describe("product contract checker", () => {
         `{ "human_reviewed": true, "customer_selectable": true }`,
         `copy = "the Tamil candidate is approved for customer use",`,
         `copy = "The AI-generated ceremonial wording is human-reviewed",`,
+        // `main-landmark-absence-claim` — the sentence this rule was added to refuse.
+        `| Host editor on a phone | the page a host works on has no main landmark |`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());

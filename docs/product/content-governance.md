@@ -175,9 +175,12 @@ because each one is a place where a future reader could over- or under-read the 
    assume the column's existence already answers it.
 4. **The cultural-safety checker grew four more rules** (`pack-selection-derived-by-name`,
    `place-tested-for-a-tradition`, `tamil-candidate-status-claim`,
-   `machine-assisted-claimed-approved`), joining the 23 that already existed: 27 now, and
+   `machine-assisted-claimed-approved`), joining the 23 that already existed: 27 at that point, and
    `product:check` is the gate that stops a commit from quietly describing the draft candidate as
-   shippable. Its known blind spot is stated in the audit rather than here: none of the 27 rules looks
+   shippable. Stage 5's fifth rule (`main-landmark-absence-claim`, added while assembling the Stage 5
+   report after a stale current-state sentence about the host editor had survived the truth sync) takes
+   the total to 28; it guards documentation truth rather than culture, so it is not one of the ten above.
+   Its known blind spot is stated in the audit rather than here: none of the 28 rules looks
    at markup injection, so Rule 3's protection is about *derived tradition selection*, not about
    rendering safety, which lives in the Stage 0 sanitisation boundary and the Stage 5 refuser instead.
 

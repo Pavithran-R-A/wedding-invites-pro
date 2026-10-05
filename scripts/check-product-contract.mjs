@@ -339,6 +339,18 @@ export const RULES = [
     scope: ["src/", "index.html", "README.md", "docs/product/", "docs/content-review/", "content/"],
     exclude: ["src/test/"],
   },
+  {
+    id: "main-landmark-absence-claim",
+    // Found while assembling §40, one commit after the truth sync: `feature-readiness.md` still said the
+    // host editor has no `main` landmark after `EditProject.tsx:654` had been repaired. The wording is
+    // deliberately narrow — an absence verb directly on the landmark — because the honest sentence about
+    // the same element is that its browser re-read is what is missing.
+    pattern: /\b(?:has no|does not have|lacks|had no)\s+(?:`main`|main)\s+landmark\b/gi,
+    message: "states that a page has no `main` landmark",
+    fix: "check the source before repeating it — the editor's success branch renders `<main>` at `src/pages/EditProject.tsx:654`; if what is missing is a measurement, say that",
+    scope: ["src/", "index.html", "README.md", "docs/product/", "docs/content-review/", "content/"],
+    exclude: ["src/test/"],
+  },
 ];
 
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
@@ -381,6 +393,9 @@ export const MUST_NOT_MATCH = [
   'if (venue.city.trim() === "") toast("A city is required for the venue");',
   "const region = layout.regions.find((entry) => entry.id === section.region);",
   "a language selects which wording of the host's own release is drawn, never which release",
+  // The sentence that replaced the claim the new rule below forbids. It talks about the same
+  // element, so it is the case a future widening of that pattern would break.
+  "the `main` landmark on the page a host works on is measured from source and pinned by a unit test, but has not been re-read in a browser since the repair",
 ];
 
 export function isScannedPath(relativePath) {
@@ -493,6 +508,7 @@ export function selfTest() {
       `copy = "The AI-generated ceremonial wording is human-reviewed",`,
       `copy = "machine-assisted wording counts as approved content",`,
     ],
+    "main-landmark-absence-claim": `| Host editor on a phone | the page a host works on has no \`main\` landmark |`,
   };
   for (const [ruleId, fixture] of Object.entries(fixtures)) {
     const texts = Array.isArray(fixture) ? fixture : [fixture];
