@@ -628,7 +628,7 @@ const EditProject = () => {
 
       <div className="sticky top-0 z-40 bg-card border-b border-border px-4 h-14 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <Button variant="ghost" size="icon" asChild aria-label="Back to invitation draft">
+          <Button variant="ghost" size="icon" asChild className="h-11 w-11 shrink-0" aria-label="Back to invitation draft">
             <Link to={`/project/${id}/configure`}><ArrowLeft className="w-4 h-4" aria-hidden="true" /></Link>
           </Button>
           <span className="font-display font-semibold text-sm truncate">{design.title}</span>
@@ -638,7 +638,7 @@ const EditProject = () => {
           <Button
             variant="outline"
             size="sm"
-            className="rounded-lg"
+            className="rounded-lg h-11"
             onClick={() => { void handleSave(); }}
             disabled={busy || saveState === 'saving'}
           >
@@ -744,7 +744,7 @@ const EditProject = () => {
             <div className="space-y-1.5">
               <FieldLabel id="font-label">Font</FieldLabel>
               <Select value={editor.font} onValueChange={v => setEditor(e => ({ ...e, font: v }))}>
-                <SelectTrigger className="h-9 text-xs" aria-labelledby="font-label">
+                <SelectTrigger className="h-11 text-xs" aria-labelledby="font-label">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -766,7 +766,7 @@ const EditProject = () => {
                 max={120}
                 value={editor.fontSize}
                 onChange={e => setEditor(p => ({ ...p, fontSize: e.target.value }))}
-                className="h-9 text-xs"
+                className="h-11 text-xs"
               />
             </div>
 
@@ -780,11 +780,16 @@ const EditProject = () => {
                     onClick={() => setEditor(p => ({ ...p, color: c.value }))}
                     aria-label={`Use ${c.name}`}
                     aria-pressed={editor.color === c.value}
-                    className={`h-9 w-9 rounded-full border-2 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
-                      editor.color === c.value ? 'border-primary scale-110' : 'border-border'
-                    }`}
-                    style={{ backgroundColor: c.value }}
-                  />
+                    className="flex h-11 w-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`h-8 w-8 rounded-full border-2 transition-transform ${
+                        editor.color === c.value ? 'border-primary scale-110' : 'border-border'
+                      }`}
+                      style={{ backgroundColor: c.value }}
+                    />
+                  </button>
                 ))}
               </div>
               <Input
@@ -792,7 +797,7 @@ const EditProject = () => {
                 value={editor.color}
                 onChange={e => setEditor(p => ({ ...p, color: e.target.value }))}
                 aria-label="Custom colour"
-                className="h-9 w-full cursor-pointer"
+                className="h-11 w-full cursor-pointer"
               />
             </div>
 
@@ -806,7 +811,7 @@ const EditProject = () => {
                     onClick={() => setEditor(p => ({ ...p, alignment: a }))}
                     aria-label={`Align text ${a}`}
                     aria-pressed={editor.alignment === a}
-                    className={`flex-1 py-2 text-xs border rounded capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+                    className={`flex h-11 flex-1 items-center justify-center text-xs border rounded capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
                       editor.alignment === a ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground'
                     }`}
                   >

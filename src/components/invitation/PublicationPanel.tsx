@@ -163,7 +163,7 @@ const PublicationPanel = ({
         <li className="flex items-start gap-2">
           <span aria-hidden="true" className="mt-0.5 text-muted-foreground">1</span>
           <span className="flex-1">
-            <Button type="button" size="sm" variant="outline" className="rounded-lg"
+            <Button type="button" size="sm" variant="outline" className="rounded-lg h-11"
               onClick={onCreateVersion}
               disabled={busy || !languageChosen || serverBlocking || retiredRelease !== null}>
               Freeze this draft as a version
@@ -201,7 +201,7 @@ const PublicationPanel = ({
                 <select
                   value={selected ?? ''}
                   onChange={e => setVersionId(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-xs"
+                  className="h-11 w-full rounded-md border border-input bg-background px-2 text-xs"
                 >
                   {versions.map(v => (
                     <option key={v.id} value={v.id}>
@@ -215,7 +215,7 @@ const PublicationPanel = ({
                 Nothing to publish yet — freeze a version in step 1.
               </p>
             )}
-            <Button type="button" size="sm" className="mt-2 rounded-lg"
+            <Button type="button" size="sm" className="mt-2 rounded-lg h-11"
               onClick={() => { if (selected !== null) onPublish(selected); }}
               disabled={busy || selected === null}>
               Publish
@@ -235,12 +235,12 @@ const PublicationPanel = ({
           <p className="text-xs font-medium">This is the address. It is shown once.</p>
           <p className="break-all font-mono text-xs">{shareUrl}</p>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" className="rounded-lg"
+            <Button type="button" size="sm" variant="outline" className="rounded-lg h-11"
               onClick={() => { void copy(); }}>
               Copy
             </Button>
             {typeof navigator.share === 'function' ? (
-              <Button type="button" size="sm" variant="outline" className="rounded-lg"
+              <Button type="button" size="sm" variant="outline" className="rounded-lg h-11"
                 onClick={() => { void share(); }}>
                 Share
               </Button>
@@ -249,7 +249,7 @@ const PublicationPanel = ({
               href={`https://wa.me/?text=${encodeURIComponent(shareUrl)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-11 items-center rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               Open in WhatsApp
             </a>
@@ -266,11 +266,11 @@ const PublicationPanel = ({
       ) : null}
 
       <div className="flex flex-wrap gap-2 pt-1">
-        <Button type="button" size="sm" variant="outline" className="rounded-lg"
+        <Button type="button" size="sm" variant="outline" className="rounded-lg h-11"
           onClick={onRotate} disabled={busy || !state?.linkActive}>
           New link, same version
         </Button>
-        <Button type="button" size="sm" variant="outline" className="rounded-lg text-destructive"
+        <Button type="button" size="sm" variant="outline" className="rounded-lg h-11 text-destructive"
           onClick={onRevoke} disabled={busy || !state?.linkActive}>
           Take the link down
         </Button>

@@ -151,7 +151,7 @@ const TextField = ({ id, label, value, onChange, hint, placeholder, disabled, ty
       placeholder={placeholder}
       disabled={disabled}
       onChange={e => onChange(e.target.value)}
-      className="h-8 text-xs"
+      className="h-11 text-xs"
     />
     {hint ? <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p> : null}
   </div>
@@ -217,10 +217,10 @@ const RowActions = ({
   removeLabel: string;
 }) => (
   <div className="flex gap-2">
-    <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={onSave} disabled={busy || !dirty}>
+    <Button type="button" size="sm" variant="outline" className="rounded-lg h-11 text-xs" onClick={onSave} disabled={busy || !dirty}>
       Save row
     </Button>
-    <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs text-muted-foreground" onClick={onRemove} disabled={busy}>
+    <Button type="button" size="sm" variant="ghost" className="rounded-lg h-11 text-xs text-muted-foreground" onClick={onRemove} disabled={busy}>
       {removeLabel}
     </Button>
   </div>
@@ -448,7 +448,7 @@ export const PeopleGroup = ({ rows }: { rows: WeddingContentRows }) => (
           <Button
             type="button"
             size="sm"
-            className="rounded-lg h-8 text-xs"
+            className="rounded-lg h-11 text-xs"
             disabled={rows.busy}
             onClick={() =>
               void rows.run(createPerson(rows.weddingId, rows.newPerson), () => {
@@ -459,13 +459,13 @@ export const PeopleGroup = ({ rows }: { rows: WeddingContentRows }) => (
           >
             Add to invitation
           </Button>
-          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
+          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-11 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
             Cancel
           </Button>
         </div>
       </div>
     ) : (
-      <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => rows.startAdd('person')} disabled={rows.busy}>
+      <Button type="button" size="sm" variant="outline" className="rounded-lg h-11 text-xs" onClick={() => rows.startAdd('person')} disabled={rows.busy}>
         Add a person
       </Button>
     )}
@@ -525,7 +525,7 @@ export const VenueGroup = ({ rows }: { rows: WeddingContentRows }) => (
           <Button
             type="button"
             size="sm"
-            className="rounded-lg h-8 text-xs"
+            className="rounded-lg h-11 text-xs"
             disabled={rows.busy}
             onClick={() =>
               void rows.run(createVenue(rows.weddingId, rows.newVenue), () => {
@@ -536,13 +536,13 @@ export const VenueGroup = ({ rows }: { rows: WeddingContentRows }) => (
           >
             Add to invitation
           </Button>
-          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
+          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-11 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
             Cancel
           </Button>
         </div>
       </div>
     ) : (
-      <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => rows.startAdd('venue')} disabled={rows.busy}>
+      <Button type="button" size="sm" variant="outline" className="rounded-lg h-11 text-xs" onClick={() => rows.startAdd('venue')} disabled={rows.busy}>
         Add a venue
       </Button>
     )}
@@ -627,7 +627,7 @@ export const CeremonyGroup = ({ rows }: { rows: WeddingContentRows }) => (
           <Button
             type="button"
             size="sm"
-            className="rounded-lg h-8 text-xs"
+            className="rounded-lg h-11 text-xs"
             disabled={rows.busy}
             onClick={() =>
               void rows.run(createCeremony(rows.weddingId, ceremonyPayload(rows.newCeremony)), () => {
@@ -638,13 +638,13 @@ export const CeremonyGroup = ({ rows }: { rows: WeddingContentRows }) => (
           >
             Add to invitation
           </Button>
-          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-8 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
+          <Button type="button" size="sm" variant="ghost" className="rounded-lg h-11 text-xs" onClick={rows.cancelAdd} disabled={rows.busy}>
             Cancel
           </Button>
         </div>
       </div>
     ) : (
-      <Button type="button" size="sm" variant="outline" className="rounded-lg h-8 text-xs" onClick={() => rows.startAdd('ceremony')} disabled={rows.busy}>
+      <Button type="button" size="sm" variant="outline" className="rounded-lg h-11 text-xs" onClick={() => rows.startAdd('ceremony')} disabled={rows.busy}>
         Add a ceremony
       </Button>
     )}
@@ -801,7 +801,7 @@ const CeremonyFields = ({
         value={draft.venueId}
         disabled={disabled}
         onChange={e => onChange({ venueId: e.target.value })}
-        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+        className="h-11 w-full rounded-md border border-input bg-background px-2 text-xs"
       >
         <option value={NO_VENUE}>No venue</option>
         {venues.map(venue => (

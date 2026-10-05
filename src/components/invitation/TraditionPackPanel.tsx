@@ -252,7 +252,7 @@ const TraditionPackPanel = ({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 rounded-lg text-xs"
+            className="h-11 rounded-lg text-xs"
             onClick={() => {
               // The same two reads the mount ran; a retry is the only honest action left when
               // a catalogue could not be loaded.
