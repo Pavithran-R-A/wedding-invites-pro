@@ -295,3 +295,83 @@ files on disk only); and S6-3/S6-4 cannot start until the local Docker engine ca
 deleted, pruned or restarted in response — shared Docker images belong to a second project on this machine, and
 this session's own artifacts are 576 MB (`wedding-invites-pro`), 298 MB (`s5qual`), 234 MB
 (`s5-browser-harness`) and 3.0 MB (`q5-logs`), none of which is enough on its own.
+
+## 10. The engine died outright, and the dependency tree was replaced under this branch (measured 2026-10-06)
+
+This section exists because two things happened to the environment rather than to the code, and §9's prediction
+("cannot start until the engine can serve a query again") turned out to be optimistic. No Stage 6 implementation
+work is recorded here; nothing in §8 has been executed.
+
+**10.1 The reclaim ran, and was not what relieved the pressure.** `q6-logs/s6-g9-reclaim.log` begins at
+`before_free=6.6G`, i.e. by the time the authorized deletions executed the volume had already recovered on its own
+from the 370 MB recorded in §9. Six named paths were removed, each logged with its size, `rm_rc=0` and
+`exists_after=no`: `/tmp/node-compile-cache` 197M, `/tmp/DockerDesktopUpdates` 168M, `/tmp/DiagOutputDir` 318M,
+`/tmp/energy-trace.etl` 109M, `s5-browser-harness/profile` 206M, `s5-browser-harness/node_modules` 29M.
+`after_free=7.5G`. The 576 MB `wedding-invites-pro` clone was on the authorized list and was **not** deleted: it was
+proved to hold 0 unpushed commits first, and keeping an intact clone costs less than destroying one someone else
+may want. Disk is **not** the present constraint — `df` now reports 12 G free of 476 G (98 % used).
+
+**10.2 The container-level remedy in this session's authorization cannot be carried out, because there is no
+engine left to address.** Progression, each step in its own log: `s6-g11` — `docker restart
+supabase_db_localvivaahvarnam` timed out, `rc=124`; `s6-g12` — `docker version` and `docker ps` stopped hanging and
+started failing instantly with `failed to connect to the docker API at
+npipe:////./pipe/dockerDesktopLinuxEngine … The system cannot find the file specified`; `s6-g13` — the control plane
+was gone and the data plane followed it: `/rest/v1/ → 000`, `/auth/v1/health → 000`, `/storage/v1/bucket → 000`,
+where the earlier probe in the same file's history read 200 / 200 / 503. Today's check is worse than "hung": the
+full Windows process table (297 entries) contains **zero** `docker`/`com.docker`/`Docker Desktop` processes, and the
+only surviving piece is `wslservice.exe` (PID 5876). `docker context ls` still names `desktop-linux` as current,
+which shows the *configuration* is intact and only the VM is absent. Starting Docker Desktop is the action that
+would recover the stack, and it is outside what this session was granted ("`docker restart` on the `supabase_*`
+containers belonging to localvivaahvarnam only … leave every other container alone") — an engine start resumes
+whatever other projects' containers carry restart policies, on a shared machine, and the §9 constraint that
+`DueWeave` stays untouched is still in force. So the state is reported and the action is asked for, not improvised.
+
+**10.3 Correction to §9's inventory, and to a Stage 5 statement, by naming them rather than editing them.**
+`s5-browser-harness` is now 25 KB (`chrome-launch.scratch.log`, `package.json`, `package-lock.json`); its `profile`
+and `node_modules` were deleted under the authorization above. That makes
+`stage-5-pack-driven-authoring-review.md:3356` stale — it described that harness as "the one piece of browser state
+still on disk". Stage 5's file is not edited; this section supersedes the claim.
+
+**10.4 Second finding, independent of Docker: the Stage 6 clone's `node_modules` is no longer npm-provenanced.**
+The S6-2 probe read 357 top-level directories, no `.pnpm`, no `.modules.yaml`, and a real `node_modules/vite`. Today
+the same clone reads `.pnpm/` with 467 entries, `.modules.yaml` present (33,253 bytes), `node_modules/vite` a
+**symlink** into `.pnpm/vite@6.4.3_@types+node@22.20.4_jiti@1.21.7/node_modules/vite`, and 325 top-level directories
+— rising to 327 while the commands in 10.5 were running, so the tree was being mutated underneath the measurement.
+The timestamps place the replacement precisely: `node_modules/.pnpm` and `.modules.yaml` are both
+`2026-10-05 19:02:53 +0530`, the same minute as the `c2f9872` commit and push. Two `node.exe` processes are live on
+this host. `pnpm-lock.yaml` (214,689 bytes) and `pnpm-workspace.yaml` (91 bytes) remain untracked and were never
+staged; they are **not** byte-identical to the sibling clone's copies (`md5 c502f3bcc3cf715065ac288725d983da` here
+against `a98d3ed5477b0ca7c1e71a2aa5f92f46` there), so the earlier "external pnpm re-drops a byte-identical lockfile"
+note does not describe this event — a full install happened. Consequence, stated plainly: **no node gate below can
+be reported as the directive's `npm ci` on an npm-provenanced clean tree.** `npm ci` is the repair, and it deletes
+`node_modules` while an external installer is live in the same tree, so it is not run blind.
+
+**10.5 What did run at `c2f9872`, labelled honestly as diagnostics on a non-conforming tree.** Each exit code was
+read from a file-redirected run in an adjacent `echo`, never after a pipe.
+
+| Instrument | rc | Measured output |
+| --- | --- | --- |
+| `npm run lint` | 0 | 9 problems, **0 errors**, 9 `react-refresh/only-export-components` warnings |
+| `npm run product:check` | 0 | `181 active file(s) scanned, 0 violation(s)` |
+| `node scripts/check-product-contract.mjs --self-test` | 0 | `29 rule(s) verified` |
+| `npm run typecheck` | 0 | `tsc --noEmit -p tsconfig.app.json`, no diagnostics |
+| `npm run dbtypes:check` | 0 | `19 migration file(s)`; `19 public + 10 non-client table(s)`; `19` client tables, `29` query column groups, `0 finding(s)` |
+| `npm test` | 0 | **30 files passed, 440 tests passed**, duration 99.00 s |
+| `npm run build` | 0 | `✓ built in 41.38s`; `dist` 1,062 KB; largest chunk `index-BglJXl4G.js` 577.47 kB (172.28 kB gzip) |
+| `npm audit --omit=dev --audit-level=high` | 0 | `found 0 vulnerabilities` |
+| `git diff --check` | 0 | empty |
+| `dist` credential sweep | — | `grep -rl "service_role" dist` → **0 files**; no JWT-shaped literal hits |
+
+Two readings of that table, both wanted: the suite is fully engine-independent, which is why 440 tests pass with no
+database at all and confirms these tests do not touch the stack; and `dbtypes:check` is a **file-and-types checker**,
+not DB introspection, so its `19` is a count of migration *files on disk*. §9's admission therefore stands
+unchanged: the applied-migration ledger count is still **not measured**, and nothing in this table supplies it.
+
+**10.6 Repository state, proved safe while the environment was not.** `s5qual` is the Stage 6 clone: branch
+`stage6/storage-assets` at `c2f987222e8a513865c1a6adee790ea7a6634551`, and `git ls-remote
+origin refs/heads/stage6/storage-assets` reads back that same SHA, so the S6-2 design note is pushed and nothing is
+stranded locally. `origin/stage5/pack-driven-authoring-review` and the local base branch both read `1b1ef6d`, and
+`origin/main` reads `328f0e3` — main was not moved by this session. Working tree: clean except the two untracked
+pnpm files. No `config.toml` edit, no migration, no policy and no adapter code has been written; S6-3 through S6-7
+remain unstarted, and no Stage 6 gate has run. A rule that did not run is not a rule that passed, and a diagnostic
+on a substituted tree is not a qualification gate.
