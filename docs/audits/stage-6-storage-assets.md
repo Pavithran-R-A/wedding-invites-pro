@@ -395,3 +395,120 @@ at the Stage 4 commit) and says nothing about the server. §10.6's conclusion �
 is true, and its number was not. `refs/heads/stage6/storage-assets` at `f823905` matches local `HEAD`, so the record
 of §10 is pushed. Nothing was rebased, reset or force-pushed to get there: the push was the ordinary
 `c2f9872..f823905` fast-forward.
+
+## 12. S6-3: Storage is on the local stack, and six design assumptions were measured against it (2026-10-06)
+
+**12.1 Recovery, and one instrument that failed while the thing it measured was fine.** The user started Docker
+Desktop (this session's authorization covered only `docker restart` on this project's containers, so the engine start
+itself was asked for, not taken). The first proof was mine and it was wrong twice over: a 38-iteration poll loop
+reported no engine because it grepped `docker version` for the string `Server Version`, and modern `docker version`
+writes the server block as `Server:` followed by `Version:` — the string never existed in that output. `docker ps`
+succeeded on the same data, listing five `localvivaahvarnam` containers "Up About an hour", which puts engine
+recovery at roughly 11:25 IST, i.e. after §10's process-table reading and before the poll. The poll's exit code was
+also 0 the whole time, because a `break`-less loop that never matched is not a failure to `bash`. Recorded so the
+next pass probes with `docker ps` and reads `Server:` — an instrument that cannot go red is not evidence.
+
+**12.2 The measurement §9 and §10.5 both had to withhold is now taken.**
+`select count(*) from supabase_migrations.schema_migrations` → **19**, against 19 files on disk, and
+`dbtypes:check` independently reports `19 migration file(s)`. The ledger is now read from the live database rather
+than inferred, and the stack's own `supabase start` restored it from the project docker volume
+("Local data are backed up to docker volume"), so the Stage 5 schema survived the Storage switch-on.
+`/rest/v1/ → 200`, `/auth/v1/health → 200`, and `/storage/v1/bucket` moved from 503 to served.
+
+**12.3 Turning Storage on is a two-step operation, and the first step lies.** `supabase/config.toml` `[storage]`
+flipped to `enabled = true`, then `supabase start` returned **rc=0** while doing nothing at all: its log is three
+lines — "supabase start is already running", the stopped-services list, "supabase local development setup is
+running" — and the measurement immediately after read `storage_relcount=0`, `storage.objects` nonexistent and
+`storage_fns=NONE`. A success exit code that reports "already running" while the requested service is absent is a
+false green, and it is the single most dangerous shape of failure for a qualification pass. `supabase stop`
+(project-scoped; `docker ps` before it showed zero non-`localvivaahvarnam` containers, so `DueWeave` was not
+reachable) followed by `supabase start` is what actually brought up `supabase_storage_localvivaahvarnam`, pulling
+`storage-api:v1.79.28` — a newer pin than the `v1.72.1` already on the host, which is why §2's documentation quotes
+and this image's behaviour differ. `imgproxy` did **not** start; nothing in Stage 6 depends on it, and that is
+recorded as an observation rather than fixed.
+
+**12.4 Measured platform semantics.** All of it read from the running database, not from memory or the saved docs.
+
+* `storage.buckets` columns: `id text!`, `name text!`, `owner uuid?`, `owner_id text?`, `created_at timestamptz?`,
+  `updated_at timestamptz?`, `public boolean?`, `avif_autodetection boolean?`, `file_size_limit bigint?`,
+  `allowed_mime_types text[]?`, `type storage.buckettype!`, `versioning_status text!`,
+  `lifecycle_configuration jsonb?`, `lifecycle_configuration_generation uuid?`. Defaults: `public=false`,
+  `type='STANDARD'`, `versioning_status='DISABLED'`, `avif_autodetection=false`, timestamps `now()`. The enum is
+  `STANDARD, ANALYTICS, VECTOR`. A bare INSERT therefore yields a **private, non-versioned** bucket, which is
+  exactly the §4 requirement with nothing extra to remember.
+* `storage.objects` columns: `id uuid`, `bucket_id text`, `name text`, `owner uuid`, `owner_id text`,
+  `created_at/updated_at/last_accessed_at timestamptz`, `metadata jsonb`, `path_tokens text[]`, `version text`,
+  `owner_id text`, `user_metadata jsonb`, **`archived_at timestamptz`, `is_delete_marker boolean`,
+  `is_versioned boolean`**. Storage is a versioned object store now, with delete markers — see 12.5.
+* `storage` holds 10 tables: `buckets`, `buckets_analytics`, `buckets_vectors`, `iceberg_namespaces`,
+  `iceberg_tables`, `migrations`, `objects`, `s3_multipart_uploads`, `s3_multipart_uploads_parts`,
+  `vector_indexes`.
+* **RLS is on and there are zero policies**: `relrowsecurity = true` on both `buckets` and `objects`,
+  `relforcerowsecurity = false`, and `pg_policies` for schema `storage` reads `NONE`. Deny-by-default is now an
+  observation, not a quote.
+* Table-level grants: `anon` and `authenticated` hold `DELETE,INSERT,SELECT,UPDATE`; `service_role` and `postgres`
+  additionally hold `REFERENCES,TRIGGER,TRUNCATE`. So the client roles *can* address the table and only RLS stops
+  them — the policy is the whole boundary, and no grant-stripping is available or needed.
+* **`storage` is unreachable over PostgREST**, which is the exposure question §1.2's C22/C24 tripwires care about:
+  `[api] schemas` is still `["public","api"]`, and with the publishable key
+  `/rest/v1/objects → 404 PGRST205 "Could not find the table"`, `/rest/v1/storage/objects → 404 PGRST125`,
+  `/rest/v1/buckets → 404 PGRST205`. The only path to storage metadata is the Storage API itself, so the existing
+  schema-exposure contract needed no change and no new tripwire. Consequence for the checker, measured rather than
+  hoped: `dbtypes:check` still reads `19 public + 10 non-client table(s)` because `NON_CLIENT_SCHEMAS` is
+  `["private","legacy"]` and does not include `storage` — so enabling Storage silently moved 10 tables outside
+  every contract checker. Stage 6 will not widen that list (it would change what the historic gate certifies); the
+  gap is recorded here and closed by the Stage 6 SQL battery instead.
+* `storage.objects` is owned by `supabase_storage_admin`; `postgres` is **not** superuser
+  (`usesuper = false`). The capability that Stage 6 depends on was therefore probed rather than assumed:
+  `CREATE POLICY … ON storage.objects FOR SELECT TO authenticated …` **succeeds as the migration role**
+  (verified inside `begin; … rollback;`, and the follow-up read confirmed `storage_policies_now=NONE`,
+  `buckets_now=EMPTY`). An `INSERT` into `storage.buckets` setting `public`, `file_size_limit` and
+  `allowed_mime_types` also succeeded and was rolled back the same way. No probe left state behind.
+* Triggers already on these tables: `protect_objects_delete` and `protect_buckets_delete` → `storage.protect_delete()`,
+  `update_objects_updated_at`, `enforce_bucket_name_length_trigger`, `protect_bucket_control_insert`/
+  `_update` → `protect_bucket_control_columns`, `protect_bucket_control_update_role` →
+  `enforce_bucket_lifecycle_service_role`.
+* `storage.protect_delete()` raises `Direct deletion from storage tables is not allowed. Use the Storage API
+  instead.` with `ERRCODE 42501` **unless** `current_setting('storage.allow_delete_query', true) = 'true'`.
+* `storage.allow_only_operation(expected text)` compares against `storage.operation()`, which is
+  `current_setting('storage.operation', true)`; it strips a leading `storage.` from both sides and returns
+  `FALSE` when the expected value is NULL/empty. Unset GUC ⇒ no operation matches ⇒ an operation-scoped policy
+  denies. That is the safe direction, and it is why such a policy is usable.
+* `protect_bucket_control_columns()` guards **only** `lifecycle_configuration` /
+  `lifecycle_configuration_generation` (and requires `type = 'STANDARD'` before they may change). Its INSERT path
+  permits the row when both are NULL and otherwise demands membership of the storage service role, with the hint
+  "Insert with both lifecycle columns NULL and configure lifecycle through the Storage API afterward."
+
+**12.5 What those six facts do to the §3–§6 design.** They are not cosmetic, so each is answered here rather than
+in a later migration comment.
+
+1. *The directive's "no direct INSERT/UPDATE/DELETE against storage metadata tables" is platform-enforced.* A new
+   attack case (**A15**) tests it as written: as `authenticated` and as `postgres`, `delete from storage.objects
+   where …` must fail with 42501 and leave the row. Our design gains nothing by pretending to enforce it alone, and
+   loses the tripwire if we ever assert the opposite.
+2. *Object deletion is not row deletion.* `is_delete_marker` / `archived_at` / `version` mean the Storage API's
+   delete may be a marker write on a versioned bucket. Our `tombstoned` state therefore stays **registry-side**
+   (a `wedding_assets` status transition) and must never be inferred from "the `storage.objects` row is gone".
+   The consistency rules O1/O2 are re-expressed as: a row may be `ready` only if the API reports the object;
+   a `tombstoned` row says nothing about the object's row.
+3. *Retention cannot be declared as bucket configuration in a migration.* The lifecycle columns are service-role
+   territory, so the blueprint §15 "stated retention period" is implemented as application-visible registry state
+   plus an explicit deletion path, not `lifecycle_configuration`. Stage 6 records the rule and ships no fake
+   lifecycle.
+4. *No UPDATE policy is still the right call, and now for a stronger reason.* `update_objects_updated_at` and the
+   versioning columns are maintained by the service; an UPDATE policy aimed at `authenticated` would let a client
+   touch a table whose columns the platform itself manages. Replace stays copy-on-write: new key, new object, then
+   a registry-side tombstone.
+5. *Bucket creation as code works, with the platform defaults doing the security-relevant part.* The Stage 6
+   migration sets `public = false`, `file_size_limit`, `allowed_mime_types` and leaves lifecycle NULL — the probe
+   proved the INSERT path is available to the migration role, and the `versioning_status` default keeps us out of
+   the delete-marker semantics entirely.
+6. *Operation-scoped SELECT is usable but not yet necessary.* A listing policy that only opens for
+   `storage.object.list` denies the plain read path too, so it is a sharper tool than §5 needs; the design keeps
+   ordinary ownership-bound policies and defers the operation spelling to the battery, where it gets measured
+   rather than guessed.
+
+**12.6 Still unmeasured.** Whether `supabase db reset` applies the 19 (+1 Stage 6) migrations before or after the
+storage service creates its own schema (the §2.1 question) — it can only be observed on a reset, and the reset is
+part of S6-4's qualification rather than done speculatively now. Also unmeasured: what `imgproxy`'s absence does to
+transform requests, because Stage 6 as designed performs none.

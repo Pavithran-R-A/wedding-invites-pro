@@ -44,8 +44,12 @@ enabled = false
 [realtime]
 enabled = false
 
+# Stage 6 turns Storage on: wedding media is uploaded through the Storage API and
+# governed by RLS on `storage.objects`, so the service has to exist locally for the
+# qualification batteries to run against it. Bucket creation, object-key minting and
+# every policy live in migrations — never in Studio and never in browser code.
 [storage]
-enabled = false
+enabled = true
 
 [studio]
 enabled = false
