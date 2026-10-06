@@ -375,3 +375,23 @@ stranded locally. `origin/stage5/pack-driven-authoring-review` and the local bas
 pnpm files. No `config.toml` edit, no migration, no policy and no adapter code has been written; S6-3 through S6-7
 remain unstarted, and no Stage 6 gate has run. A rule that did not run is not a rule that passed, and a diagnostic
 on a substituted tree is not a qualification gate.
+
+## 11. One number in §10.6 was wrong, and this section names it (measured 2026-10-06)
+
+§10.6 asserted "`origin/main` reads `328f0e3`". That value came from `git for-each-ref refs/remotes` in a clone,
+which lists **locally cached remote-tracking refs**, not the remote. The push read-back taken moments later asks the
+server directly:
+
+```
+git ls-remote origin refs/heads/main refs/heads/stage5/pack-driven-authoring-review refs/heads/stage6/storage-assets
+1b1ef6dcc6c7893c42afc29787e3724ab062eb1b  refs/heads/main
+1b1ef6dcc6c7893c42afc29787e3724ab062eb1b  refs/heads/stage5/pack-driven-authoring-review
+f823905b7dcdc6ddfe2fab8d55d442fe9a5b2285  refs/heads/stage6/storage-assets
+```
+
+The correct reading is that hosted `main` **is** `1b1ef6d`, exactly the base the Stage 6 directive named, so
+`328f0e3` is a stale cache in the other clone (`wedding-invites-pro`, whose `refs/remotes/origin/main` still points
+at the Stage 4 commit) and says nothing about the server. §10.6's conclusion — main was not moved by this session —
+is true, and its number was not. `refs/heads/stage6/storage-assets` at `f823905` matches local `HEAD`, so the record
+of §10 is pushed. Nothing was rebased, reset or force-pushed to get there: the push was the ordinary
+`c2f9872..f823905` fast-forward.
