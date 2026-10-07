@@ -280,6 +280,26 @@ CREATE FUNCTION pg_temp.s4_head() RETURNS text
 LANGUAGE sql STABLE AS $fn$
   SELECT coalesce(current_setting('app.stage_head', true), 'stage4') $fn$;
 
+-- "Is the declared head this one or later?" Every branch below that grew with Stage 5 asks that
+-- question, not "is the head exactly stage5". The distinction is not cosmetic: heads are cumulative,
+-- so a chain that qualifies Stage 6 still contains everything Stage 5 added, and an equality test
+-- would silently hand a Stage 6 run the *Stage 4* expectations — a suite that goes quiet about a
+-- shape it was written to catch. A malformed token is refused rather than defaulted, because a
+-- runner that cannot name the head it is qualifying must not produce a green.
+CREATE FUNCTION pg_temp.s4_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.s4_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 's4_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.s4_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.s4_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END;
+$fn$;
+
 -- Keys at every depth, sorted in C order on both sides of every comparison.
 CREATE FUNCTION pg_temp.s4_sorted(want text[]) RETURNS text[]
 LANGUAGE sql STABLE AS $fn$
@@ -1303,7 +1323,7 @@ BEGIN
   -- down rather than one of them being dropped.
   v_err := pg_temp.s4_err('UPDATE public.tradition_pack_releases '
                           || 'SET definition_schema_version = '
-                          || CASE WHEN pg_temp.s4_head() = 'stage5' THEN '3' ELSE '2' END
+                          || CASE WHEN pg_temp.s4_at_least('stage5') THEN '3' ELSE '2' END
                           || ' WHERE id = ' || quote_literal(v_rel::text));
   PERFORM pg_temp.s4_ok('LC9x a frozen release cannot adopt a contract version this build does not understand (' || left(v_err, 100) || ')',
     v_err LIKE '23514%is not understood by this build%');
@@ -2131,11 +2151,11 @@ BEGIN
   -- list of names the result is compared against, and Stage 5's own battery asserts the
   -- *newly added* arms directly.
   PERFORM pg_temp.s4_eq('S7 the resolution path is these '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN 'twelve' ELSE 'ten' END
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'twelve' ELSE 'ten' END
     || ' functions, found by walking the call closure rather than by a hand-written list ('
     || array_to_string(pg_temp.s4_sorted(v_path), ', ') || ')',
     pg_temp.s4_sorted(v_path),
-    pg_temp.s4_sorted(CASE WHEN pg_temp.s4_head() = 'stage5' THEN ARRAY[
+    pg_temp.s4_sorted(CASE WHEN pg_temp.s4_at_least('stage5') THEN ARRAY[
       'private.build_invitation_snapshot', 'private.public_invitation_dto',
       'private.invitation_freeze_issues', 'private.require_approved_pack_release',
       'private.require_frozen_pack_release', 'private.resolve_invitation_sections',
@@ -2927,10 +2947,10 @@ BEGIN
   PERFORM pg_temp.s4_eq('F11 and a release whose definition contract this build cannot interpret says which version it found',
     private.invitation_freeze_issues(jsonb_set(v_unnamed,
       '{tradition_pack_release,definition_schema_version}',
-      (CASE WHEN pg_temp.s4_head() = 'stage5' THEN '3' ELSE '2' END)::jsonb)),
+      (CASE WHEN pg_temp.s4_at_least('stage5') THEN '3' ELSE '2' END)::jsonb)),
     ARRAY['section blessing is required and has no wording in the chosen language, and the release does not allow it to fall back',
           'this release''s definition uses contract version '
-          || CASE WHEN pg_temp.s4_head() = 'stage5' THEN '3' ELSE '2' END
+          || CASE WHEN pg_temp.s4_at_least('stage5') THEN '3' ELSE '2' END
           || ', which this build does not understand']);
 
   -- ------------------------------------------------------- an issue nobody can name
@@ -3714,7 +3734,7 @@ BEGIN
   -- prompt-shaped column would show up here as a non-zero first arm, which is what the count
   -- is being held steady to prove.
   PERFORM pg_temp.s4_jq('A7d the ban on machine prompt details is structural: neither catalogue table has a prompt-, instruction- or system-shaped column, and the scan ran over the '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN '29' ELSE '28' END
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN '29' ELSE '28' END
     || ' columns that do exist',
     jsonb_build_object(
       'prompt_shaped', (SELECT count(*)::text FROM information_schema.columns c
@@ -3727,7 +3747,7 @@ BEGIN
                            WHERE c.table_schema = 'public'
                              AND c.table_name IN ('tradition_pack_releases', 'tradition_packs'))),
     jsonb_build_object('prompt_shaped', '0', 'columns_scanned',
-      CASE WHEN pg_temp.s4_head() = 'stage5' THEN '29' ELSE '28' END));
+      CASE WHEN pg_temp.s4_at_least('stage5') THEN '29' ELSE '28' END));
 
   -- --------------------------------- 4. ruling A1's historical case, with a new holder
   -- P11 measured the *other* half: a host who lets go of a retired release loses the row.
@@ -3842,11 +3862,11 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s4_eq('I1 the customer-facing surface is exactly the '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN 'eight' ELSE 'seven' END
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'eight' ELSE 'seven' END
     || ' entry points: Stage 4 added no wrapper to it, because a release selection is an ordinary UPDATE the row policy and the wedding trigger already govern (§5)'
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN ', and Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — which is the only new name a browser can reach' ELSE '' END,
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN ', and Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — which is the only new name a browser can reach' ELSE '' END,
     v_api,
-    CASE WHEN pg_temp.s4_head() = 'stage5' THEN
+    CASE WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['create_invitation_version', 'get_invitation_publication_state',
             'preview_invitation', 'preview_invitation_document',
             'publish_invitation_version', 'resolve_public_invitation',
@@ -3868,11 +3888,11 @@ BEGIN
   -- customer-facing ones, and the eleven maintenance names are listed here by name. An
   -- accidental twelfth is a failing line, which is strictly more than the old equality said.
   PERFORM pg_temp.s4_eq('I2 and the privileged surface is '
-    || CASE WHEN pg_temp.s4_head() = 'stage5'
+    || CASE WHEN pg_temp.s4_at_least('stage5')
          THEN 'exactly these nineteen names — the eight public twins plus the eleven maintenance functions, listed so an unlisted privilege is a failing assertion'
          ELSE 'the same seven names, so there is no fourth way into a publication action and no privileged function without a public twin' END,
     v_names,
-    CASE WHEN pg_temp.s4_head() = 'stage5' THEN
+    CASE WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['approve_tradition_pack_release', 'create_invitation_version',
             'create_tradition_pack', 'create_tradition_pack_release',
             'deprecate_tradition_pack_release', 'get_invitation_publication_state',
@@ -3886,7 +3906,7 @@ BEGIN
     ELSE v_api END);
 
   PERFORM pg_temp.s4_jq('I3 the shape that makes that split mean something: every `api` function runs as the caller, every `internal_api` one has a pinned search path, and '
-    || CASE WHEN pg_temp.s4_head() = 'stage5'
+    || CASE WHEN pg_temp.s4_at_least('stage5')
          THEN 'exactly the eight with a public twin are DEFINER — the eleven maintenance bodies are INVOKER, so they add a workflow and no privilege'
          ELSE 'seven each side' END,
     (SELECT jsonb_build_object(
@@ -3903,15 +3923,22 @@ BEGIN
                                    JOIN pg_namespace n ON n.oid = p.pronamespace
                                   WHERE n.nspname = 'internal_api'
                                     AND p.proconfig @> ARRAY['search_path=""']))),
-      CASE WHEN pg_temp.s4_head() = 'stage5'
+      CASE WHEN pg_temp.s4_at_least('stage5')
              THEN jsonb_build_object('api_invoker', '8', 'api_pinned', '8',
                                      'internal_definer', '8', 'internal_pinned', '19')
              ELSE jsonb_build_object('api_invoker', '7', 'api_pinned', '7',
                                      'internal_definer', '7', 'internal_pinned', '7') END);
 
   -- ------------------------------------------------------------ the governance machinery
+  -- Stage 6 adds three functions to `private` — the key minter and the two registry guards — and no
+  -- name to `api` or `internal_api`, which is the shape this line measures. The count is not the
+  -- interesting half: `usage_anon`/`usage_auth` staying false is what makes the growth invisible to an
+  -- account, and Stage 6's own battery (90_storage_policies.sql G6) holds those three functions to an
+  -- owner-only ACL, which is the property this census was written to protect.
   PERFORM pg_temp.s4_jq('I4 the whole privileged inventory is '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN '54' ELSE '32' END
+    || CASE WHEN pg_temp.s4_at_least('stage6') THEN '57'
+             WHEN pg_temp.s4_at_least('stage5') THEN '54'
+             ELSE '32' END
     || ' functions across the three schemas, and none of the machinery is in a schema an account can even name',
     (SELECT jsonb_build_object(
               'api', (SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'api'),
@@ -3921,7 +3948,11 @@ BEGIN
               'usage_anon', (SELECT has_schema_privilege('anon', 'private', 'USAGE')::text),
               'usage_auth', (SELECT has_schema_privilege('authenticated', 'private', 'USAGE')::text),
               'usage_maint', (SELECT has_schema_privilege('service_role', 'private', 'USAGE')::text))),
-      CASE WHEN pg_temp.s4_head() = 'stage5'
+      CASE WHEN pg_temp.s4_at_least('stage6')
+             THEN jsonb_build_object('api', '8', 'internal_api', '19', 'private', '30',
+                                     'public', '0', 'usage_anon', 'false',
+                                     'usage_auth', 'false', 'usage_maint', 'true')
+             WHEN pg_temp.s4_at_least('stage5')
              THEN jsonb_build_object('api', '8', 'internal_api', '19', 'private', '27',
                                      'public', '0', 'usage_anon', 'false',
                                      'usage_auth', 'false', 'usage_maint', 'true')
@@ -3952,10 +3983,10 @@ BEGIN
    WHERE n.nspname IN ('api', 'internal_api', 'private')
      AND p.prosrc ILIKE '%tradition_pack%';
   PERFORM pg_temp.s4_eq('I6 '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN 'twenty-two function bodies name the catalogue tables: Stage 4''s seven plus the review-hash pair, the definition accessor, the record engine and the eleven maintenance bodies'
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'twenty-two function bodies name the catalogue tables: Stage 4''s seven plus the review-hash pair, the definition accessor, the record engine and the eleven maintenance bodies'
             ELSE 'seven function bodies name the catalogue tables, and they are these — the selection gate, the freeze gate, the lifecycle guard, the resolver inputs, the checker and the projection' END,
     v_names,
-    CASE WHEN pg_temp.s4_head() = 'stage5' THEN
+    CASE WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['internal_api.approve_tradition_pack_release',
             'internal_api.create_invitation_version', 'internal_api.create_tradition_pack',
             'internal_api.create_tradition_pack_release',
@@ -3982,9 +4013,9 @@ BEGIN
   -- EXECUTE-able by an account, and the maintenance bodies are not. That is why the widened
   -- surface in I2 is not a widened attack surface.
   PERFORM pg_temp.s4_eq('I6b and exactly '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN 'two of them' ELSE 'one of them' END
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'two of them' ELSE 'one of them' END
     || ' are EXECUTE-able by an authenticated account, which '
-    || CASE WHEN pg_temp.s4_head() = 'stage5'
+    || CASE WHEN pg_temp.s4_at_least('stage5')
          THEN 'are the freeze call and the parity preview — the other twenty sit behind `private` USAGE no client role holds, or a revoked maintenance grant'
          ELSE 'is the freeze path itself — the other six sit behind `private` USAGE that only the maintenance role holds' END,
     (SELECT coalesce(string_agg(q.f, ', ' ORDER BY q.f), '(none)')
@@ -3993,7 +4024,7 @@ BEGIN
               WHERE n.nspname IN ('api', 'internal_api', 'private')
                 AND p.prosrc ILIKE '%tradition_pack%'
                 AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) q),
-    CASE WHEN pg_temp.s4_head() = 'stage5'
+    CASE WHEN pg_temp.s4_at_least('stage5')
          THEN 'internal_api.create_invitation_version, internal_api.preview_invitation_document'
          ELSE 'internal_api.create_invitation_version' END);
 
@@ -4032,7 +4063,9 @@ BEGIN
   -- this session's own temporary schema — the battery's helpers, which *do* carry the marker — so a zero in the
   -- first half is known to be a clean schema rather than a pattern that matches nothing.
   PERFORM pg_temp.s4_jq('I8 no function in api, internal_api or private is test-shaped: the scan finds none of this stage''s fixture markers in any of the '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN '54' ELSE '32' END
+    || CASE WHEN pg_temp.s4_at_least('stage6') THEN '57'
+             WHEN pg_temp.s4_at_least('stage5') THEN '54'
+             ELSE '32' END
     || ' real bodies, so no privileged wrapper exists to serve a test (§5)',
     (SELECT jsonb_build_object(
               'real_scanned', (SELECT count(*)::text FROM pg_proc p
@@ -4045,7 +4078,9 @@ BEGIN
                                     OR p.prosrc ILIKE '%fixture%'
                                      OR p.proname ILIKE '%test%')))),
     jsonb_build_object('real_scanned',
-      CASE WHEN pg_temp.s4_head() = 'stage5' THEN '54' ELSE '32' END,
+      CASE WHEN pg_temp.s4_at_least('stage6') THEN '57'
+             WHEN pg_temp.s4_at_least('stage5') THEN '54'
+             ELSE '32' END,
       'real_dirty', '0'));
 
   -- ... and the control on that scan, pointed at the one schema where the marker really does
@@ -4076,17 +4111,17 @@ BEGIN
     || array_to_string(v_api, ', '), v_api, 'stage4_inventory_probe');
   PERFORM pg_temp.s4_eq('I9b and I1''s exact equality is what rejects it, so the assertion below is the same one a future migration would trip',
     cardinality(v_api)::bigint,
-    CASE WHEN pg_temp.s4_head() = 'stage5' THEN 9::bigint ELSE 8::bigint END);
+    CASE WHEN pg_temp.s4_at_least('stage5') THEN 9::bigint ELSE 8::bigint END);
 
   EXECUTE 'DROP FUNCTION api.stage4_inventory_probe(p_wedding_id uuid)';
   SELECT coalesce(array_agg(p.proname ORDER BY p.proname COLLATE "C"), '{}'::text[]) INTO v_api
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s4_eq('I10 and with the probe removed the surface is the '
-    || CASE WHEN pg_temp.s4_head() = 'stage5' THEN 'eight' ELSE 'seven' END
+    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'eight' ELSE 'seven' END
     || ' again, which is the state the rest of the suite and the application both depend on',
     v_api,
-    CASE WHEN pg_temp.s4_head() = 'stage5' THEN
+    CASE WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['create_invitation_version', 'get_invitation_publication_state',
             'preview_invitation', 'preview_invitation_document',
             'publish_invitation_version', 'resolve_public_invitation',
@@ -4100,7 +4135,9 @@ BEGIN
   SELECT count(*) INTO v_scanned FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname IN ('api', 'internal_api', 'private');
   PERFORM pg_temp.s4_eq('I10b and no residue of the probe is left anywhere in the inventory', v_scanned,
-    CASE WHEN pg_temp.s4_head() = 'stage5' THEN 54::bigint ELSE 32::bigint END);
+    CASE WHEN pg_temp.s4_at_least('stage6') THEN 57::bigint
+         WHEN pg_temp.s4_at_least('stage5') THEN 54::bigint
+         ELSE 32::bigint END);
 END $I$;
 -- ---------------------------------------------------- what this file actually leaves behind
 -- `BASE` remembered the catalogue as this file found it. Everything above then wrote to it:

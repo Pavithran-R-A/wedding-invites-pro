@@ -54,6 +54,31 @@ BEGIN
     array_to_string(coalesce(want, ARRAY[]::text[]), ', ');
 END $$;
 
+-- Which schema head this run is qualifying, as a fact about the run rather than about the
+-- catalogue. Unset means this file's own head, so `supabase/tests/stage2/run.sh` — whose chain
+-- stops at Stage 4 — needs no change and still measures the inventories it was written against.
+CREATE FUNCTION pg_temp.st2_head() RETURNS text
+LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(current_setting('app.stage_head', true), 'stage4') $fn$;
+
+-- Cumulative, and an ordinal rather than an equality, because heads are cumulative: a census keyed
+-- on `= 'stage5'` would silently hand the Stage 6 chain the Stage 5 expectations, which is the
+-- defect class this repair exists to remove. A malformed head raises instead of choosing a branch,
+-- so a typo in `PGOPTIONS` reports itself rather than passing.
+CREATE FUNCTION pg_temp.st2_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.st2_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 'st2_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.st2_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.st2_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$fn$;
+
 -- Plan shape for one query: does `rel` get a sequential scan anywhere in the plan
 -- Postgres picks? EXPLAIN's JSON output carries the node types, so this asks the
 -- question instead of pattern-matching formatted text.
@@ -547,20 +572,31 @@ BEGIN
   -- What did NOT change is the reason the check exists: a definer function is the
   -- one shape in this schema that can act above its caller, so the list is the
   -- audit surface, and a new name arriving here must be readable in one line.
+  --
+  -- The declared set is therefore built per head: the Stage 2-4 base, plus the name each later
+  -- stage added. Nothing from Stage 5 onwards is folded into the base, so this line still says
+  -- which head introduced which definer — and a head that declares Stage 5 against a schema that
+  -- has no such definer fails, exactly as it should.
   PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the privileged publication implementations plus the two trigger definers',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')) s),
-    ARRAY['internal_api.create_invitation_version',
-          'internal_api.get_invitation_publication_state',
-          'internal_api.preview_invitation',
-          'internal_api.publish_invitation_version',
-          'internal_api.resolve_public_invitation',
-          'internal_api.revoke_invitation_publication',
-          'internal_api.rotate_invitation_token',
-          'private.attach_draft_on_wedding_create',
-          'private.handle_new_user']);
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
+        ARRAY['internal_api.create_invitation_version',
+              'internal_api.get_invitation_publication_state',
+              'internal_api.preview_invitation',
+              'internal_api.publish_invitation_version',
+              'internal_api.resolve_public_invitation',
+              'internal_api.revoke_invitation_publication',
+              'internal_api.rotate_invitation_token',
+              'private.attach_draft_on_wedding_create',
+              'private.handle_new_user']
+        -- Stage 5 §7: the document preview is the eighth privileged body, reached through the
+        -- wrapper beside it and by nothing else.
+        || CASE WHEN pg_temp.st2_at_least('stage5')
+                THEN ARRAY['internal_api.preview_invitation_document']
+                ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema')
@@ -588,10 +624,13 @@ BEGIN
   -- a second call or an ownership test of its own would fail here rather than in review.
   -- A text check on purpose: it is proving the absence of logic, which no behavioural
   -- test can show, and it is the shape C63b's limitation makes worth watching.
+  --
+  -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the
+  -- document preview. Every wrapper still has to be one line, whatever the number is.
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = 7
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage5') THEN 8 ELSE 7 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc p
                       JOIN pg_namespace n ON n.oid = p.pronamespace
                      WHERE n.nspname = 'api'
@@ -603,20 +642,40 @@ BEGIN
                                       'internal_api\.', 'g')) <> 1
                             OR (SELECT count(*) FROM regexp_matches(p.prosrc,
                                       ';', 'g')) <> 1)));
-  -- The implementations are the same seven names, and no eighth arrived to sit in the
-  -- unexposed schema where no HTTP request can reach it.
-  PERFORM pg_temp.st2_set('C26e internal_api holds exactly the seven implementations',
+  -- The implementations are the same names the wrappers have, and no eighth arrived to sit in the
+  -- unexposed schema where no HTTP request can reach it — except that from Stage 5 the census is
+  -- deliberately asymmetric, so it is written as the head's own set: the paired bodies, plus the
+  -- pack-maintenance bodies that have no wrapper because a browser must not be able to call them at
+  -- all. Which eleven those are, and that they carry no browser grant, is measured by
+  -- `supabase/tests/stage3/30_publication.sql` G1f/G1g and by Stage 5's own suites; this line is the
+  -- tripwire that notices a twelfth arriving.
+  PERFORM pg_temp.st2_set('C26e internal_api holds exactly the paired implementations plus the maintenance bodies its declared head adds',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT p.proname AS p FROM pg_proc p
          JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'internal_api') s),
-    ARRAY['create_invitation_version',
-          'get_invitation_publication_state',
-          'preview_invitation',
-          'publish_invitation_version',
-          'resolve_public_invitation',
-          'revoke_invitation_publication',
-          'rotate_invitation_token']);
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
+        ARRAY['create_invitation_version',
+              'get_invitation_publication_state',
+              'preview_invitation',
+              'publish_invitation_version',
+              'resolve_public_invitation',
+              'revoke_invitation_publication',
+              'rotate_invitation_token']
+        || CASE WHEN pg_temp.st2_at_least('stage5')
+                THEN ARRAY['preview_invitation_document',
+                           'approve_tradition_pack_release',
+                           'create_tradition_pack',
+                           'create_tradition_pack_release',
+                           'deprecate_tradition_pack_release',
+                           'get_tradition_pack_review_packet',
+                           'inspect_tradition_pack_release',
+                           'submit_tradition_pack_review',
+                           'tradition_pack_catalog',
+                           'tradition_pack_retention_report',
+                           'update_draft_tradition_pack_release',
+                           'validate_tradition_pack_release']
+                ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
   -- call a wrapper can call its implementation and no more — which is what makes the
@@ -627,7 +686,8 @@ BEGIN
         JOIN pg_namespace n ON n.oid = impl.pronamespace
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
-       WHERE n.nspname = 'internal_api' AND wn.nspname = 'api') = 7
+       WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
+      = (CASE WHEN pg_temp.st2_at_least('stage5') THEN 8 ELSE 7 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc impl
                       JOIN pg_namespace n ON n.oid = impl.pronamespace
                       JOIN pg_proc wrap ON wrap.proname = impl.proname
@@ -666,26 +726,35 @@ BEGIN
           AND has_function_privilege('anon', p.oid, 'EXECUTE')) s),
     ARRAY['api.resolve_public_invitation',
           'internal_api.resolve_public_invitation']);
-  PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the seven wrappers and their seven implementations',
+  PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the wrappers and their implementations, as one set named by signature',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
-    ARRAY['api.create_invitation_version',
-          'api.get_invitation_publication_state',
-          'api.preview_invitation',
-          'api.publish_invitation_version',
-          'api.resolve_public_invitation',
-          'api.revoke_invitation_publication',
-          'api.rotate_invitation_token',
-          'internal_api.create_invitation_version',
-          'internal_api.get_invitation_publication_state',
-          'internal_api.preview_invitation',
-          'internal_api.publish_invitation_version',
-          'internal_api.resolve_public_invitation',
-          'internal_api.revoke_invitation_publication',
-          'internal_api.rotate_invitation_token']);
+    -- Fourteen names when this was written, sixteen from Stage 5, which paired one more wrapper
+    -- with one more body. The pack-maintenance bodies are absent from both lists because they are
+    -- granted to nobody a browser can be — that is C26e's asymmetry, checked here from the other
+    -- side: an EXECUTE that appeared for one of them would show up as a diff in this set.
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
+        ARRAY['api.create_invitation_version',
+              'api.get_invitation_publication_state',
+              'api.preview_invitation',
+              'api.publish_invitation_version',
+              'api.resolve_public_invitation',
+              'api.revoke_invitation_publication',
+              'api.rotate_invitation_token',
+              'internal_api.create_invitation_version',
+              'internal_api.get_invitation_publication_state',
+              'internal_api.preview_invitation',
+              'internal_api.publish_invitation_version',
+              'internal_api.resolve_public_invitation',
+              'internal_api.revoke_invitation_publication',
+              'internal_api.rotate_invitation_token']
+        || CASE WHEN pg_temp.st2_at_least('stage5')
+                THEN ARRAY['api.preview_invitation_document',
+                           'internal_api.preview_invitation_document']
+                ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
   -- empty `public` meant the data API could not be asked to run anything of ours.
@@ -698,19 +767,25 @@ BEGIN
                  WHERE n.nspname = 'public'));
   -- ... and the counterpart, since C29 alone would also be satisfied by a schema that
   -- grew no boundary at all. The list is exact: an eighth callable would have to be
-  -- named here before it could ship.
-  PERFORM pg_temp.st2_set('C29a the callable boundary is exactly seven named RPCs',
+  -- named here before it could ship — and from the Stage 5 head it has been, so the
+  -- eighth name is declared with the head that introduced it rather than merged into
+  -- the base.
+  PERFORM pg_temp.st2_set('C29a the callable boundary is exactly the named RPCs this head declares',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT p.proname AS p FROM pg_proc p
          JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'api') s),
-    ARRAY['create_invitation_version',
-          'get_invitation_publication_state',
-          'preview_invitation',
-          'publish_invitation_version',
-          'resolve_public_invitation',
-          'revoke_invitation_publication',
-          'rotate_invitation_token']);
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
+        ARRAY['create_invitation_version',
+              'get_invitation_publication_state',
+              'preview_invitation',
+              'publish_invitation_version',
+              'resolve_public_invitation',
+              'revoke_invitation_publication',
+              'rotate_invitation_token']
+        || CASE WHEN pg_temp.st2_at_least('stage5')
+                THEN ARRAY['preview_invitation_document']
+                ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
   -- "the credential never appears in a query string": with no parameter to name, a
   -- request that puts `?p_token=` in a URL cannot be resolved to a function at all,
@@ -743,6 +818,9 @@ BEGIN
          JOIN pg_namespace n ON n.oid = c.relnamespace
          JOIN pg_proc p ON p.oid = t.tgfoid
         WHERE NOT t.tgisinternal) s),
+    -- Sorted on both sides, so a later stage's additions can be declared in the order that
+    -- explains them rather than in collation order.
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
     ARRAY[
       'auth.users.on_auth_user_created=handle_new_user',
       'private.access_tokens.tokens_no_client_delete=reject_client_delete',
@@ -798,7 +876,24 @@ BEGIN
       -- Stage 4 §10: a wedding may only point at an *approved* release. INVOKER, and it
       -- reads the release as the calling role, so a host cannot select a release through
       -- a definer that sees rows the host was never shown.
-      'public.weddings.weddings_pack_release_gate=require_approved_pack_release']);
+      'public.weddings.weddings_pack_release_gate=require_approved_pack_release']
+        -- Stage 6 has no definer in this group (see C32), and the census is unfiltered, so the
+        -- platform's own Storage triggers arrive here too: the three that mint and guard the
+        -- asset registry, and the six that protect `storage.buckets` / `storage.objects`. They
+        -- are listed because they are measured — an inventory that quietly ignores a schema it
+        -- did not write is an inventory that cannot notice one disappearing either.
+        || CASE WHEN pg_temp.st2_at_least('stage6')
+                THEN ARRAY[
+                  'public.wedding_assets.wedding_assets_mint_object_key=mint_wedding_asset_object_key',
+                  'public.wedding_assets.wedding_assets_guard_update=guard_wedding_asset_update',
+                  'public.wedding_assets.wedding_assets_guard_delete=guard_wedding_asset_delete',
+                  'storage.buckets.enforce_bucket_name_length_trigger=enforce_bucket_name_length',
+                  'storage.buckets.protect_bucket_control_insert=protect_bucket_control_columns',
+                  'storage.buckets.protect_bucket_control_update=protect_bucket_control_columns',
+                  'storage.buckets.protect_buckets_delete=protect_delete',
+                  'storage.objects.protect_objects_delete=protect_delete',
+                  'storage.objects.update_objects_updated_at=update_updated_at_column']
+                ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
   -- use. That is the property this check carried in Stage 2, when the whole schema had

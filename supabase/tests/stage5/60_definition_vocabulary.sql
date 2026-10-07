@@ -118,10 +118,14 @@ DECLARE v_packs bigint; v_rels bigint; v_mine bigint;
 BEGIN
   PERFORM pg_temp.s6_is_superuser('BASE0 the vocabulary battery is qualified as the '
     'maintenance identity');
-  PERFORM pg_temp.s6_eq('BASE1 and the run declares the Stage 5 head, because a version-2 '
+  -- "From Stage 5 up", not "exactly Stage 5": the version-2 vocabulary this file measures is a
+  -- Stage 5 object and a later chain still contains it, so refusing a later head would turn a
+  -- regression signal into an identity check. An undeclared head yields NULL here, and NULL is
+  -- distinct from `true`, so this line cannot pass on a missing declaration.
+  PERFORM pg_temp.s6_eq('BASE1 and the run declares a head of Stage 5 or later, because a version-2 '
     'authoring vocabulary does not exist at the Stage 4 head — this file would be measuring '
     'nothing there, and saying so is the honest report',
-    pg_temp.s6_head(), 'stage5');
+    (SELECT ((substring(pg_temp.s6_head() from '^stage([0-9]+)$'))::int >= 5)), true);
 
   SELECT count(*) INTO v_packs FROM public.tradition_packs;
   SELECT count(*) INTO v_rels  FROM public.tradition_pack_releases;

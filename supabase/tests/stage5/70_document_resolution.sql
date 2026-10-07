@@ -343,9 +343,13 @@ DECLARE v_weds bigint; v_vers bigint; v_mine bigint;
 BEGIN
   PERFORM pg_temp.s7_is_superuser('BASE0 the resolution battery is qualified as the maintenance '
     'identity and hands the pen to the host wherever a case needs one');
-  PERFORM pg_temp.s7_eq('BASE1 the run declares the Stage 5 head, because the resolver, the '
+  -- From Stage 5 up, not exactly Stage 5: the objects named here are Stage 5's and a later chain
+  -- still carries them, so a later head is a re-measurement rather than a category error. An
+  -- undeclared head yields NULL below, and NULL is distinct from `true`, so a run that forgot to
+  -- declare still fails.
+  PERFORM pg_temp.s7_eq('BASE1 the run declares a head of Stage 5 or later, because the resolver, the '
     'issue engine and the preview document measured here are all Stage 5 objects',
-    pg_temp.s7_head(), 'stage5');
+    (SELECT ((substring(pg_temp.s7_head() from '^stage([0-9]+)$'))::int >= 5)), true);
   SELECT count(*) INTO v_weds FROM public.weddings;
   SELECT count(*) INTO v_vers FROM public.invitation_versions;
   SELECT count(*) INTO v_mine FROM public.tradition_packs WHERE pack_key LIKE 'stage7\_%';

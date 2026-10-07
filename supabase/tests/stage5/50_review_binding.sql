@@ -241,10 +241,15 @@ BEGIN
   -- not derived from the schema. If the head were read back from `pg_proc`, the assertion
   -- below could not fail, and the two-head split in Stage 4's inventory group would be
   -- measuring the instrument rather than the thing.
+  --
+  -- "From Stage 5 up", not "exactly Stage 5": heads are cumulative, so a Stage 6 chain still
+  -- contains every object this file measures, and refusing it there would hide a real regression
+  -- signal behind an identity check. An undeclared or malformed token still fails — the substring
+  -- yields NULL, and NULL is distinct from `true`, so this cannot pass by accident.
   PERFORM pg_temp.s5_eq('BASE1 the run declares which schema head it is qualifying, and this '
-    'file only means anything at the Stage 5 head — a battery whose own identity is unverifiable '
+    'file only means anything from the Stage 5 head up — a battery whose own identity is unverifiable '
     'cannot report a delta',
-    pg_temp.s5_head(), 'stage5');
+    (SELECT ((substring(pg_temp.s5_head() from '^stage([0-9]+)$'))::int >= 5)), true);
 
   SELECT count(*) INTO v_packs FROM public.tradition_packs;
   SELECT count(*) INTO v_rels FROM public.tradition_pack_releases;
@@ -551,7 +556,17 @@ BEGIN
   PERFORM pg_temp.s5_ok('B2 a release cannot be created already carrying a binding (' || v_err || ')',
     v_err LIKE 'P0001%cannot already carry a review binding%');
 
-  SELECT count(*) INTO v_rows FROM public.tradition_pack_releases WHERE release_number = 900;
+  -- Scoped to the pack this probe authored against, and that is a measurement rather than a
+  -- tidy-up. Measured at the Stage 6 head, alone on a schema with no other suite's rows: this
+  -- file prints PASSED (122) and B2b reads zero. Run after `stage2/20_attacks.sql` has committed
+  -- in the same database — which is the order `tests/stage6/run.sh` chains — an unscoped count
+  -- of 900 reported 1, and the row it was counting is `unshipped_pack`'s own approved scratch
+  -- release at 900, kept on purpose by that suite's lifecycle cases. The same count scoped to
+  -- `stage5_binding` still reported 0, so nothing about this file's forged birth was written;
+  -- the assertion was answering a question about another battery's fixtures. Stage 4 made the
+  -- identical repair for the identical reason (`50_pack_release.sql`, the note above its `Dc3`).
+  SELECT count(*) INTO v_rows FROM public.tradition_pack_releases
+    WHERE pack_id = v_pack AND release_number = 900;
   PERFORM pg_temp.s5_eq('B2b and the refusal wrote nothing, including no half-formed row a later '
     'release number would have to work around', v_rows, 0::bigint);
 

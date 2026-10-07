@@ -446,7 +446,10 @@ describe('§5.3 cross-account isolation over the API', () => {
     ['venues', (id, n) => ({ wedding_id: id, name: `A hall I do not own ${n}` })],
     ['wedding_events', (id, n) => ({ wedding_id: id, event_key: `probe-${n}`, display_name: `Probe ${n}`, starts_at_local: '2026-11-14T07:30:00' })],
     ['guest_households', (id, n) => ({ wedding_id: id, display_name: `A household I did not invite ${n}` })],
-    ['wedding_assets', (id, n) => ({ wedding_id: id, asset_kind: 'photo', object_key: `unowned/${RUN_TAG}/${n}.jpg` })],
+    // No object_key here: Stage 6 mints it in a BEFORE INSERT trigger that runs ahead of the RLS
+    // WITH CHECK, so a supplied key is answered by the mint refusal and this claim stops being
+    // about row-level security. stage6_storage.test.mjs MINT-02 covers the supplied-key case.
+    ['wedding_assets', (id) => ({ wedding_id: id, asset_kind: 'photo' })],
   ];
   for (const [table, build] of childTables) {
     test(`a child row cannot be attached to another account's wedding via ${table}`, async () => {

@@ -61,6 +61,30 @@ BEGIN
   RETURN n;
 END $$;
 
+-- Which cumulative schema head this run qualifies. `supabase/tests/stage6/run.sh` declares
+-- `stage6` through `PGOPTIONS`; unset means the head this file was written against, which is
+-- the Stage 4 chain that `supabase/tests/stage2/run.sh` builds.
+CREATE FUNCTION pg_temp.st2_head() RETURNS text
+LANGUAGE sql STABLE AS $head$
+  SELECT coalesce(current_setting('app.stage_head', true), 'stage4') $head$;
+
+-- Ordinal, not equality: heads accumulate, so an assertion written for Stage 4 still holds at
+-- Stage 6 unless the later chain supersedes it. A malformed head raises instead of quietly
+-- picking a branch, so a typo in `PGOPTIONS` reports itself rather than passing.
+CREATE FUNCTION pg_temp.st2_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $head$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.st2_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 'st2_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.st2_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.st2_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$head$;
+
 -- ===========================================================================
 -- Seed, through the maintenance role: the server-authoritative tables are only
 -- writable by a trusted path, so the trusted path has to build the rows this
@@ -311,10 +335,23 @@ INSERT INTO public.approval_feedback (id, wedding_id, request_id, version_id, fe
 SELECT s.feedback_a, s.wedding_a, s.request_a, s.version_a1, 'decision', 'approved',
        'Chethan' FROM seed s;
 
+-- Stage 6 took `object_key` out of the writer's hand: at that head up the database mints
+-- `weddings/<wedding_id>/<asset_kind>/<id>` and refuses any presented value, so the trusted
+-- path that builds this fixture writes the same row a customer would — with no key column.
+-- Below that head the key was the writer's to choose, and these literals are what the
+-- constraint layer was qualified against. Both forms are present because this file qualifies
+-- more than one head, and each head has to be entered through the door it actually has.
 INSERT INTO public.wedding_assets (id, wedding_id, asset_kind, label, object_key, mime_type,
                                    size_bytes, is_generated)
 SELECT s.asset_a, s.wedding_a, 'photo', 'Couple', 'weddings/seed/photo-1.jpg',
-       'image/jpeg', 204800, false FROM seed s;
+       'image/jpeg', 204800, false FROM seed s
+ WHERE NOT pg_temp.st2_at_least('stage6');
+
+INSERT INTO public.wedding_assets (id, wedding_id, asset_kind, label, mime_type,
+                                   size_bytes, is_generated)
+SELECT s.asset_a, s.wedding_a, 'photo', 'Couple', 'image/jpeg',
+       204800, false FROM seed s
+ WHERE pg_temp.st2_at_least('stage6');
 
 INSERT INTO public.entitlements (id, wedding_id, package_code, status, source, metadata)
 SELECT s.entitlement_a, s.wedding_a, 'print-plus', 'active', 'service',
@@ -359,7 +396,41 @@ SELECT s.feedback_b, s.wedding_b, s.request_b, s.version_b1, 'comment',
 INSERT INTO public.wedding_assets (id, wedding_id, asset_kind, label, object_key, mime_type,
                                    size_bytes, is_generated)
 SELECT s.asset_b, s.wedding_b, 'photo', 'Couple B', 'weddings/seed/photo-2.jpg',
-       'image/jpeg', 102400, false FROM seed s;
+       'image/jpeg', 102400, false FROM seed s
+ WHERE NOT pg_temp.st2_at_least('stage6');
+
+INSERT INTO public.wedding_assets (id, wedding_id, asset_kind, label, mime_type,
+                                   size_bytes, is_generated)
+SELECT s.asset_b, s.wedding_b, 'photo', 'Couple B', 'image/jpeg',
+       102400, false FROM seed s
+ WHERE pg_temp.st2_at_least('stage6');
+
+-- The pair above is a head branch, so both arms have to be checked: a predicate that is wrong
+-- in both directions would leave the fixture with zero or two asset rows and every isolation
+-- assertion below would then be counting nothing. At the minting head the key is also read
+-- back, because a seed whose key silently stayed NULL would satisfy `wedding_assets` rows
+-- existing while breaking the claim that the registry is populated the way Stage 6 says it is.
+DO $seed_assets$
+DECLARE n bigint;
+BEGIN
+  SELECT count(*) INTO n FROM public.wedding_assets a
+    JOIN seed s ON s.asset_a = a.id OR s.asset_b = a.id;
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'SEED: the wedding_assets fixture arrived with % of its 2 rows (head=%)',
+      n, pg_temp.st2_head();
+  END IF;
+  IF pg_temp.st2_at_least('stage6') THEN
+    SELECT count(*) INTO n FROM public.wedding_assets a
+      JOIN seed s ON (s.asset_a = a.id OR s.asset_b = a.id)
+     WHERE a.object_key = 'weddings/' || a.wedding_id::text || '/' || a.asset_kind
+                           || '/' || a.id::text
+       AND a.upload_status = 'staged';
+    IF n <> 2 THEN
+      RAISE EXCEPTION 'SEED: at the Stage 6 head % of the 2 asset rows carry a minted key in '
+                      'the promised shape and start staged', n;
+    END IF;
+  END IF;
+END $seed_assets$;
 
 INSERT INTO public.entitlements (id, wedding_id, package_code, status, source, metadata)
 SELECT s.entitlement_b, s.wedding_b, 'print-plus', 'active', 'service',
@@ -1163,18 +1234,42 @@ INSERT INTO probes_state (label, expect, stmt) VALUES
               current_setting('probe.request_a')::uuid,
               current_setting('probe.version_a1')::uuid, 'comment', 'peer', 'approved', 'nice')$t$),
   -- assets
-  ('asset key that escapes its prefix', '23514',
+  -- Two of these four probes aim at `object_key`, and Stage 6 moved the refusal for a
+  -- presented key one layer earlier: the minting trigger answers before any constraint on the
+  -- column is reached. The attack is unchanged — a client still cannot get an out-of-prefix or
+  -- traversing key into the registry — so the probe keeps its statement and follows the
+  -- refusal that actually lands, naming the trigger at that head and the CHECK below it.
+  -- Neither arm is a weakening: the CHECK stays installed, and `stage6/80_asset_registry.sql`
+  -- B12 pins that its definition still bounds `object_key` while K1-K2 pin the shape the minted
+  -- value arrives in.
+  ('asset key that escapes its prefix',
+   CASE WHEN pg_temp.st2_at_least('stage6') THEN '42501' ELSE '23514' END,
    $t$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key)
       VALUES (current_setting('probe.wedding_a')::uuid, 'photo', '/etc/passwd')$t$),
-  ('asset key with a traversal segment', '23514',
+  ('asset key with a traversal segment',
+   CASE WHEN pg_temp.st2_at_least('stage6') THEN '42501' ELSE '23514' END,
    $t$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key)
       VALUES (current_setting('probe.wedding_a')::uuid, 'photo', 'weddings/../../other/x.jpg')$t$),
+  -- These two aim at columns that are still the writer's to get wrong. Presented with a key
+  -- below Stage 6, and presented without one from that head up — because at that head a
+  -- presented key is refused first, and the probe would report the trigger while claiming to
+  -- measure a size or vocabulary CHECK.
   ('asset with a negative size', '23514',
-   $t$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key, size_bytes)
-      VALUES (current_setting('probe.wedding_a')::uuid, 'photo', 'weddings/a.jpg', -1)$t$),
+   CASE WHEN pg_temp.st2_at_least('stage6') THEN
+     $t6b$INSERT INTO public.wedding_assets (wedding_id, asset_kind, size_bytes)
+        VALUES (current_setting('probe.wedding_a')::uuid, 'photo', -1)$t6b$
+   ELSE
+     $t$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key, size_bytes)
+        VALUES (current_setting('probe.wedding_a')::uuid, 'photo', 'weddings/a.jpg', -1)$t$
+   END),
   ('asset kind outside the vocabulary', '23514',
-   $t$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key)
-      VALUES (current_setting('probe.wedding_a')::uuid, 'video', 'weddings/a.mp4')$t$),
+   CASE WHEN pg_temp.st2_at_least('stage6') THEN
+     $t6c$INSERT INTO public.wedding_assets (wedding_id, asset_kind)
+        VALUES (current_setting('probe.wedding_a')::uuid, 'video')$t6c$
+   ELSE
+     $t$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key)
+        VALUES (current_setting('probe.wedding_a')::uuid, 'video', 'weddings/a.mp4')$t$
+   END),
   -- versions and publications
   ('version zero', '23514',
    $t$INSERT INTO public.invitation_versions (wedding_id, version_number, snapshot, created_by)
@@ -1296,8 +1391,14 @@ INSERT INTO probe_msgs (label, msg) VALUES
   ('approved release''s review record rewritten', 'is part of the frozen unit'),
   ('approved release''s review timestamp moved', 'is part of the frozen unit'),
   ('approved release''s reviewer identity attached afterwards', 'is part of the frozen unit'),
-  ('asset key that escapes its prefix', 'violates check constraint "wedding_assets_object_key_check"'),
-  ('asset key with a traversal segment', 'violates check constraint "wedding_assets_object_key_check"'),
+  ('asset key that escapes its prefix',
+   CASE WHEN pg_temp.st2_at_least('stage6')
+        THEN 'object_key is minted by the database and cannot be supplied'
+        ELSE 'violates check constraint "wedding_assets_object_key_check"' END),
+  ('asset key with a traversal segment',
+   CASE WHEN pg_temp.st2_at_least('stage6')
+        THEN 'object_key is minted by the database and cannot be supplied'
+        ELSE 'violates check constraint "wedding_assets_object_key_check"' END),
   ('asset kind outside the vocabulary', 'violates check constraint "wedding_assets_asset_kind_check"'),
   ('asset with a negative size', 'violates check constraint "wedding_assets_size_bytes_check"'),
   ('audit event with an empty action', 'violates check constraint "audit_events_action_check"'),
@@ -1345,7 +1446,14 @@ INSERT INTO probe_msgs (label, msg) VALUES
   ('publication status outside the vocabulary', 'violates check constraint "publications_check"'),
   ('release allowing an English fallback it never declared', 'section opening allows an English fallback but this release does not cover en'),
   ('release belonging to no pack', 'violates foreign key constraint "tradition_pack_releases_pack_id_fkey"'),
-  ('release carrying an unknown key in a section', 'section opening carries unknown keys: {css}'),
+  -- Stage 5 rewrote this one refusal's text when its validator began telling unknown keys
+  -- apart from version-2 keys on a version-1 definition (measured on both heads: Stage 4's
+  -- text names the key list only, Stage 5's names both clauses and then the list). The probe
+  -- follows the schema it is run against; the SQLSTATE is unchanged, so only the text moves.
+  ('release carrying an unknown key in a section',
+   CASE WHEN pg_temp.st2_at_least('stage5')
+        THEN 'section opening carries unknown keys, or version-2 keys on a version-1 definition: {css}'
+        ELSE 'section opening carries unknown keys: {css}' END),
   ('release claiming a language outside the product set', 'violates check constraint "tradition_pack_releases_languages_check"'),
   ('release created already approved', 'a tradition pack release begins life as draft; it cannot be created already approved'),
   ('release created already reviewed', 'a tradition pack release begins life as draft; it cannot be created already reviewed'),
@@ -1524,6 +1632,30 @@ BEGIN
                 current_setting('probe.event_a2')::uuid, 'attending', 1, 'host_manual')$t5$,
     $t5$INSERT INTO public.wedding_assets (wedding_id, asset_kind, object_key)
         VALUES (current_setting('probe.wedding_a')::uuid, 'photo', 'weddings/forged/x.jpg')$t5$];
+
+  -- The loop below walks `owner_writable` and indexes `forge` by the same position, so a list
+  -- that grows on one side only would hand the probe a NULL statement and report that as a
+  -- refusal. Checked here, where the two lists are still in each other's sight.
+  IF array_length(forge, 1) IS DISTINCT FROM array_length(owner_writable, 1) THEN
+    RAISE EXCEPTION 'SETUP: forge probes (%) no longer line up with the writable tables (%)',
+      array_length(forge, 1), array_length(owner_writable, 1);
+  END IF;
+
+  IF pg_temp.st2_at_least('stage6') THEN
+    -- Stage 6 put a second 42501 in front of this table's row security: the minting trigger
+    -- refuses a presented key before RLS is consulted, so the statement above would be refused
+    -- for a reason that has nothing to do with ownership — and group 5, which reads only the
+    -- SQLSTATE, would credit the policy with a refusal it never reached. The Stage 6 form of
+    -- the attack presents no key, leaving the ownership policy as the only thing between this
+    -- account and somebody else's wedding. The message is then named, so this cannot regress
+    -- back into a trigger pass.
+    i := array_position(owner_writable, 'wedding_assets');
+    IF i IS NULL THEN
+      RAISE EXCEPTION 'SETUP: public.wedding_assets is no longer in the writable-table list';
+    END IF;
+    forge[i] := $t6e$INSERT INTO public.wedding_assets (wedding_id, asset_kind)
+        VALUES (current_setting('probe.wedding_a')::uuid, 'photo')$t6e$;
+  END IF;
 
   -- Publish the fixture ids for the probe statements, which any role has to be able
   -- to execute. GUCs are session-wide, so SET ROLE does not hide them.
@@ -1748,6 +1880,14 @@ BEGIN
     v := pg_temp.st2_err(forge[i]);
     IF v NOT LIKE '42501%' THEN
       RAISE EXCEPTION 'FAIL 5: an owner-less account forged a row into public.%: %', t, v;
+    END IF;
+    -- Not a new assertion to count, and deliberately not a `passed` increment: it sharpens
+    -- the one above, so a Stage 6 refusal by the minting trigger cannot be mistaken for the
+    -- ownership policy doing its job.
+    IF pg_temp.st2_at_least('stage6') AND t = 'wedding_assets'
+       AND v NOT LIKE '%row-level security policy%' THEN
+      RAISE EXCEPTION 'FAIL 5: the forged wedding_assets row was refused by % rather than by '
+                      'row security, so the ownership policy is unproven at this head', v;
     END IF;
     passed := passed + 2;
   END LOOP;
@@ -2207,8 +2347,18 @@ BEGIN
        WHERE h.wedding_id = current_setting('probe.fresh')::uuid
          AND e.wedding_id = current_setting('probe.fresh')::uuid$t10$);
   IF n <> 1 THEN RAISE EXCEPTION 'FAIL 10: owner could not record an RSVP (rows=%)', n; END IF;
-  n := pg_temp.st2_changed($t10$INSERT INTO public.wedding_assets (wedding_id, asset_kind, label, object_key)
-      VALUES (current_setting('probe.fresh')::uuid, 'photo', 'Hall', 'weddings/fresh/photo.jpg')$t10$);
+  -- At the Stage 6 head the honest registration statement names no key: the row the customer
+  -- may write is the one the minting trigger accepts, and a write that presented a key would
+  -- be refused by that trigger rather than by anything about ownership. Either way the claim
+  -- this step makes is the same one — a customer can register an asset on its own wedding.
+  n := pg_temp.st2_changed(CASE WHEN pg_temp.st2_at_least('stage6') THEN
+      $t10a$INSERT INTO public.wedding_assets (wedding_id, asset_kind, label)
+          VALUES (current_setting('probe.fresh')::uuid, 'photo', 'Hall')$t10a$
+      ELSE
+      $t10$INSERT INTO public.wedding_assets (wedding_id, asset_kind, label, object_key)
+          VALUES (current_setting('probe.fresh')::uuid, 'photo', 'Hall',
+                  'weddings/fresh/photo.jpg')$t10$
+      END);
   IF n <> 1 THEN RAISE EXCEPTION 'FAIL 10: owner could not register an asset (rows=%)', n; END IF;
   -- The draft a customer edits is the one that came with the wedding (Stage 3), so this
   -- step writes the content rather than the row. Same strength as before: it proves the
