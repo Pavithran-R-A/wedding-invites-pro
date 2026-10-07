@@ -1607,3 +1607,88 @@ none of it reclaimed. So the trend within one hour of writing is −131 MB, and 
 that is consuming it. That does not change the boundary — I will not prune a shared volume or delete another project's
 data — but it does change what restarting Docker Desktop will require, it bounds how many more gate sets this machine
 can certify, and it belongs in the one human-only action this stage is waiting on rather than in a silent retry loop.
+
+## 26. The security tier taken statically, and the one published claim about the confirm edge it did not survive (2026-10-07)
+
+**26.1 What this section is, and what it is not.** The objective asks for a security gate, and probe 16 (`q6-logs/s6-engine-probe-16.log`,
+`docker_info_exit=124`, `docker_ps_exit=124`, both with 0 bytes) keeps every HTTP, SQL and browser tier waiting on the engine. Five of the
+six questions a security review of this stage raises can be answered by reading the code and the DDL, so they were. Two things this
+section is not: it is not an *independent* review — the delegated reviewer never produced a report, for the reason in §26.5, so the same
+agent that wrote the adapter read it — and it is not a substitute for any gate. Evidence lines, file citations and the two open
+measurements live in `q6-logs/s6-security-review-static-01.log`; this section carries only what it concluded. The review was read-only:
+`git status --short` before and after it showed the same two external untracked files and nothing else.
+
+**26.2 The six questions, and where each one closed.**
+
+* *Can browser code reach a privileged credential?* No. `src/integrations/supabase/client.ts:4-5` reads exactly `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_PUBLISHABLE_KEY`, and a grep of every `import.meta.env` reference in `src/` returns those two names and nothing else;
+  Vite only exposes `VITE_`-prefixed keys, so an un-prefixed secret cannot leak by omission. `weddingAssets.ts:46` imports that client and
+  no other. §25.4's value-keyed sweep already proved the same thing from the other direction.
+* *Can a client influence a server-assigned or immutable column?* No, and the interesting case is closed twice. A presented `object_key`
+  is refused with 42501 (`20261006120000…sql:61-64`) before the mint overwrites it (`:74`); an INSERT that claims anything but `staged`
+  is refused (`:65-68`); `object_key`, `wedding_id` and `asset_kind` are each refused on UPDATE (`:106-114`); `tombstoned` is terminal
+  (`:129-131`) and `ready` may only move to `tombstoned` (`:133-135`); and a no-state-change write that re-describes `mime_type` or
+  `size_bytes` on a ready row still meets the verification (`:121-126`), which closes the "true at confirmation, edited into a lie
+  afterwards" route. The segment the mint interpolates is not free text: `asset_kind` is CHECKed to five literals
+  (`20260925120400_stage2_assets_entitlements_secrets.sql:14-15`) and `object_key` is CHECKed against a leading `/` and against `..` in
+  the same DDL, so no traversal shape reaches the path at either layer.
+* *Public-URL construction?* None. `getPublicUrl` appears nowhere in `src/` or `index.html`; the only storage URL call is
+  `createSignedUrl(objectKey, 60)` (`weddingAssets.ts:168`), whose result is never written to a row, a snapshot or a projection
+  (`ASSET_COLUMNS`, `:59-60`), and the bucket is inserted with `public = false` (`:30-33`).
+* *Swallowed upload errors, and the orphan ordering?* The order is the only one the two guards accept, which is checkable statically:
+  `upsert: false` (`:256`) against a table with no UPDATE policy (`:275-278`), and tombstone, collect bytes, delete row (`:344-356`)
+  against a DELETE policy that needs `tombstoned` (`:263-273`) and a delete guard that refuses while the object resolves (`:207-212`).
+  No storage failure is dropped silently: each both logs and returns a host-readable sentence (`:113-116`, `:257-259`, `:376-379`), and
+  the 42501 on the confirm edge is translated rather than surfaced as a permission error (`:283-286`).
+* *GRANT versus RPC parity — can the adapter actually do what it claims?* Yes for all seven calls. Table-level `SELECT`
+  (`20260925120500…:26-46`) covers `object_key`, so the post-insert read-back is servable; `INSERT`/`UPDATE`/`DELETE` are granted at
+  `:50-61` after `REVOKE ALL ON ALL TABLES` at `:19`; four policies exist for exactly those verbs and only to `authenticated`
+  (`:311`, `:316`, `:321-328` with both `USING` and `WITH CHECK`, `:330`), each binding on `w.owner_user_id = auth.uid()`. Grants are
+  table-level rather than column-level, so there is no hidden column grant that could starve a legitimate write. The three trigger
+  functions are EXECUTE-revoked per object (`:84`, `:189`, `:219`), which the measured `anon_exec_mint=true` default made necessary and
+  which costs the flow nothing because a trigger needs no EXECUTE from the writing role.
+* *Does the UI call an upload ready before the database did?* No. `WeddingAssetsPanel.tsx:58-59` renders "Stored." only for
+  `upload_status === 'ready'`, the preview control is disabled otherwise (`:236`), inline media renders only under the same condition
+  (`:243`), and the adapter module is imported by the panel and its unit suite alone — `PublicInvitation.tsx:32`'s `{ kind: 'ready' }` is
+  that page's own load phase, unrelated to `upload_status`, so the guest route cannot reach this code.
+
+**26.3 The claim that did not survive: I4's type half may be comparing one client value against itself.** The confirm edge compares the
+row's `mime_type` against the object's recorded `metadata->>'mimetype'` (`:150-156`, `:172-176`) and the migration explains that it does
+so in order to claim that "a row that records `image/png` while the stored object is something else" is caught "against the bytes rather
+than trusted" (`:167-171`). But the adapter fills *both* sides from a single client-supplied value: `putObject` sends
+`contentType = draft.mimeType` (`weddingAssets.ts:256`) and `registerAsset` puts the same `draft.mimeType` in the row (`:238`). If the
+storage service records the **declared** header, then for TYPE the comparison is client-value against client-value and the sentence
+overstates the mechanism — an SVG or HTML payload declared as `image/png` would satisfy the row claim and the recorded metadata
+together. `size` is not exposed the same way, because the recorded length is measured from real bytes. This is not a published falsehood:
+`80_asset_registry.sql:10` already labels its `storage.objects` rows a stand-in, so the SQL battery never claimed to prove where the
+metadata comes from, and §2's open-item table (`:132`) already lists whether `allowed_mime_types` is honoured locally as it is hosted. It
+is an unproven claim about a mechanism, and the review deliberately did not edit the comment on the strength of a guess. M1 in
+`q6-logs/s6-engine-runbook.md` §6 measures it in one upload and then chooses between three outcomes: leave the comment, weaken it to what
+the mechanism does, or add a battery case. M2 there asks the adjacent question the adapter itself flags at `:204-206` — whether a refused
+upload can leave partial bytes at the minted key, which would turn a legal staged-row delete into an O1 orphan that reports itself as
+"the asset record could not be removed".
+
+**26.4 No code was repaired by this review, and that is the finding.** Not because nothing was found — §26.3 is a real gap in what the
+comment proves — but because the fix depends on which layer answers first, and repairing an unmeasured behaviour is the one thing the
+standing rule forbids. The adapter's own honesty line (`:41-44`) still stands, and this section widens rather than narrows it: the module
+has still never called a running stack.
+
+**26.5 Why the review was not independent, recorded as an instrument result.** The delegated reviewer (`agentType ecc:security-reviewer`,
+task `a74606c4f893c3edd`) could not deliver a report on this host: its transcript path
+`…/subagents/agent-aecc:security-reviewer-604b0e57c0d51470.jsonl` contains a colon, Windows cannot create such a file, the directory held
+a 0-byte entry named `agent-aecc`, the `tasks/*.output` symlink pointed at a non-existent target, and `task-*.json` never left
+`status:"running"` (`updatedAt` was `createdAt` plus 216 ms). The task was stopped and the six questions were answered in the main agent.
+The consequence belongs in the verdict: this tier is *self*-review, and an independent pass over the same six questions is still owed —
+by a non-plugin agent type or by a human — before Stage 6 can call its security gate closed.
+
+**26.6 Certification posture for this head, and the constraint that shaped it.** §22.7 asks a docs-only head to be certified by re-taking
+the gate set at it. Five gates are re-taken here (`typecheck`, `product:check`, `dbtypes:check`, `lint`, `test`); the production build is
+not, because this commit touches only `docs/audits/stage-6-storage-assets.md`, which `git show --stat` in the certification log proves, so
+the `dist/` identity measured at `5731b35` (`asset_count=30 ref_count=30 differing_entries=0 certified_dist_files=33`,
+`q6-logs/s6-section25b-cert-01.log`) carries forward by construction rather than by re-measurement. The reason is the drive, not
+convenience: `df -k /c` read **319,012 KB free of 498,133,316, 100 % used** when this section was written, against the 449,012 falling to
+410,692 KB that the certification run at `5731b35` recorded minutes earlier — roughly 90 MB gone with no build of mine in it. A build
+costs about 18 MB, and an `ENOSPC` in the middle of a gate would produce an invalid attempt that then has to be disclosed and re-measured,
+costing more than it saves. Note also that the tree is currently a **pnpm** tree (`node_modules/.modules.yaml` and `node_modules/.pnpm`
+present, `vite` a symlink): the same external installer that re-drops the byte-identical `pnpm-lock.yaml` + `pnpm-workspace.yaml` pair
+converted it after `5731b35` was certified. That pair remains untracked and unstaged here, as it does everywhere else in this stage.
