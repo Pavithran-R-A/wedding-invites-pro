@@ -1280,3 +1280,79 @@ hold it. The single human-only action is the one §18.5 names: Docker Desktop re
 its own GUI, on a volume whose free space its owner controls. Nothing in this section asserts that Stage 6 is
 qualified; it asserts that the work is published where it can be reviewed, and that the boundary §18.4 drew is
 still the boundary.
+
+## 22. The head that carries the commit set, the artifact built at it, and the one match the bundle sweep found (2026-10-07)
+
+**22.1 Why a section after the one that published the work.** §21.5 measured the node gates at the head the seven
+implementation commits created. Writing §21 changed the tree, so the head that carries *this* stage's audit is one
+docs-only commit further (`dbf02e4`), and a section that reports a green run has to point at a run taken at the head
+it ships from — which is why the gates and the build were re-measured after it rather than cited from before it.
+
+**22.2 The artifact run at the published head.** `q6-logs/s6-final-head-build-02.log`: `npm run build` at `dbf02e4`
+with a tracked-clean tree → **`build_exit_code=0`**, `built in 38.88s`, `dist_kb=1074`. The census now has its method
+stated on the record, because two different numbers were circulating for the same build: vite prints **31** output
+lines, of which **30** are under `dist/assets/` (the extra line is `dist/index.html`), while `find dist -type f` counts
+**33** because it also sees the two root files vite does not print, `favicon.ico` and `robots.txt`. So §19.5's "31 asset files" (the log's
+`dist_asset_files=31`) and this run's `find`-based 30/33 are two probes over two sets, not a lost asset — the panel
+build re-measured the same way returns 31 printed lines and 30 under `dist/assets/`, exactly the same set.
+
+Identity is asserted the way that can be checked rather than eyeballed: the **30 chunk names with their content
+hashes** are diffed file-for-file between the §19.5 panel build and this one and the diff is empty
+(`chunk_name_and_hash_set_identical=YES`) — `index-fTteksTz.js` 577.47 kB (gzip 172.27), `Header-DPODPWZC.js` 132.19 kB,
+`EditProject-CjuTfpnK.js` 115.90 kB (gzip 33.81), `sanitizeSvg-CfK6a1-E.js` 29.89 kB, `Index-mcRxrBTH.js` 18.19 kB,
+`index-DSeE7ILB.css` and the 24 smaller chunks. A hash set is stronger evidence than the `dist_kb` figure, since a
+changed import or a new lazy route would rename a file; identical hashes are the correct expectation for a docs-only
+change.
+
+The five node gates were re-taken at the same head with each `$?` read beside its own command
+(`q6-logs/s6-final-head-gates-01.log`): typecheck, `product:check` (185 files, 0 violations), `dbtypes:check`
+(20 migrations), lint (0 errors, 9 warnings) and test (**31 files / 466 tests**) → **`gate_exit_code=0` for all five**,
+with `worktree_tracked_changes=0` before and `head_after` equal to the head the run started at.
+
+**22.2a Two instrument errors in the measurement above, recorded because they changed reported numbers.** The first
+pass of this section reported `dist_asset_files=33` from a build log whose asset listing had been tail-limited to five
+lines, and §22's draft then asserted that "both build logs list 30 asset lines", which the logs contradict: grepping
+the retained output for `dist/assets` returns **0** matches in both, because vite writes ANSI colour escapes into the
+line before the path, so a plain prefix match never sees it. Both faults were fixed the same way — strip the escapes
+(`sed 's/\x1b\[[0-9;]*m//g'`) before matching, and enumerate the built tree with `find` rather than counting printed
+lines. The corrected numbers are the ones in §22.2; `-01`'s tail-limited listing is left in place rather than rewritten,
+and its `secret_prefix_in_dist=1` classification survives because it was taken from the file contents, not the listing.
+
+**22.3 I10 over the artifact, including the match that was not a hit.** The dist sweep on this build returns
+`privileged_name_in_dist=0`, `hosted_origin_in_dist=0`, `secret_prefix_with_token_chars=0` and `jwt_shaped_in_dist=0`.
+One file matches the bare secret-prefix pattern, and reading it rather than counting it settles it: the bundle contains
+the nine characters `sb_secret_` with nothing after them, inside the client library's own key-shape predicate
+(`qw=t=>t.startsWith("sb_publishable_")||t.startsWith("sb_secret_")`). A search for that prefix followed by twenty or
+more token characters returns 0 across `dist/`, and a JWT shape (header payload, i.e. two dotted base64url segments)
+returns 0 — so the hit is a dependency recognising the shape of a credential this product never ships, not a
+credential. The local config still names only `http://localhost:8080`, and `supabase link`/`db push`/`db pull` were
+never run.
+
+**22.4 The added-line scan for the range the audit commit extends.** The head this section publishes from adds 68 lines
+of prose and nothing else (`68 0 docs/audits/stage-6-storage-assets.md`); `q6-logs/s6-final-head-gates-01.log` carries
+its census over `f0f5088..dbf02e4`, `candidate_lines=68`: AWS/GitHub/Slack/Google token shapes, JWT shapes,
+`sb_secret_` with a value, hosted `supabase.co` origins, an anon-key assignment and a long privileged-key form all
+**0**. One line matches three pattern *names* (`BEGIN PRIVATE KEY`, `sb_secret_`, `postgres://user:pass@`) and it is
+§21.3 describing this sweep — the same self-reference §19.12 classified, now twice-removed from any value.
+
+**22.5 The branch push triggers no CI, and that is the repository's design rather than a gap.**
+`.github/workflows/ci.yml` fires on `push` to `main` and on `pull_request` targeting `main`, so
+`gh run list --branch stage6/storage-assets` correctly returns an empty list; there is no red run to investigate and
+no green one to claim. CI is therefore evidence this stage does not have, and cannot get without crossing the merge
+boundary §18.4 and the standing scope both forbid.
+
+**22.6 Still open after this section, unchanged in kind.** The serial HTTP chain and the SQL batteries at this
+head, the browser tier with its three network observations, the A13 operation-spelling question (§20.3), the Stage 6
+journey file, and the added-line scan for any range a later repair adds. All of them need the engine: this section's
+probe returned `engine_probe_exit=124` and `docker_ps_exit=124` (`q6-logs/s6-engine-probe-10.log`), which is what every
+probe that recorded a code has returned — the one exception being `-08`, whose file is empty, so it reports no
+outcome rather than a success. The same log carries `C: 476G 473G 2.4G 100% /c`; §20.9's probe measured 1.9 G free, so
+the free figure is moving while the used percentage stays pinned, and the volume owner, not this stage, controls it.
+No merge, no main, no deploy, no hosted project, no Stage 7.
+
+**22.7 What this section does and does not claim about its own commit.** The commit that carries this prose changes
+only this file, so no gate result reported here depends on a run taken after it: the gates and the build cited above
+were both measured at `dbf02e4`, which already contains §20 and §21. The convention this stage keeps is that the
+docs-only head created after a section is certified by re-taking the gate set at it and recording the run in
+`q6-logs/` under that head's own SHA, rather than by writing a predicted result into the document it is certifying.
+A reader who wants the number at the final head reads the log named by the closing report, not the prose.
