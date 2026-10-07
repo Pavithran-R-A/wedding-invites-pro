@@ -384,6 +384,46 @@ function makePage(name, targetId, s, session, requests, open) {
         return el ? { value: el.value, disabled: el.disabled, tag: el.tagName } : null;
       })()`);
     },
+    /** Puts a real file into a file input, and returns what the input says it now holds.
+     *
+     *  This is the one control the harness cannot drive by dispatching events: a page may not write
+     *  `input.files`, so a journey that wants the *product's* size and type checks to run against a
+     *  genuine `File` has to hand the bytes to Chrome itself. `DOM.setFileInputFiles` is that door,
+     *  and it is used here rather than in a journey so every caller gets the same read-back.
+     *
+     *  The read-back matters and is the reason this is not just `s('DOM.setFileInputFiles', …)`:
+     *  reaching the node needs an `objectId` from the label lookup, and a journey that assumed the
+     *  upload could proceed after a silently-empty picker would then measure the product's refusal
+     *  of a zero-byte file instead of the file it meant to send. Whether the page's own framework
+     *  *reacted* is deliberately not claimed here — a journey asks that by waiting for the control
+     *  the file enables, and `pressButtonWhenReady` reports `disabled` as the product's verdict. */
+    async setFileByLabel(labelText, filePath) {
+      const lookup = `(() => {
+        const el = (${FIND_BY_LABEL})(${JSON.stringify(labelText)}, 'any');
+        return el && el.type === 'file' ? el : null;
+      })()`;
+      const evaluated = await s('Runtime.evaluate', { expression: lookup, returnByValue: false });
+      if (evaluated.exceptionDetails) {
+        throw new Error(`[${name}] file-input lookup for "${labelText}" threw: ${
+          evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text}`);
+      }
+      if (!evaluated.result?.objectId) {
+        throw new Error(`[${name}] no file input answers to the label "${labelText}"`);
+      }
+      await s('DOM.enable').catch(() => {});
+      const { nodeId } = await s('DOM.requestNodeId', { objectId: evaluated.result.objectId });
+      await s('DOM.setFileInputFiles', { files: [filePath], nodeId });
+      const held = await evaluate(`(() => {
+        const el = (${FIND_BY_LABEL})(${JSON.stringify(labelText)}, 'any');
+        const f = el?.files?.[0];
+        return f ? { name: f.name, size: f.size, type: f.type, count: el.files.length } : null;
+      })()`);
+      if (held === null) {
+        throw new Error(`[${name}] "${labelText}" still holds no file after DOM.setFileInputFiles`);
+      }
+      await sleep(80);
+      return held;
+    },
 
     /** Presses a button by its visible words. `'absent'` means the product did not offer the
      *  control, `'disabled'` means it offered and refused, and `'obstructed'` means a click was
