@@ -1932,3 +1932,46 @@ four network observations. No repair was made in this section — nothing new wa
 implementation, and the only defect-class candidate (M1) has its instrument staged at
 `q6-logs/s6-m1-upl07-draft.md`, unapplied, waiting for an engine. Boundary unchanged: no merge, no `main`,
 no deploy, no hosted Supabase, no Stage 7.
+
+## 30. The §29 head is certified, run-book §4's closure scan is done, and the engine is down to one human click (2026-10-07)
+
+**30.1 Certification of `d30fe0a`** (`1 file changed, 52 insertions(+)`, the audit alone): all five gates
+`gate_exit_code=0` — `Product contract OK — 185 active file(s) scanned, 0 violation(s)`;
+`Database contract OK — 20 migration file(s)`, `19 public + 10 non-client table(s)`, `34 query column group(s)
+reconciled, 0 finding(s)`; lint `9 problems (0 errors, 9 warnings)`; `Test Files 31 passed (31)` /
+`Tests 466 passed (466)` in 119.04 s, this time with `test_summary_present=YES` from the guard §29.2 earned.
+`local_equals_remote=YES`, `worktree_tracked_changes=0`, the two pnpm files still untracked and unstaged.
+Evidence: `q6-logs/s6-section30-cert-d30fe0a.log`. Free `C:` was 1,235,588 KB at the start and 1,218,600 KB at
+the end — the gate set cost about 17 MB, consistent with §26.8, on a disk whose free space had meanwhile
+roughly tripled from outside this repo.
+
+**30.2 The extended-range added-line scan (run-book §4's closure item) ran without an engine.**
+`1b1ef6d..d30fe0a` = 7,374 added lines. Against the four privileged values from `.env.local`:
+`SUPABASE_LOCAL_SECRET_KEY` (41) → 0, `SUPABASE_LOCAL_SERVICE_ROLE_KEY` (164) → 0, `SUPABASE_LOCAL_DB_URL`
+(55) → 0, `VITE_SUPABASE_PUBLISHABLE_KEY` (46) → 0; and 0 connection-string lines, 0 JWT-shaped strings, 0
+`Bearer <20+>` strings in added source. The one non-zero count is the *word* `service_role`, 75 added lines,
+and it was characterised instead of waved away: 44 in `supabase/tests/stage3/30_publication.sql`, 18 in this
+audit, 6 in `supabase/tests/stage6/00_storage_schema.sql`, 4 in `90_storage_policies.sql`, 3 in the Stage 6
+migration — every one of them the Postgres role name inside `GRANT`/`REVOKE` or prose naming invariant I10.
+A role name is not a secret; the secret is the JWT, and that shape scores 0. A deliberately wider pattern
+(`service_role` assigned to a 20+ char run, or `eyJ`) did match 4 lines, and reading them with every ≥20-char
+run masked showed all four are this audit *listing its own sweep pattern names* (`eyJhbGciOi`, `postgres://`,
+`…?token=eyJ`) — prose about patterns, not patterns' payloads. Evidence and the stated limits (committed added
+lines only; two uncommitted `q6-logs/` files still carry expired 60-second signed-URL tokens from an earlier
+HTTP run; a value added and later removed inside the range would not appear):
+`q6-logs/s6-i10-extension-scan-05.log`.
+
+**30.3 Engine.** Probe 21 at 13:41 UTC: `docker version` → `code=124`. The human has chosen the fix
+(quit and relaunch Docker Desktop, which is the only action that recycles `com.docker.backend` and starts
+`dockerd` inside the VM it owns); `Get-Process` still shows that process at StartTime 6 Oct 15:10, so the
+relaunch has not happened yet. Nothing was started by hand inside the VM and `wsl --shutdown` was not used —
+see §29.4 for why both were refused.
+
+**30.4 Stage position, stated as gaps rather than as a verdict.** Complete: node tier at the published head;
+the static security tier and its independent pass (§26, §27); the I10 log-surface work including this
+extended-range scan. Still open, all behind §30.3's one cause: the SQL batteries at this head (90 registry /
+80 policy plus historic stage2–5), the HTTP tier, `UPL-07` for M1, the `pg_roles` row that must replace
+§25.3's recalled ranking, the A13 `allow_only_operation('object.list')` spelling, and the browser tier with
+its four network observations. Stage 6 is therefore **not** fully qualified, and this section says so rather
+than letting the certified tiers imply otherwise. Boundary unchanged: no merge, no `main`, no deploy, no
+hosted Supabase, no Stage 7.
