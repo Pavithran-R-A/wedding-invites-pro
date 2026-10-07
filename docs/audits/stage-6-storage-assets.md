@@ -241,6 +241,13 @@ construction instead of being reconciled later.
 | A13 | Listing the bucket as a co-tenant, and listing as anon, to harvest other users' object names | only the caller's own keys appear; `allow_only_operation('object.list')` keeps download-scope and list-scope from widening each other | SQL + HTTP |
 | A14 | Public-URL guess (`/storage/v1/object/public/wedding-assets/…`) for a private bucket, and after a row is tombstoned | refused by bucket `public = false`; no public path exists in any snapshot (B28) | HTTP + publication battery |
 
+**Dated correction to the A13 row (2026-10-07, §20.3).** That row's middle cell credits
+`allow_only_operation('object.list')` with keeping download-scope and list-scope apart. Neither this stage's
+policies nor either battery calls that function — it exists only as a definition the SQL fixture captures from the
+live image — so the separation is carried by the policies' own key-shape predicates, and the spelling question §2.1
+defers is answerable only against the running service. §20.2 therefore marks A13's SQL coverage *partial*, and the
+tier that must answer it is HTTP, not SQL.
+
 ## 7. Ruling: guest-facing asset delivery does not belong in Stage 6
 
 Guest publication is **out of scope**, and the repository contract is what says so, in three pieces of evidence:
@@ -512,3 +519,696 @@ in a later migration comment.
 storage service creates its own schema (the §2.1 question) — it can only be observed on a reset, and the reset is
 part of S6-4's qualification rather than done speculatively now. Also unmeasured: what `imgproxy`'s absence does to
 transform requests, because Stage 6 as designed performs none.
+
+## 13. S6-4: the migration exists and is applied, and the historic runner proved nothing about it (2026-10-06)
+
+**13.1 The migration.** `supabase/migrations/20261006120000_stage6_wedding_asset_storage.sql`: the
+`wedding-assets` bucket row, the `upload_status` column, a BEFORE-INSERT key-minting trigger, UPDATE and DELETE
+guards, and three `storage.objects` policies. `supabase db push --local` applied it with rc=0 and the structure read
+back from the running database:
+
+```
+LEDGER=20
+BUCKET=wedding-assets public=false limit=5242880 mime=image/jpeg+image/png+image/webp+audio/mpeg
+       type=STANDARD ver=DISABLED lifecycle=NULL
+POLICY wedding_members_read_asset_objects               cmd=SELECT permissive=PERMISSIVE roles=authenticated
+POLICY wedding_members_remove_tombstoned_asset_objects  cmd=DELETE permissive=PERMISSIVE roles=authenticated
+POLICY wedding_members_upload_staged_asset_objects      cmd=INSERT permissive=PERMISSIVE roles=authenticated
+COL=upload_status text notnull=true default='staged'::text
+TRIG=set_updated_at  TRIG=wedding_assets_guard_delete  TRIG=wedding_assets_guard_update
+TRIG=wedding_assets_mint_object_key
+```
+
+Two dependencies were measured before writing, because both were assumptions carried over from §5: `authenticated`
+holds `USAGE` on schema `storage` and `EXECUTE` on `storage.foldername`/`storage.extension` (both `true`), which is
+what lets the `ready` transition read `storage.objects` **as the invoker**. That is a deliberate change from §5.2's
+SECURITY DEFINER sketch: a definer function would look up bytes the caller has no policy for, turning a consistency
+check into a privilege of its own. Same role, same policy, same answer — confirmation can only succeed where preview
+would also succeed. `anon` also holds schema `USAGE` (`true`), which is why I7 is carried by the policies and by A4's
+HTTP test rather than by schema ACLs.
+
+**13.2 The runner did not apply it, and still reported complete success.** The first thing run after the push was the
+historic Stage 2 battery, `bash supabase/tests/stage2/run.sh` → **rc=0**, both chains, printing `42 / 46 / 284 / 464
+/ 103` (clean) and `76 / 49 / 284 / 464 / 103` (legacy). Those totals are *identical* to the pre-Stage-6 numbers
+quoted in that runner's own header, and they must be read as the finding rather than as comfort:
+
+```
+supabase/tests/stage2/run.sh:149   for stage in stage2 stage3 stage4; do
+supabase/tests/stage4/run.sh:166   for stage in stage2 stage3 stage4; do
+supabase/tests/stage5/run.sh:144   for stage in stage2 stage3 stage4 stage5; do
+```
+
+Each runner enumerates the stages it applies, and `grep -vE '_stage[0-9]+_'` at `stage2/run.sh:134` keeps the numbered
+stage files out of the "published migrations" pass. So a migration named `_stage6_` is invisible to the Stage 2 and
+Stage 4 runners — and `stage5/run.sh:144` shows the precedent: Stage 5 added `stage5` to the loop of the runner it
+wired into, and left the other two behind. The consequence is stated exactly, because it is the failure shape this
+document exists to catch: **the historic battery that just printed green qualified a schema that does not contain
+Stage 6**, while `stage2/run.sh:18-20` claims the opposite intent ("a later migration must be shown not to have
+loosened a Stage 2 guarantee"). The Stage 5 migration was never applied by the Stage 2 battery either; that
+pre-existing gap is found here by accident and is not silently inherited.
+
+**13.3 Why this is not just wiring.** The Stage 6 migration references `storage.buckets` and `storage.objects`, and
+those tables are created by the *storage service*, not by anything in `supabase/migrations`. On the bare
+`postgres:16-alpine` clusters the runners start, the Stage 6 file would fail outright with `relation
+"storage.buckets" does not exist` — and because `ON_ERROR_STOP=1` is genuinely set (`run.sh:82-100`), the runner would
+stop rather than pass. So wiring `stage6` into a loop requires a **faithful storage schema fixture** that puts those
+tables in front of the app migrations, which also answers §12.6's ordering question by construction: the fixture
+stands in for "the storage service created its tables first". Two measurements depend on it. C18/C19 scan `pg_policy`
+across **every** schema, so they are the assertions actually at risk from three new `storage` policies, and they have
+to be measured with Stage 6 present. And `POLICY_COUNT_TOTAL=48` on the live stack becomes the number the harness must
+reproduce.
+
+**13.4 Nothing in this section is a behavioural result.** No upload, read, replace, delete, cross-account attempt or
+MIME/size refusal has been exercised yet. 13.1 proves the DDL landed; 13.2 proves the existing instrument cannot see
+it. Both are fixed in the next section, which is the point where Stage 6 either works or does not.
+
+## 14. S6-4/S6-6: the registry battery runs at the Stage 6 head, and it finds a real hole in the migration (2026-10-06)
+
+**14.1 The instrument first, because a result is worth no more than the loop that produced it.** Battery 1 is
+iterated against a throwaway `postgres:16-alpine` container (`vivaahvarnam-stage6-iter`, database `st6iter`) built
+by `q6-logs/s6-iterate.sh` — a scratch script outside the repository, not part of any gate. Its chain is exactly the
+committed runner's: `supabase/tests/rls/00_bootstrap.sql`, then `supabase/tests/stage6/00_storage_schema.sql`, then
+every migration in published order and then stage order through `stage6`. A battery file is then replayed inside
+`begin; …; rollback;` so one chain serves many edits. That caching is a hazard the script now names: the chain is
+applied once per container, so **a repaired migration is invisible to the battery until the head is rebuilt**, and
+`REBUILD=1` was added because reading a green run against a cached chain would credit the fix to an edit that was
+never applied. The committed instrument remains `supabase/tests/stage6/run.sh`, which cross-checks each suite's
+printed `PASSED (n)` against the observed `NOTICE: PASS` lines and fails if the two disagree.
+
+**14.2 The defect, found by the battery rather than by reading.** The T-block assertion `T2c` failed with
+`got [no-er] want [42501]`. Root cause, in one line of the migration: `private.guard_wedding_asset_update()` began
+with `IF NEW.upload_status = OLD.upload_status THEN RETURN NEW;`, so any write that left the state alone returned
+before the guard read `storage.objects` at all. `mime_type` and `size_bytes` are ordinary columns a PATCH can name
+without touching `upload_status`, and they are what the product serves as the description of a ready asset. The
+result was that a row confirmed honestly against a 900-byte `audio/mpeg` object could be edited afterwards to claim
+`text/html`, stay `ready`, and be rendered, downloaded and re-offered on a description the bytes never agreed to.
+That is invariant I4 — the same lie the confirmation edge exists to refuse — arriving through a door the edge did not
+watch.
+
+The repair narrows the early return instead of deleting it: the guard now returns before any object read only when the
+row is not `ready`, **or** when neither byte-claim moved. A same-status write to a `ready` row that moves
+`mime_type` or `size_bytes` falls through to the verification the confirmation already performs, so it is refused by
+the same evidence the confirmation demanded. It is deliberately not folded into the two state-transition refusals
+below it, because those raise messages naming a transition and this write is not one; the accurate message is the
+one the type comparison already gives ("the object at % is stored as %, but this row claims %"). Six assertions now
+hold the repaired edge: `T2c` refuses the type lie, `T2cd` proves the lie did not land, `T2d` refuses a size lie by
+the same route, `T2e` accepts *dropping* the claims (an absent claim is not a false one, so §I4 compares claims and
+does not freeze the row), `T2f` accepts re-declaring them truthfully through the same route — which is the positive
+control that says the verification ran rather than that it was skipped — and `T2g` shows the state never moved
+during any of the description edits.
+
+**14.3 Battery 1's measured result.** `STAGE6 REGISTRY TESTS PASSED (90)`, against 90 observed `NOTICE: PASS` lines,
+exit 0, on a head built with the repaired guard. The file's own floor was raised from the provisional 55 to the
+measured 89 (the count before `L1` itself), because a floor is only worth having at the number the machine actually
+reaches. Coverage of that 90: `B` the bucket, column, trigger and policy shape; `K` minting — nine client
+key/status/ownership refusals at 42501, the unknown-`asset_kind` path as 23514, the blank-claim case minted over and
+removed, `K21` anon refused at the table *grant*, and `K22` no residue; `S` the `staged → ready` edge — present,
+owned, matching type, matching size, unreadable metadata refused as 42501 rather than as a cast failure, a
+same-named object in another bucket refused, a stranger's attempt shown to be a zero-row no-op *and* the row still
+`staged`; `T` the rest of the machine; `D`/`O` the removal ordering and the two orphan classes counted by state;
+`L` the ledger.
+
+**14.4 Five instrument defects found on the way, recorded because each one was a candidate false pass.**
+- `storage.protect_delete()` is reproduced faithfully in the fixture and has **no role exemption**: it refuses every
+  `DELETE FROM storage.objects` and `… FROM storage.buckets` until the transaction sets `storage.allow_delete_query`,
+  including the harness's own superuser statements. The file now routes removals through service-stand-in helpers
+  that set the flag and put it straight back, and `D0` measures the refusal from a client role instead of quietly
+  stepping over it. `D6`'s earlier wording claimed its deletes ran with the flag unset; that was false and is
+  corrected in the label.
+- `S4` originally asserted the cross-bucket refusal with a `WHERE` clause that matched no row. A zero-row UPDATE is
+  not an error, so the assertion measured nothing — it could not have failed. Rebuilt so the collision is real. This
+  class of bug fails loudly here (expected 42501, got no-error) rather than producing a pass, which is why it was
+  catchable at all.
+- `T4` assembled a concatenated literal *inside* the dynamic statement; psql answered **42601** (syntax error), and
+  because the assertion compares `left(got, 5)`, a broken test would have been reported as a refusal that never
+  happened. Now built with `quote_literal`, with `T4b` asserting the key the row holds is still the minted one.
+- `left(x, 5)` applied to a *positive* control truncates `'no-error'` to `'no-er'`, so an acceptance can never match
+  its expectation. Removed where the comparison is an acceptance (`S11`, `T2`, `T2b`, `D2`), kept for SQLSTATE.
+- uuids interpolated bare into dynamic SQL (`WHERE id = <uuid>`) were a syntax and injection-shape problem waiting
+  for the first edit that moved a value; every site now goes through a `quote_literal` helper. Two `O`-series
+  expectations were also guesses about the residue — the measured residue is 4 rows, 2 `ready` / 1 `staged` / 1
+  `tombstoned` — so those assertions count states instead of forcing the fixture to match prose.
+
+**14.5 Shapes measured for battery 2, before writing its assertions.** Probed against the same head: `anon` holds
+`Select`/`Insert`/`Update`/`Delete` on `storage.objects`, and so does `authenticated` — the storage tables sit
+*outside* the Stage 2 grant allow-list that protects every customer table. Consequences, each probed rather than
+assumed: anon `SELECT` from `storage.objects` returns **0 rows with no error**; anon `UPDATE` changes 0 rows; anon
+`DELETE` with the service flag changes 0 rows; anon `INSERT` raises `new row violates row-level security policy for
+table "objects"`. The asymmetry matters for what the HTTP tier will see, and both halves are now named in the
+batteries: the registry refuses anon at the **grant** (42501, battery 1 `K21`, battery 2 `G3`), the object table
+refuses it at the **policy** (empty list, battery 2 `R4`). Over REST those are a 403 and a `[]` — different answers,
+so the labels say which mechanism produced them and the file that measures one does not quietly redefine the other.
+
+**14.6 Battery 2 is written and is explicitly *not* a pass.** `supabase/tests/stage6/90_storage_policies.sql`
+covers `G` (grant shape, so a later refusal is attributable to a policy and not to a missing GRANT), `P` (policy
+census: three policies, none `FOR UPDATE`, all targeting `authenticated` alone — re-taken here because a dropped
+read policy would otherwise turn every "stranger sees zero" assertion below it into a pass), `R` read/list, `I`
+upload, `U` overwrite, `D` removal, `Z` the census it leaves, `L` the floor (provisionally 50). Its expectations are
+two kinds and the file must not be quoted until the second kind has run: the probed shapes above, and everything
+derived from reading which clause of which policy should answer each attack. Two of the derived ones are load-bearing
+and self-contradictory unless measured: `I7` claims the second write to a live *staged* key is refused by the unique
+index (**23505**), while `I10` claims the second write to a live *ready* key is refused by the policy's `WITH CHECK`
+before any index is consulted (**42501**). If the order is the other way round, one of those labels is wrong, and
+both are one run away from being known.
+
+**14.7 The run then stopped for an external reason, classified rather than glossed.** The Docker daemon went
+unresponsive mid-qualification. Evidence: `docker ps` exits **124** under a 12 s timeout on three consecutive
+attempts spanning roughly five minutes; `docker info --format …` exits 124; `wsl -e bash -lc "docker ps -q"` exits
+124; while WSL itself answers normally and reports `/dev/sdd` 1 % used. So the engine socket is not answering, not
+the shell, and not the SQL. The likely pressure is the host volume: `Get-Volume` reports **C: 5.5 GB free of 476 GB
+(99 % used)**, on which Docker Desktop's data lives. Nothing in `s5qual/` changed between battery 1's green run and
+the hang — same container, same database, same replay loop — so this is recorded as an external-state failure and
+not as a Stage 6 result. The two tasks left blocked on the daemon were this task's own (`s6-iterate.sh` on battery
+2, and a `pg_stat_activity` probe) and were stopped; no container belonging to anything else was touched, and none
+was restarted without being asked for.
+
+**14.8 Two consequences that must be cleared before any further Stage 6 claim.** First, the local Supabase stack
+still has the **pre-repair** copy of `20261006120000_stage6_wedding_asset_storage.sql` applied — the `db reset` that
+put it there ran before §14.2's edit. Until it is reset again, nothing measured over HTTP about a ready row's
+description means anything, because the stack is running the version with the hole in it. Second, the historic
+suites have still not been re-run at the Stage 6 head (`bash supabase/tests/stage6/run.sh both`), so §13.2's finding
+stands uncorrected: the numbers the older runners print are still about a schema that does not contain Stage 6.
+
+**14.9 What is still unproven, restated so §14 is not read wider than it is.** No upload, no edge-level MIME or
+size refusal, no signed URL, no download, no guest-page render has been exercised. Battery 1 proves the registry
+side as SQL, on a fixture that stands in for the storage service's tables. Battery 2, once it runs, proves the
+policy side as SQL — writes to `storage.objects` under a caller's role, which is still not a byte upload. The HTTP
+tier and the browser tier remain unbuilt, and the migration itself remains uncommitted and therefore unpushed.
+
+## 15. S6-6: the HTTP tier is built, it is green, and three of its assertions were written backwards first (2026-10-07)
+
+**15.1 Three probes, because the transport does not obey the design document.** Before any assertion was
+written down, the shapes were collected by three throwaway scripts — `q6-logs/s6-probe3.sh`,
+`s6-probe4.sh`, `s6-probe5.sh`, logs `s6-p3-shapes-02.log`, `s6-p4-shapes-02.log`, `s6-p5-shapes-01.log`. Each
+ended with its own census and all four lines read zero every time:
+`RESIDUE wedding_assets=0 / objects=0 / weddings=0 / auth_users=0`. Writing the battery from the design instead
+of from these would have produced confident assertions about responses the stack never sends.
+
+**15.2 Three forecasts the measurement reversed.**
+
+- A request to upload with no token at all is **not** a 401. It is `400` with `code: "NoSuchKey"`, because the
+  storage service resolves the object first and the anonymous role simply cannot see it. The refusal arrives
+  *as* the body, so "the response had bytes" is not evidence that bytes were served; the assertion that survives
+  is the pair "the served bytes are not the PNG" plus "the first byte is `{`".
+- A second write to a key that already exists, without `x-upsert`, is `400` with
+  `code: "409" / "Duplicate"`, not an overwrite and not a 401.
+- A `DELETE` that RLS refuses answers **`200 []`**. It is a success status carrying an empty list. Read this
+  together with the registry side, where a stranger's `DELETE` of a row it cannot see answers `204` and changes
+  nothing: an empty or empty-looking answer is not an answer about the row, which is why every refusal in the
+  battery is *re-read* with a following `SELECT` instead of inferred from a status code.
+
+**15.3 The status table that the `Prefer` header writes.** `return=representation` decides the success code, so
+the same logical operation reports differently depending on the client's preference: `POST` with it is 201 plus
+the row; `PATCH` with it is 200 plus the row; `PATCH` without it is 204; `DELETE` without it is 204; `DELETE`
+with it and no matching row is 200 `[]`. A refusal carries its error body in every one of those modes, which is
+what makes the error assertions independent of the preference the helper happens to set.
+
+**15.4 The battery, and what it took to get it green.** `supabase/tests/api/stage6_storage.test.mjs`, run under
+its own tag: **33 tests in 6 suites, 33 pass, 0 fail, 21.9 s** (`q6-logs/s6-http-iter-02.log`), and its teardown
+prints `wedding_assets total=0` and `objects in the bucket=0` from the database itself rather than asserting it
+cleaned up. The first attempt (`s6-http-iter-01.log`) was 27 pass / 6 fail, and every one of the six was an
+instrument defect, not a product defect:
+
+- MINT-02/03/04 each read the registry back after a refusal and omitted the acting account, so the helper sent
+  no token and the read was refused at the *grant* (401) instead of showing whether a row survived. The refusal
+  was still being proven; the read that confirmed it was measuring the wrong door.
+- A4 asserted `bytes.length === 0` on a refused download. The refusal body is 88 bytes long. Replaced, per
+  §15.2, with the pair that actually says no image was served.
+- A13 found an object name it did not expect. It was this run's own cascade: A4 had aborted before its cleanup.
+  A query after the run showed 0 rows and 0 objects, so the bucket was not in a state the product had failed to
+  reach.
+- STA-03 expected `NULL|NULL` for a `ready` row's mime and size, copied from a probe row that had been staged
+  without claims. The measured behaviour is `{image/png, 68, ready}`: the confirmation *checks* a claim against
+  the object rather than recording the object's own description.
+
+**15.5 §14.8's first consequence is cleared by a passing test, not by a reset command.** The two repaired-edge
+cases — a `ready` row re-described with a false type, and a size claim that disagrees with the bytes — answer
+`403 / 42501` with "the object at … is stored as image/png, but this row claims …". That message exists only in
+the post-§14.2 migration, so the stack under test is the repaired copy. §14.8's second consequence is cleared
+the same way: `q6-logs/s6-stage6chain-04.log` replays every historic chain at the Stage 6 head and prints
+stage 2 migration outcome 42, stage 3 draft invariant 46, stage 3 publication 284, stage 2 privilege+RLS 464,
+stage 2 catalog 103, stage 4 documents 428, stage 4 §8 tooling 57, stage 5 review-binding 122, vocabulary 50,
+document-resolution 124, and the two Stage 6 batteries at 90 and 80, with `chain_exit_code=0`.
+
+**15.6 The runner now counts the two stores an HTTP run can dirty silently.** `supabase/tests/api/run.sh`
+compares before/after counts for `public.wedding_assets` and for
+`storage.objects where bucket_id = 'wedding-assets'`, alongside the three it already checked. A registry row and
+the bytes it points at can both survive a run that leaves `weddings`, `auth.users` and `invitation_drafts`
+untouched, and "metadata gone, bytes still there" is precisely the orphan class this stage exists to make
+observable — so it is measured by the runner rather than trusted to any suite's teardown.
+
+## 16. Stage 6 made a Stage 3 assertion false, and the honest reading is that Stage 3 was measuring the wrong thing (2026-10-07)
+
+**16.1 The gate, taken seriously.** `bash supabase/tests/api/run.sh` was run whole rather than file by file, and
+it failed: `api_run_exit_code=1` (`q6-logs/s6-api-run-01.log`). Preconditions were green
+("ok 20 migrations applied, matching supabase/migrations"), `stage3_publication.test.mjs` passed 38/38, and
+`stage3_security.test.mjs` came back 55 pass / 1 fail. `set -euo pipefail` then stopped the chain, so stage 4,
+5 and 6 never ran. That single failure is the only reason the chain did not reach my new file.
+
+**16.2 What failed, and why, read rather than guessed.** The case is
+*a child row cannot be attached to another account's wedding via wedding_assets*, and the assertion that broke
+expected `/row-level security policy/` but received
+`wedding_assets.object_key is minted by the database and cannot be supplied`. The Stage 3 builder at
+`supabase/tests/api/stage3_security.test.mjs:449` hand-supplies an `object_key`, and PostgreSQL evaluates an RLS
+`WITH CHECK` *after* the BEFORE ROW triggers — so the Stage 6 mint trigger now answers that insert before row
+level security is consulted at all. The claim was never about the key, and the test's own control insert on the
+line below would have failed for the same reason, which is how one failure revealed that both halves of the case
+had silently become about a different mechanism.
+
+**16.3 The repair, and why it is not a weakening.** The key was dropped from that one builder, leaving
+`{ wedding_id, asset_kind: 'photo' }`, so the foreign-wedding insert is answered by RLS again
+(`403 / 42501 / new row violates row-level security policy for table "wedding_assets"`) and its control is a
+`201`. Nothing was relaxed: the presented-key case keeps being proven, in Stage 6, by MINT-02 — seven spellings
+of a supplied key, each refused, then a re-read showing no row survived — and the RLS case by MINT-04. A comment
+at the repair site says which case covers what, because the next reader will otherwise be tempted to put the
+key back.
+
+**16.4 Measured, in isolation, before claiming anything about the chain.**
+`node --test supabase/tests/api/stage3_security.test.mjs` → **56 pass / 0 fail**, `isolation_exit_code=0`
+(`q6-logs/s6-stage3-isolation-01.log`), with the repaired case named in the passing list. A census taken
+immediately after: `assets=0`, `objects=0`, `weddings=0`, `users=0`. That answers the question §15.6 raises for
+this file — the Stage 3 control now creates a `wedding_assets` row, and it goes with its wedding through the
+`ON DELETE CASCADE` on `wedding_assets.wedding_id`, which the delete guard permits because the row is `staged`
+and no object was ever uploaded to its key. So the widened leak check is satisfiable by Stage 3's own teardown,
+and not merely hoped for.
+
+**16.5 What this section does not claim.** The full chain has not gone green at this head. It was blocked
+minutes after the isolation run, by §18, and the browser tier has not been started.
+
+## 17. The node gates at the current tree, measured, with the caveat the tree itself carries (2026-10-07)
+
+`npm run typecheck`, `npm run product:check`, `npm run dbtypes:check`, `npm run lint`, `npm run test` were run
+serially against this working tree — which already contains the Stage 6 migration, the adapter, the regenerated
+types and both battery files — and each printed its exit code next to its own name in
+`q6-logs/s6-node-gates-01.log`: `exit_code=0` for all five. `npm run build` separately: `build_exit_code=0`,
+`dist_kb=1062`, with `index` at 577.47 kB (172.28 kB gzip), `Header` at 132.19 kB and `EditProject` at 103.75 kB,
+and the same `chunkSizeWarningLimit` advisory the earlier stages recorded.
+
+Two things this does not license. First, `product:check` passing means the Stage 6 additions did not break the
+contract checker's canonical-table and file-count rules; it is not evidence about the storage behaviour, which is
+§15's and the browser tier's job. Second, `node_modules` in this clone carries **both** `.modules.yaml` and
+`.package-lock.json`, so the 1062 kB describes the tree as found rather than a clean install — the installer
+marker check is the reason the clean-install gate stays in the closure rather than being assumed from this pair.
+
+## 18. The engine did not come back this time, what was tried, and precisely what is now blocked (2026-10-07)
+
+**18.1 §14.7 was an interruption; this is a stop.** The daemon has not answered a single request since.
+Evidence, all of it measured rather than inferred: `docker version --format …` exits **124** under a 20 s timeout
+on **fourteen consecutive attempts spanning about five minutes**; `docker exec supabase_db_localvivaahvarnam psql -c "select 1"`
+exits 124; `wsl -e bash -lc "docker system df"` exits 124 while `wsl -l -v` in the same command answers normally;
+and `monitor.log` — Docker Desktop's own API-proxy journal, which had been rotating roughly every four minutes —
+stops at a `POST /v1.56/containers/supabase_db_localvivaahvarnam/exec` at `17:19:57 +0530` with nothing recorded
+after it. The shell works, WSL works, the CLI works (`docker context ls` answers instantly), and the engine behind
+the socket does not.
+
+**18.2 Three recoveries attempted, each with its measured outcome.**
+(i) `Stop-Process -Force` on `Docker Desktop.exe`, `com.docker.backend.exe`, `com.docker.build.exe`,
+`docker-monitor.exe`: it reported each one stopped, and `Win32_Process` still lists the *same* PIDs
+(18052, 7288, 25512) with the *same* creation times. The kill did not take, because this session is not elevated
+and cannot signal them. (ii) Relaunching `"C:\Program Files\Docker\Docker\Docker Desktop.exe"`: no new instance
+appeared and the socket still answered 124. (iii) `wsl -t docker-desktop`, deliberately scoped to Docker's own
+distro: it went `Running` → **`Stopped`**, and `Ubuntu` was left `Running` and untouched — but the wedged backend
+did not respawn the VM, and the socket still answers 124. Free space on the volume that holds Docker's data is
+**5.5 GB of 476 GB (99 % used)**, the same pressure §14.7 named.
+
+**18.3 No writes happened under the truncated log.** The chain that was running when the engine died left
+`q6-logs/s6-api-run-02.log` at **0 bytes**, confirmed independently by PowerShell's `Length`. So that run
+produced no suite output and reached the product with no HTTP write of any kind; nothing in §15 or §16 depends on
+it, and nothing was inferred from it. The hung processes belonged to this task and this task only — `run.sh` and
+its child `node --test supabase/tests/api/stage5_admin_cli.test.mjs` — and they were stopped before anything else
+was attempted. (Recorded because it affects how the timestamps in this section should be read: on this host the
+file mtimes and `date` disagree by roughly eighteen hours, so every claim above is keyed to command output and
+log content, never to a clock.)
+
+**18.4 What is blocked, and it is the stack-bound half of the stage.** The serial HTTP chain at this head;
+therefore the Stage 5 admin-CLI file and the joint run of stage 3 → stage 6 with the widened leak equality; the
+browser tier in its entirety; every SQL battery, since each starts `postgres:16-alpine` through the same daemon;
+and consequently the commits and the push, because the migration, the battery, the adapter, the `run.sh` census
+and the §16 repair must each be covered by a green run taken at the SHA that carries them. I am not committing
+ahead of that.
+
+**18.5 The one action here that is genuinely human.** Docker Desktop has to be restarted from an elevated
+context or from its own GUI, which a non-elevated agent session cannot do; and with 5.5 GB free on `C:` the
+restart may not hold, in which case the durable fix is a decision about what to remove that belongs to the owner
+of this machine. I will not delete anything belonging to another project, and I will not prune shared Docker
+storage: the engine on this host also carries a second project's containers, and the last thing this stage needs
+is a leak check that passes because somebody else's data was cleared to make room.
+
+**18.6 Restated so §15-§17 are not read wider than they are.** No browser-tier assertion has been made. No
+observation exists yet that a privileged header never leaves the browser, that no non-loopback request is issued,
+or that `/object/public/` is never used. The Stage 6 batteries pass at the SQL and HTTP tiers on the repaired
+migration; the stage as a whole has no green chain, no commit and no push, and therefore **no PASS is claimed for
+Stage 6** — the stage is bounded by §18.4 until the engine returns.
+
+## 19. The host's own file panel, the one primitive the driver was missing, and what a widened truth sweep found (2026-10-07)
+
+§18 closed with the engine dead and the stack-bound half of the stage blocked. This section records the work
+that a dead engine does not block, and it is careful about the difference between *compiling*, *being
+checked*, and *having been driven*.
+
+**19.1 Why a panel was the remaining gap at all.** §8 requires the Stage 6 browser journey to run "from the
+UI", and at the start of this section `grep -rn weddingAssets src/` returned nothing: §13–§15 had built the
+adapter, the migration and both batteries, but no screen mounted it. §7 had already ruled the stage to be
+host-private upload and management with preview through a short-lived signed URL, so the surface was
+determined by the ruling, not invented here. `src/components/invitation/WeddingAssetsPanel.tsx` was written
+against that, mounted in `src/pages/EditProject.tsx`'s aside between the existing separators, and follows the
+conventions the pack panel established: newest-read-wins ticket (§20's Stage 5 defect), one failure phrase
+rather than a list, `role="alert"` for refusals and `aria-live="polite"` for the live region, 44px controls,
+`<section aria-labelledby>`, native radios for the choose-one question "which stored file does this new one
+stand in for". Three rules are stated in its header because they are the rules the migration enforces: the
+panel speaks only through `weddingAssets.ts` and never exposes an `object_key` field; a signed URL is rendered
+as media and never as text; and nothing in it is a guest claim, because B28 still asserts the published
+snapshot carries no `object_key`.
+
+**19.2 The panel carries its own not-qualified banner.** The component prints, in the host's own language,
+that this surface has not been exercised: no browser journey has driven it and no HTTP battery has run
+against the adapter it calls, because the engine died (§18). That is not decoration. `feature-readiness.md`
+labels the row `FOUNDATION` rather than `IMPLEMENTED` for exactly this reason, and a banner in the UI is what
+keeps a future reader of the *screen* from inheriting the assumption that a screen someone once wrote has
+been shown to work.
+
+**19.3 The bucket's vocabulary was not copied into the browser.** The panel deliberately has no `accept`
+attribute on its file input and no prose list of allowed types or sizes. Those limits are the bucket's, and
+the adapter already refuses a file they would reject with one sentence that is measured by §15. Duplicating
+them in markup and copy would create a second source that rots when the migration changes — and a second
+source that a host could read as a promise the server does not keep. The four kinds the panel offers to click
+are a presentation list, not a rule: `generated_output` is absent because it names a derivative the platform
+would produce rather than a file a host uploads, and an unknown kind is still answered by the table's CHECK.
+The adapter's header said "no copy of that list is kept here to rot" and, once the panel existed, that
+sentence needed making precise rather than deleting, so it now names the panel's list as a presentation list.
+That was a truth-sync, not a silent divergence.
+
+**19.4 One CDP primitive, added rather than worked around.** `scripts/stage5-browser-driver.mjs` exposes no
+raw `send` to journey files and has no file-input capability, and an upload journey cannot be written without
+one. `setFileByLabel(labelText, filePath)` now resolves the labelled input through the same `FIND_BY_LABEL`
+the other setters use, takes a node id and calls `DOM.setFileInputFiles`, then **reads the file back** and
+throws if the input still holds nothing. The read-back is the point: a picker that silently took nothing would
+turn the journey into a measurement of the product's refusal of a zero-byte file while reporting that it had
+uploaded a PNG. What the primitive pointedly does *not* do is claim the framework reacted to the change — a
+journey asks that question with `pressButtonWhenReady`, which reports `disabled` as the product's own verdict.
+`node --check` on the driver: `driver_check_code=0`. **The primitive has never executed**, which is why §19.7
+is written the way it is.
+
+**19.5 Everything provable without a database, measured at the panel tree.** Each gate printed its own exit
+code beside its own name (`q6-logs/s6-panel-gates-01.log`), and each is quoted from that log rather than
+recalled:
+
+| gate | result | exit |
+| --- | --- | --- |
+| `npm run typecheck` | clean | `0` |
+| `npm run lint` | 9 problems, **0 errors**, 9 warnings | `0` |
+| `npm run product:check` | **184 active file(s) scanned, 0 violations** | `0` |
+| `npm run dbtypes:check` | 20 migrations; 19 public + 10 non-client tables; 19 client tables; 34 query column groups reconciled, 0 findings | `0` |
+| `npm run test` | **30 files, 440 tests, all passed** | `0` |
+
+All nine lint warnings sit in files this stage did not touch (`AuthProvider`, `ContentEditor`, and seven
+`src/components/ui/` primitives); neither `WeddingAssetsPanel.tsx` nor `EditProject.tsx` appears in the output.
+The production build (`q6-logs/s6-panel-build-01.log`): `build_exit_code=0`, `dist_kb=1074` against §17's
+`1062` — **+12 kB**, which is the same change `EditProject` shows chunkwise (103.75 kB → 115.90 kB), `index`
+unchanged at 577.47 kB (gzip 172.27 kB against §17's 172.28 kB, so the movement is the panel's chunk rather
+than the shared bundle), 31 asset files, and the familiar `chunkSizeWarningLimit` advisory.
+Both installer markers are still present in `node_modules` (`.modules.yaml` and `.package-lock.json`), so
+`1074 kB` describes the tree as found, not a clean install; the clean-install gate stays in the closure for
+that reason and is not assumed from this pair. §8 asks for each gate to be *bracketed* by the
+installer-provenance probe; here the probe ran once over the tree and printed both markers into the build log
+rather than around every gate, so the per-gate bracketing is a closure-run obligation, and it is recorded as
+unfinished rather than claimed.
+
+**19.6 The I10 bundle sweep, re-taken over the new surface.** `q6-logs/s6-panel-sweep-01.log`, `scanned_kb=1045`
+across `src/`, `index.html` and `dist/`: **eight** privileged shapes — `service_role`, `SERVICE_ROLE`,
+`eyJhbGciOi`, `supabase_service`, `"role": *"service`, `postgres://`, `eyJ`, `object/public` — each printing
+`files_matched=0`, and `hosted_origin_files=0`. `dist/` is the built bundle, so a zero there is a statement
+about what would ship rather than about what is written in a source file. One hygiene slip is recorded because
+the log is evidence: the sweep's `.env.local` context line printed the publishable key's value. It is the
+browser-public anon key, not a privileged secret, and invariant I10 is about the privileged ones — but a
+credential-shaped value does not belong in a file that gets read by later audits, so the value is redacted in
+place and the redaction is what §19.6 now describes.
+
+**19.7 The instrument that was *not* written, and why that is the disciplined choice.** `scripts/stage6-
+journeys` does not exist yet. Stage 5 accumulated six instrument defects that only execution revealed
+(§15.4 of this file is the same story three times over: a read that omitted its token, a length assertion on a
+refusal body, an expectation copied from a probe row that had been staged differently), and an authored-but-
+never-run journey file is precisely that failure mode in waiting — confident prose about responses the stack
+may not send. So the journeys will be authored and executed in the same sitting, against the four transport
+shapes §15.2 had to learn by measurement. The only piece added early is the driver primitive in §19.4, which
+is a capability rather than a claim.
+
+**19.8 The truth sweep, widened before it was trusted.** The readiness matrix was repaired in four places
+(the asset row promoted `PLANNED V1` → `FOUNDATION` with the measured evidence beside it; the adapter census
+from six to the count that includes `weddingAssets.ts`; the "tables no product code reads or writes yet" list,
+which `wedding_assets` now leaves; the schema-count sentence that assumed nine untouched tables), the domain
+model in three (`wedding_assets`'s write path, the stage attribution line, and the deferred-work row, which
+now reads "Built, not qualified" and names the promotion as guest delivery plus a threat model plus a
+retention rule), the Stage 2 blueprint's I-27 once the sweep found its "there is no upload path" sentence, and
+the README in five. Both doc-scanning gates were re-run after those edits: `product_check_exit_code=0`,
+`typecheck_exit_code=0` (`q6-logs/s6-docsync-gates-01.log`). §7's quotation of the old `feature-readiness.md`
+line is kept as written, because it records what was true when §7 was written; this section is the place that
+notes the quoted sentence has since been repaired.
+
+**19.9 Two claims this section drafted from memory, both corrected by reading the files instead.** Writing
+the README's new Stage 6 paragraph from recall produced "seven spellings of a supplied key, each followed by a
+re-read proving no row survived" for the **SQL** battery. Against `supabase/tests/stage6/80_asset_registry.sql`
+the registry battery refuses **five** shapes (K6 a legal-looking prefix, K7 traversal, K8 absolute path, K9
+another wedding's prefix, K10 over-long) and measures a sixth — a whitespace-only claim — as *not a refusal*
+but an absent claim the minter writes over (K11–K11c), so the guarantee is "no client string is ever stored as
+a key" rather than "every non-empty string is refused". The seven-spelling-plus-re-read property belongs to
+HTTP MINT-02 (§16.3), where the re-read is what turns a refusal into evidence. The README now states the SQL
+battery's actual shape.
+
+The second error ran the other way, and is the more instructive one. The draft recorded a **battery gap**:
+that the migration's `asset_kind` immutability guard (`20261006120000_stage6_wedding_asset_storage.sql:113`,
+raised as `42501` because the kind is a segment of the minted key) was enforced but never asserted. It is
+asserted, four times, in the T group: **T4** the minted key cannot be rewritten even to another key of the
+same legal grammar under the same wedding, **T4b** the row still carries the key it was minted with (a re-read
+inside the SQL tier, not only in HTTP), **T5** the row cannot be re-parented to another wedding, **T6** the
+kind cannot be swapped — each sent as `authenticated` with the owning account named, each expected to answer
+`42501`. A first grep for `UPDATE public.wedding_assets SET object_key|asset_kind|wedding_id` found them at
+`80_asset_registry.sql:595/602/606`, which is what overturned the claim; the earlier search had looked for a
+word ("immutable") that the assertions spell as `§I2` in their case names. So there is **no gap to close**,
+and the guard's coverage is stated here with its case ids rather than as an absence. Reading the same lines
+also surfaced a measurement-integrity note the battery carries at :588, worth repeating because it applies to
+every `left(sqlstate, 5)` assertion in this repository: an earlier draft of T4 concatenated a literal *inside*
+the dynamic statement, the run answered `42601` — a syntax error from psql, not a policy refusal — and the
+five-character comparison would have scored that as a refusal that never happened. Quoting through
+`quote_literal` is what keeps a broken instrument from being green.
+
+**19.10 Evidence consolidated, and one ambiguity in every earlier citation resolved by naming it.** All Stage
+6 logs cited by §12–§18 live in `…/2026-09-24/37be0a2a/q6-logs/`, which is the **parent of the repository
+root**, not a directory inside the clone. This session's first logs went instead to `s5qual/q6-logs/` — inside
+the tree, untracked, and therefore one careless `git add` away from being committed. Its twelve files were
+moved into the canonical directory (now 119 files, no name collisions) and `s5qual/q6-logs/` was removed;
+`git status --porcelain` no longer lists it. Readers of §15–§19 should resolve any `q6-logs/…` path against
+`…/37be0a2a/`. Nothing else was deleted, and no file belonging to another stage or project was touched.
+
+**19.11 Engine re-probe, taken rather than assumed.** Two more attempts, each with its exit code read from an
+adjacent `code=$?` and not from a pipeline: `timeout 25 docker version` → `engine_probe_exit=124`, and
+`timeout 25 docker ps` → `ps_exit=124`. `q6-logs/s6-engine-probe-08.log` is **0 bytes**, which is what a killed
+hang writes when it writes nothing: the daemon produced no output before the timeout. §18.5's position stands
+unchanged, and the genuinely-human action is still the one it names — Docker Desktop restarted from an
+elevated context or its own GUI, with the 5.5 GB-free question belonging to the owner of this machine. I did
+not touch another project's containers or prune shared storage, and I did not delete anything to make room.
+
+**19.12 The added-line secret scan (§8's last non-Docker obligation), taken over the candidate commit content
+rather than over a SHA that does not exist yet.** The scan assembled the added lines of the tracked diff plus
+the full bodies of the untracked Stage 6 files — `candidate_lines=5439` — and deliberately **excluded**
+`pnpm-lock.yaml` and `pnpm-workspace.yaml`, which are never staged on this project (§10's substituted tree).
+`q6-logs/s6-addedline-secret-scan-01.log`. Zero-counts, in order: `BEGIN PRIVATE KEY`, `AKIA…`, `ghp_…`,
+`github_pat_…`, `xox[abpsr]-`, `AIza…`, JWT-shaped `eyJ…`, `sb_secret_…`, `postgres://user:pass@`,
+`*.supabase.co`, `VITE_SUPABASE_ANON_KEY=<value>` — all **0**.
+
+Four patterns matched and each was classified rather than waved past, because a sweep only covers its own
+wording and a zero is not the same thing as a verdict:
+`service_role`/`SERVICE_ROLE` 59 each — every one is a *role name* (`SET ROLE service_role`,
+`REVOKE … FROM service_role`) or audit prose about that grant layer; proved by a follow-up search for a
+token-shaped value in the position after the word, which returned nothing. `SUPABASE_SERVICE` 1 — the audit
+sentence naming the I10 sweep's own pattern list. `anon_key` 17 — column and role vocabulary in comments.
+`…token=…` 2 — one comment describing the shape the service hands back, and the battery's own
+`?token=not-a-token` tamper case. The single payload-bearing long base64 string is `iVBORw0KGgoAAAANSUhEUgAAAAE…`,
+the 1×1 PNG the HTTP battery uploads as test bytes. One grep in the first pass failed rather than matching
+(`grep -Eic` read `-----BEGIN` as an option); it was re-issued with `--` and answered 0, so the census covers
+every pattern it claims to. **Verdict: no privileged credential, secret value or hosted origin would enter the
+Stage 6 commit range.** The scan must be repeated over the actual commit range at closure — this is the
+pre-commit form of that obligation, not a substitute for it.
+
+**19.13 What this section does not license.** No browser journey has run; no `setFileByLabel` call has run;
+the serial HTTP chain has not gone green at a state carrying the panel; the Stage 6 journeys file is still
+unwritten, deliberately (§19.7); and there is still no Stage 6 commit, no push and no remote SHA to verify
+against. The gates in §19.5 are evidence that the new surface compiles, is linted, is contract-checked and
+ships without a privileged secret — nothing more, and §18.4 remains the boundary of this stage until a chain
+run exists at the SHA that carries it.
+
+
+## 20. The coverage map rebuilt from the batteries rather than from the invariant ids, one documentation hole it found, and the app tier that closed it (2026-10-07)
+
+This section exists because §6 wrote down a tier for each attack case and nothing in the repository yet answered
+"which of those tiers actually has an artefact at this head, and which is a promise?" A map was the only way to find
+out, and building it produced one real finding (§20.3) plus one real gap that this section then closed (§20.4). No
+number in §17 or §19.5 is restated or revised here; those tables stand as measured.
+
+**20.1 The map was rebuilt from labels, not from ids.** The first attempt to answer the question used the invariant
+ids as search keys — which is a mistake, because the batteries do not name themselves after §6. The real label
+vocabulary was read off the files: the registry battery's helpers are `pg_temp.s6r_ok` / `s6r_eq` (with `s6r_lit`
+and `s6r_add` as composition and tally helpers) and the policy battery's are `s6p_ok` / `s6p_eq` / `s6p_lit` /
+`s6p_add`, and each label is a group letter plus either a §-reference or an invariant id — `K6`, `S7 §I4`,
+`T5 §I2`, `D0 §A15`, `R1 … (A1)`. Prefixing the wrong pattern (`s6_ok`, `s6_eq`) returned zero matches, which is the
+kind of zero that would have been reported as "no coverage" if the files had not been opened. The census was then
+cross-checked against the files rather than trusted: excluding the helper definitions themselves,
+`80_asset_registry.sql` carries **90** assertions (84 `s6r_eq` + 6 `s6r_ok`) and `90_storage_policies.sql` carries
+**80** (78 `s6p_eq` + 2 `s6p_ok`) — counted both as call sites and as literal labels, and the two counts agree.
+Those are the same 90 and 80 §15 records from `q6-logs/s6-stage6chain-04.log`, so the map and the green run are
+describing the same battery. Registry groups: **B** shape, **K** key minting, **S** staged→ready, **T** state machine
+and immutability, **D** deletion ordering, **O** orphan census. Policy groups: **G** grants, **P** policy census,
+**R** read, **I** insert, **U** update-absence, **D** delete, **F** fixture, **Z** end-state.
+
+**20.2 Attack case × tier, as artefacts rather than as intentions.**
+
+| # | SQL | HTTP | App unit | Browser |
+|---|---|---|---|---|
+| A1 | measured — `R1`, `R2`, `R3`, `K19`, `K20`, `S11` | chain not green at this head (§18.4) | n/a — no browser code is involved in a policy answer | not run |
+| A2 | measured — `I4`, `I6`, `I9`, `K18` | chain not green at this head | n/a | not run |
+| A3 | measured — `D3`, `D3b`, `D4` | chain not green at this head | partly — `removeAsset`'s sequence is measured, the refusal is not | not run |
+| A4 | measured — `G2`, `G3`, `R4`, `R5`, `I8`, `D6`, `P3` | chain not green at this head | n/a | not run |
+| A5 | measured — `R6`, `R7`, `D5`, `Z4` | chain not green at this head | n/a | not run |
+| A6 | measured — `K6`–`K11c`, `T4`, `T4b` | chain not green at this head | measured — the register payload has no `object_key` key at all, and the upload uses the read-back key | not run |
+| A7 | measured — `P2`, `I7`, `I7b`, `I7c`, `U7`–`U7g` | chain not green at this head | measured — `upsert` is sent as `false`, and the mutation in §20.6 proves the case notices `true` | not run |
+| A8 | bucket facts measured — `B4` | chain not green at this head | **measured — new** (`§20.4`) | not run |
+| A9 | claim-vs-bytes measured — `S7`, `S8`, `S10`, `T2c`, `T2d` | chain not green at this head | **measured — new** (`§20.4`) | not run |
+| A10 | measured — `T5`, `T6`, `K9` | chain not green at this head | n/a | not run |
+| A11 | **not this case** — `G4`, `G5`, `G6`, `B9`–`B11` measure RLS-enabled and grant shape *inside* Postgres; whether the `storage` schema is reachable over REST at all is only answerable by the HTTP tier | chain not green at this head, and this row is the chain's to answer | n/a | not run |
+| A12 | n/a | n/a | measured — node gates + contract rule | n/a |
+| A13 | **partial — see §20.3** | chain not green at this head, and the operation-spelling question is only answerable there | n/a | not run |
+| A14 | measured — `B2`, `Z7` | chain not green at this head | n/a | not run |
+| A15 | measured — `D0`, `D0b` (policy battery) and `D0`–`D5b` (registry battery, different group) | chain not green at this head | partly — the tombstone→collect→delete order is measured; the platform's refusal is not | not run |
+
+Reading the table honestly: the SQL column is the only tier that is green at a state carrying this code, and it is
+green for §15's chain, not for anything added since. The HTTP column says "chain not green at this head" for every
+row because §18.4's block applies to the whole chain, not to a subset of cases — so no row in that column can be
+upgraded without the engine. The app-unit column was empty for A8 and A9 when this section began; that was the gap.
+
+**20.3 `storage.allow_only_operation` is defined and called by nothing — and the SQL tier cannot answer the question
+about it.** §2.1 defers one question to the running stack: whether the operation names the local image accepts match
+the documented spelling (`object.list` versus `storage.object.list`), and §6 wrote the A13 refusal as
+"`allow_only_operation('object.list')` keeps download-scope and list-scope from widening each other." A repository
+-wide search for the identifier returns exactly two kinds of hit: the audit's own prose (§2.1, §6, §12.4), and **one
+definition** at `supabase/tests/stage6/00_storage_schema.sql:171`, which the fixture captures verbatim from the live
+image via `pg_get_functiondef()`. There is no call site: not in Stage 6's migration, not in either battery, not in
+any earlier stage's policies. So the function the A13 clause credits with keeping two scopes apart is a comparator
+this product's policies never consult, and the separation §6 describes is carried entirely by the three policies'
+own key-shape predicates (`R0`, `R3`, `R8`, `R9`), which is what those labels actually measured. The search covered
+`src/`, both batteries and every migration, so the silence is about the code and SQL, not about prose.
+
+The tempting repair was to add an SQL assertion that calls `storage.allow_only_operation('object.list')` and expects
+`true` under a set `storage.operation`. That was **not** done, and the reason is on the record: no Storage service
+runs in the SQL fixture, so the only value of `current_setting('storage.operation', true)` there is the one the
+fixture itself set. Such a test would measure the fixture's copy of the comparator against the fixture's own
+`GUC` — a proxy that turns the A13 row green without saying a word about the image. §12.5.6 already ruled the
+operation-scoped SELECT "usable but not yet necessary"; this section keeps that ruling and moves the finding, so
+A13's SQL coverage is marked *partial* rather than *measured*, and the whole question is named as belonging to the
+HTTP tier against the running service, which is §18.4's blocked half. Once the chain runs, the answer needed is one
+observation, not a policy change: what `storage.operation()` returns during a real download and a real list, and
+whether a leading `storage.` is ever present in it.
+
+**20.4 The app tier for A8 and A9 was written, and it is green.** §6 assigned both cases an "app-level unit" /
+"app unit" tier and §5.3's ordering gave the adapter a third obligation that no existing file tested: the
+client-side half of A8 and A9 is *pure decisions* — a MIME set, a byte ceiling, a check order, a payload shape — and
+none of it required Docker, PostgREST, Storage or Postgres. `src/test/weddingAssetUploadRules.test.ts` is new:
+**26 tests, 26 passed, `unit_exit_code=0`** (`q6-logs/s6-app-tier-iter-02.log`), against a recording stand-in for the
+generated client that follows `fakeSupabase.ts`'s existing rule that an unplanned read is not a silent success. The
+file's header states its own boundary rather than borrowing the SQL tier's: the `File` stand-in carries `size` and
+`type` only, the bucket's own MIME and size refusals belong to HTTP, and the mint trigger and the claim comparison
+belong to SQL — "a gate that returns the right words after already writing a row would be a gate that leaves the
+orphan it claims to avoid."
+
+What it actually pins, in four groups:
+* **The pre-flight gate as refusal-plus-silence.** Eight cases, each ending in `expect(fake.steps()).toEqual([])`:
+  no kind chosen, zero-byte file, `image/svg+xml`, `text/html`, `application/octet-stream`, a file one byte over the
+  ceiling, and the ordering (`KIND_NEEDED` before `EMPTY_FILE` before type before size) — because the ordering is
+  what decides which sentence a host with a 6 MB SVG is told.
+* **What crosses the wire on the register step.** The exact payload key set is
+  `["asset_kind","label","mime_type","size_bytes","wedding_id"]`, so "sends no `object_key`" is asserted as an absent
+  key rather than as a comment; `upsert: false`; the upload is addressed with the key read back from the insert, and
+  the fixture's read-back key is deliberately not derivable from the wedding id — a module that built a key from a
+  template would fail that case; and the claim sent at confirmation is byte-for-byte the claim registered.
+* **The sequence and both rollbacks.** Happy path `["db:insert","storage:upload","db:update"]`; a failed upload
+  `["db:insert","storage:upload","db:delete"]` with no confirmation attempted; a `42501` at the confirmation edge
+  retiring the pair as `update, remove, delete` and surfacing a sentence that does **not** contain the MIME string
+  (`safeError` keeping Postgres prose out of host-visible text, measured at the call that has the most of it to
+  leak); a non-`42501` code *not* reported as a claim disagreement; a zero-row update treated as failure; the two
+  removal shapes (`tombstoned` → `["storage:remove","db:delete"]`, `ready` →
+  `["db:update","storage:remove","db:delete"]` with payload `{upload_status:"tombstoned"}`); bytes that cannot be
+  collected stopping the sequence before the row delete; and a failed replacement leaving the previous row and key
+  absent from every recorded step.
+* **The two reads a host is entitled to.** The signed URL is requested against the one bucket, for the row's own
+  key, with a TTL of at most 60 seconds, and an answer with no URL in it is a failure; the list read carries only a
+  `wedding_id` filter and orders `created_at` then `id`.
+
+**20.5 The first run of the new battery failed eight cases, and all eight were instrument defects.**
+`q6-logs/s6-app-tier-iter-01.log` records `8 failed | 18 passed (26)`, `unit_exit_code=1`. Neither cause was the
+adapter, and neither fix was a weakened expectation:
+1. Seven of the eight were sequence assertions compared against the raw step log, which also records builder steps
+   (`from`, `select`, `eq`, `order`). The instrument now separates *calls* from *builder steps* — `ops()` filters to
+   the six verbs that actually leave the tab (`insert`, `update`, `delete`, `upload`, `remove`, `createSignedUrl`)
+   while `steps()` stays raw for the payload and silence assertions. The expectations are exactly as strict as the
+   ones that failed.
+2. The eighth was an under-planned queue in the replace case: a fresh upload that fails legitimately deletes the
+   **new** row, so the scenario needed a second planned response. That is the fixture admitting it had not been
+   written for the rollback it was being asked to prove.
+
+A third defect was closed before it could produce a false green: a queue with *unused* planned responses would let a
+scenario describe calls that never happened, so the fixture exposes `dbRemaining()` and an `afterEach` asserts it is
+zero. The drained-queue rule is the mirror of the unplanned-read rule, and it is what trimmed a duplicate plan in the
+tombstoned-removal case.
+
+**20.6 The instrument can fail, verified by three reverted mutations.** A green battery that cannot go red is not
+evidence, so each of the three rules §20.4 claims to pin was broken in the adapter and the named case re-run:
+`q6-logs/s6-app-tier-mutations-01.log`. Widening `ALLOWED_MIME` to include `image/svg+xml` →
+`1 failed`, case "refuses an SVG by name", `vitest_exit_code=1`. Changing the ceiling comparison from `>` to `>=` →
+`1 failed`, case "sends a legal file at the ceiling". Changing `upsert: false` to `upsert: true` → `1 failed`, case
+"asks for no overwrite". `adapter_sha256_before` and `adapter_sha256_after` are both
+`26fcbe9df98c85d76db55fdb8f19ec9fa378e3cde4750905e5608e079fab6c92` and the log records `restore=byte-identical`.
+These are the three mutations §12's "the adapter refuses on the host's behalf" list names, and each is now covered by
+a case that notices it.
+
+**20.7 One stale statement in the adapter's own header was corrected.** `weddingAssets.ts` carried a block reading
+"NOT YET QUALIFIED … the local stack's generated types do not carry `upload_status` yet … nothing in it may be
+reported as verified." The second half of that was written when the generated types lagged the migration and is no
+longer true of the first half: the client-side half of the file is now exercised. It was replaced with a
+"WHERE THIS FILE HAS BEEN MEASURED" block that names the test file, names the three mutations and their cases, and
+says plainly what still has not happened — no call from this module to a running stack (the HTTP battery speaks REST
+and Storage directly rather than through these functions) and no browser run at all. The test count was deliberately
+left out of the code comment; a number in a comment is the kind of claim that rots while the tests around it change.
+
+**20.8 §8's per-gate bracketing, which §19.5 recorded as the unfinished form of the installer check.** §19.5 ran the
+gates and separately proved the tree's installer provenance; §8 asked for the provenance probe *around each gate* so
+that a gate's result is tied to a tree state rather than to a session. Done now, `q6-logs/s6-node-gates-bracketed-01.log`:
+five gates, each with a before-probe, the gate, and an after-probe. `npm run typecheck`, `npm run test`,
+`npm run lint`, `npm run product:check`, `npm run dbtypes:check` → **`gate_exit_code=0` for all five**, and every
+probe line in the file is identical:
+`installer_probe: npm_marker=present pnpm_marker=present lockfiles_tracked=package-lock.json`. Two numbers moved
+because this section's work is in the tree, and each is what it should be: `npm run test` is **31 files / 466 tests**
+(one file and 26 tests newer than §19.5's run — the new battery, nothing else), and `product:check` is
+**185 active files, 0 violations**. Lint is 0 errors / 9 warnings, unchanged, and the db contract reports 20
+migrations, 19 public + 10 non-client tables, 34 query column groups, 0 findings. §17's and §19.5's tables are left
+exactly as they were measured; README's live claims were synced to 185 files and to the new bullet.
+
+**20.8a The exit codes were re-taken, because the first attempt measured the wrong process.** The log above was
+written before this section, and when §20.8 was drafted its `gate_exit_code` lines were trusted without checking how
+they were produced. The re-run made for this section (`q6-logs/s6-doc-append-gates-01.log`) initially used
+`npm run <gate> | tail -6`, which puts `$?` on the far side of a pipeline — so the number in that log measured
+`tail`, not the gate. It was superseded immediately by `q6-logs/s6-doc-append-gates-02.log`, which runs each gate to
+a file and reads `$?` adjacent to the gate itself: `product:check`, `typecheck`, `lint` and `dbtypes:check` all
+return **`gate_exit_code=0`**, with the same 185 files / 0 violations, clean typecheck, 0 errors 9 warnings, and the
+same db-contract census. `npm run test` was re-measured the same way (`q6-logs/s6-suite-exitcode-01.log`:
+`suite_exit_code=0`, **31 files / 466 tests**, `head=568b36f`) so no part of §20.8 rests on a pipeline-derived
+number. This is the same rule §19.11 applied to the engine probe, and the fact that it caught a defect in a log this
+session wrote is the argument for applying it to every exit code rather than only to surprising ones.
+
+**20.9 What this section does not change.** The engine is still down, re-probed for this section rather than
+recalled: `timeout 20 docker version` → `engine_probe_exit=124`, and `df` on the volume holding Docker's data says
+**2.3 GB free of 476 GB, 100 % used**. That figure moves between probes (1.9 GB earlier in the same session, 5.5 GB
+where §18.2 measured it), which is what a shared volume looks like and is why §18.5's and §19.11's position is
+unchanged rather than restated as a new number. The serial HTTP chain has not gone green at this head, no browser
+journey has run, the A13 operation question is still open and now has a named tier instead of an assumption, no
+Stage 6 commit exists, and there is nothing pushed. The app tier closed here is the first Stage 6 obligation since
+§18 that did not need the engine, and it is the only one — which is the whole reason the map in §20.2 was worth
+building before waiting for the stack again.

@@ -83,7 +83,7 @@ attempt even if a future grant mistake let it through.
 | `venues` | A place that more than one event can share, with coordinates as `numeric`. | `UNIQUE (wedding_id, id)` so an event can be pinned to *this wedding's* venue | owner |
 | `wedding_events` | The functions themselves: order, enable/disable, local wall-clock times, timezone, optional venue. | `UNIQUE (wedding_id, id)`; `(wedding_id, venue_id) → venues(wedding_id, id)`; no CHECK on `event_key` (see §7) | owner |
 | `invitation_drafts` | The editable content of a wedding, separated from the aggregate so content and metadata have different change rates. | `UNIQUE (wedding_id)`, and `weddings_have_draft` makes the wedding's own `INSERT` write that row in the same statement. The invariant is now total for every operation a customer can perform: `anon`/`authenticated` hold neither `INSERT` nor `DELETE` on this table (Stage 3 closed what the first trigger left open), so no browser write can create a second draft, remove one, or leave a wedding undrafted. Deleting the wedding still cascades to the draft — one aggregate. | owner SELECT + UPDATE; created and destroyed by the database |
-| `wedding_assets` | Registry of uploaded/presented artwork; the object key, never the bytes. | `UNIQUE (object_key)`; `size_bytes`/`mime_type` bounded | owner; no upload path exists yet |
+| `wedding_assets` | Registry of uploaded/presented artwork; the object key, never the bytes. | `UNIQUE (object_key)`; `size_bytes`/`mime_type` bounded. Since Stage 6 the key is **minted by a BEFORE trigger** as `weddings/<wedding>/<kind>/<row>` and a presented key is refused with `42501`, so this column cannot be made to name a path a browser chose. | owner, through `weddingAssets.ts` and the workbench's file panel — code written this stage and **not yet qualified** (`../audits/stage-6-storage-assets.md` §18), so this cell records a reach, not a measurement |
 
 ### Trust-bearing rows (customer-visible, customer-immutable)
 
@@ -363,7 +363,7 @@ that do exist are archived ones. No price, no GST, no package amount was invente
 
 ## 8. Deferred, on purpose
 
-| Concept | Status at this branch's head (schema: Stage 2 + Stage 3 + Stage 4 + Stage 5) | What would promote it |
+| Concept | Status at this branch's head (schema: Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6) | What would promote it |
 | --- | --- | --- |
 | Recipients / individual guests inside a household | **no table, no JSON column** | a per-recipient credential, or an RSVP that records one named person |
 | Pack × template compatibility | still **no join table**. Stage 4 reached the pack model, not this one: a release's `design_guidance` is validated as a shape and nothing pairs a release with a `design_templates` row | the first real pairing a customer can choose, rather than two catalogues that happen to exist |
@@ -371,7 +371,7 @@ that do exist are archived ones. No price, no GST, no package amount was invente
 | Guest links | Stage 3 built the whole read path: mint, resolve, rotate, revoke, and a `/i/:token` route; Stage 4 re-qualified it with a pack block in the DTO; Stage 5 made the same route resolve a release's document and re-qualified it again (journey B and C, `scripts/stage5-ui-journeys.mjs`) | what is still deferred is a guest *doing* anything — RSVP, approvals, a reply of any kind |
 | Family approval UX | schema only | Stage 7 |
 | Event / venue / family editors | **built, not schema only** — `ContentEditor` on the workbench adds, edits, reorders and removes `wedding_people`, `venues` and `wedding_events` rows through the adapters, which is how journeys A, B and C got their content. Stage 5 extended the same workbench with the pack-driven section editor and the server-side issue records | what is still deferred is a *richer* editor (drag-reorder, inline media), not the row writes |
-| Uploads and Storage policies | registry table only, no Storage integration | Stage 6 |
+| Uploads and Storage policies | Stage 6 wrote the integration this row deferred: the private `wedding-assets` bucket with a 5 MiB ceiling and four MIME types, the minted key, the three `storage.objects` policies, the lifecycle guards, one adapter and the host's file panel. **Built, not qualified** — the serial HTTP chain, the SQL batteries and the browser tier never re-ran at that state because the local engine died (`../audits/stage-6-storage-assets.md` §18) | what is still deferred is a guest seeing an uploaded file, and §7 of that audit explains why that needs its own threat model, a minting path for guest-delivered media and a stated retention rule rather than a policy tweak |
 | Entitlement granting | table + guards only, nothing ever sets `active` | Stage 10, from a real payment provider |
 | Retention and erasure policy | not modelled | Stage 13 |
 

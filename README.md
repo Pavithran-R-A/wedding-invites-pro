@@ -145,6 +145,63 @@ stack only — no hosted project, and no customer-visible pack content:
   ([`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md)).
   A host choosing no pack and writing every word is still the only path a real family can take
 
+## Built in Stage 6: private files, measured at the SQL, HTTP and unit tiers — never in a browser
+
+Stage 6 gave a host's own uploaded files a home. The wording of this section is deliberately not
+"Verified in Stage 6", because the browser tier has never run at the state that carries this code and
+the serial HTTP chain has not gone green at it: the **local Docker engine died mid-stage** and has not
+answered a request since
+([`docs/audits/stage-6-storage-assets.md`](docs/audits/stage-6-storage-assets.md) §18). What *is*
+measured, and where:
+
+- One forward migration (`20261006120000_stage6_wedding_asset_storage.sql`) turns Storage on for one
+  bucket: `wedding-assets`, private, 5 MiB per object, and `allowed_mime_types` of `image/jpeg`,
+  `image/png`, `image/webp`, `audio/mpeg` — no SVG, HTML or PDF is accepted, so no markup-bearing file
+  can ever reach a renderer from this path
+- The object key is **minted by the database** as `weddings/<wedding-id>/<kind>/<row-id>` in a BEFORE
+  trigger; a client that presents a key is refused `403 / 42501` rather than having it ignored, and the
+  registry's lifecycle is `staged → ready → tombstoned`, so a row that points at bytes no longer there
+  is visible as exactly that
+- Three `storage.objects` policies, for `authenticated` only, and **no UPDATE policy at all** — which
+  is why an upload cannot be `upsert`ed over somebody else's object
+- **Two Stage 6 SQL batteries, 90 and 80 assertions**, on both migration chains, alongside the
+  historical suites re-measured against a schema that now contains Stage 6: 42/76 outcome, 46/49 draft
+  invariant, 284 publication-boundary, 464 privilege and RLS attacks, 103 catalogue, 428 + 57 pack
+  documents and tooling, and 122 / 50 / 124 review-binding, vocabulary and document-resolution
+  (`bash supabase/tests/stage6/run.sh`; the joint replay printed `chain_exit_code=0`)
+- **33 HTTP tests against the running local stack** (`supabase/tests/api/stage6_storage.test.mjs`):
+  real tokens, real bytes, real refusals, and a teardown that *prints* `wedding_assets total=0` and
+  `objects in the bucket=0` from the database instead of asserting it cleaned up after itself. Three
+  of its forecasts were reversed by measurement — an unauthenticated download is `400 NoSuchKey`, not
+  401; a second write to an existing key is `400` code `409`, not an overwrite; and a DELETE that RLS
+  refuses answers `200 []` (§15) — so every refusal in it is re-read with a following `SELECT`
+  rather than inferred from a status code
+- `supabase/tests/api/run.sh` now counts **both** stores an HTTP run can dirty silently
+  (`public.wedding_assets` and `storage.objects` in this bucket) beside the three it already checked
+- One Stage 3 case was proven wrong by Stage 6 and repaired, not relaxed: it hand-supplied an
+  `object_key`, and because BEFORE triggers run before an RLS `WITH CHECK` is consulted, it had begun
+  to assert the mint guard while claiming to assert isolation (§16). Measured alone afterwards:
+  **56 pass / 0 fail**
+- **26 unit tests over the adapter itself** (`src/test/weddingAssetUploadRules.test.ts`, no engine
+  needed): every refusal the tab reaches for on its own is asserted *together with* "nothing was asked
+  of the stack", the register payload is shown to carry no `object_key` in any shape, the write is
+  shown to ask for `upsert: false`, and the §5.3 orderings — register/upload/confirm, and
+  tombstone/collect/delete — are pinned including both rollbacks. Three deliberate mutations of the
+  adapter (a widened MIME set, a `>=` ceiling, an `upsert: true`) each broke the case that should
+  notice, so this suite is not passing by ignoring the code (§20)
+- The browser-facing half is **code, not demonstrated behaviour**: `src/integrations/supabase/weddingAssets.ts`
+  and the workbench's file panel compile, lint and ship in the production bundle, and no browser has
+  ever driven either. The unit tier above measures the adapter's *decisions*; it does not measure a
+  click, a file picker, a real byte count or a signed URL opening in an `<img>`.
+  `feature-readiness.md` therefore labels the row `FOUNDATION`, not `IMPLEMENTED`
+
+And the two things this section must not be read as granting. **Nothing here has been shown to a host
+in a browser, and the serial HTTP chain has not gone green at this state** — the single run that would
+cover the migration, the batteries, the adapter and the §16 repair together was blocked by §18, which
+is also why Stage 6 carries no commit and no push. **No guest is affected by any of it**: Stage 6 ships
+host-private upload and management only, preview is through a short-lived signed URL, and the published
+snapshot still asserts no `object_key` (§7, and B28 in the Stage 3 battery).
+
 ## Implemented foundations requiring a configured backend
 
 Real code paths that compile and ship in this build. Stage 3 exercised the host-to-guest loop
@@ -261,7 +318,7 @@ src/components/auth/            auth provider + route guard
 src/components/ui/              shadcn-style primitives
 src/config/product.ts           the only place product name / descriptor / tagline / status live
 src/lib/                        i18n language order, SVG sanitisation boundary
-src/integrations/supabase/      client + generated database types
+src/integrations/supabase/      client + generated database types + the private-asset adapter
 supabase/migrations/            schema and RLS history
 supabase/tests/rls/             executable RLS assertions
 scripts/check-product-contract.mjs  scope-aware brand/claims checker
@@ -283,7 +340,13 @@ including the insert-path guard that closes the paid-status escalation hole — 
 [`docs/audits/stage-0-truth-security.md`](docs/audits/stage-0-truth-security.md).
 
 No secret belongs in this repository. The app only ever reads a browser-public publishable key;
-`.env` files are untracked, and CI fails on tracked env files or credential-shaped strings.
+`.env` files are untracked, and CI fails on tracked env files or credential-shaped strings. Stage 6
+added a second kind of secret-bearing surface — a host's own files — and it is held the same way: the
+bucket is private, the object key is minted by the database rather than accepted from a client, and the
+only read path the product has is a short-lived signed URL issued to the owning account. The Stage 6
+HTTP battery measures the refusals around that (a presented key, a stranger's object, a second write to
+an existing key), and the bundle sweep taken at the Stage 6 tree confirms no privileged key shape
+appears in `src/`, `index.html` or `dist/`.
 
 ## Product docs
 
@@ -331,7 +394,9 @@ npm audit --omit=dev --audit-level=high
 ```
 
 `npm run product:check` is the contract guard: **29 rules** over the active surfaces this tree scans
-(179 files at this head) — retired brand names, fabricated social proof and per-guest pricing
+(185 files at the current Stage 6 tree; that count has moved twice since the rule list was first
+written — once for the storage adapter and the host's file panel, once for the adapter's own unit
+battery) — retired brand names, fabricated social proof and per-guest pricing
 language, the retired scaffold vocabulary, which tables may be named outside the data adapter, the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets
@@ -399,6 +464,22 @@ in the same run — rewriting one character of Tamil wording moves the digest an
 JSON does not — because a green refusal line from an instrument that cannot succeed is the failure mode
 this stage was built to catch.
 
+`bash supabase/tests/stage6/run.sh` runs Stage 6's two batteries over the same two chains: **90**
+registry assertions and **80** assertions on the policies attached to `storage.objects`. Their shape is
+worth naming, because it is what the stage sells: a client-supplied key is refused outright rather than
+normalised — five shapes, a legal-looking prefix, a traversal, an absolute path, another wedding's prefix
+and an over-long key, each answered with the trigger's own `42501` (K6–K10) — and the sixth shape, a
+whitespace-only claim, is measured as what it actually is: not a refusal but an absent claim, which the
+minter writes over, so no client string is ever stored as a key (K11–K11c). A row cannot be born `ready`
+or born `tombstoned` (K12/K13), `ready` cannot move backwards (T1), and a `ready` row whose object is
+still in the bucket cannot be deleted (D1/D2) — the ordering being "bytes before row", which is how this
+stage makes an orphan observable instead of letting it accumulate. Each battery also writes
+`storage.objects` rows directly as a *stand-in* for bytes a service put there, and says so at the top:
+neither file proves an over-size upload is refused, that `allowed_mime_types` is enforced at the edge, or
+that a signed URL works. Those are the HTTP tier's measurements. Both batteries were green at the Stage 6
+tree — `chain_exit_code=0` for the replay that runs them beside every historical suite, with each total
+printed apart and the two Stage 6 counts never added to another stage's.
+
 `node scripts/tradition-pack-admin.mjs` is the maintenance operator's tool for authoring and approving
 a release: eleven verbs, no `delete` verb, no web panel, and it refuses to run without an explicit
 local target (`--linked`, `--project-ref`, a wrong container name and a hosted `*.supabase.co` URL are
@@ -447,8 +528,8 @@ bash supabase/tests/api/run.sh
 `run.sh` reads `.env.local` (gitignored) and **refuses to run at all** unless `SUPABASE_LOCAL_URL` is a
 loopback host *and* its port matches the `[api]` port in this repository's `supabase/config.toml` — a
 mistaken pointer at someone else's stack fails both gates. It issues real sign-ups, real tokens and one
-tampered JWT, and asserts what comes back through HTTP. Five files, **186 tests, 0 failed, 0 skipped**
-at this head, each printing its own total:
+tampered JWT, and asserts what comes back through HTTP. Five files, **186 tests, 0 failed, 0 skipped**,
+each printing its own total:
 `stage3_security.test.mjs` (56 — isolation, the anonymous surface, what a customer may never
 do), `stage3_publication.test.mjs` (38 — the `api` surface, versions, credentials, the guest door,
 rotation and revocation; its 38th test is Stage 5's, which probes `internal_api`'s maintenance verbs and
@@ -460,6 +541,11 @@ author or approve a release), `stage5_pack_driven_http.test.mjs` (28 — the rev
 HTTP, including that every reviewer, authorship and machine-disclosure column is refused **by name** at
 the edge) and `stage5_admin_cli.test.mjs` (36 — the maintenance CLI against the real stack, each refusal
 paired with the mutation that proves the refusal is the tool's and not the test's).
+`run.sh` discovers its files by glob, so at the Stage 6 tree there is a **sixth**:
+`stage6_storage.test.mjs`, **33 tests**, which passed when run on its own against the running stack and
+has not been through the joint serial chain at this state (§18) — the same is true of the repaired
+`stage3_security.test.mjs`, measured alone at 56 pass / 0 fail. The totals above therefore describe the
+five files at the Stage 5 head, and are not silently widened.
 `--local` is always explicit: `supabase link`, `db push`, `db pull` and
 `db reset --linked` are not part of this project's workflow and are never run.
 
