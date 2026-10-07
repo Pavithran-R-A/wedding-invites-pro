@@ -1600,7 +1600,10 @@ became a head — §25.3 is.
 **25.7 What still has no answer.** All of it is the engine, and probe 15 is now fifteen for fifteen:
 `docker_info_exit=124`, `docker_ps_exit=124`, both with 0 bytes of output
 (`q6-logs/s6-engine-probe-15.log`). Disk is worse than the last reading in this file: `df -k /c` reports
-**593,304 KB free of 498,133,316** at 100 % used, against the 2.1–2.2 GB §22 recorded. That does not change the
-boundary — I will not prune a shared volume or delete another project's data — but it does change what restarting
-Docker Desktop will require, and it belongs in the one human-only action this stage is waiting on rather than in a
-silent retry loop.
+**593,304 KB free of 498,133,316** at 100 % used, against the 2.1–2.2 GB §22 recorded — and that figure is itself
+already overtaken. The two node runs this section then went on to execute (`q6-logs/s6-final-head-gates-05.log`,
+`s6-final-head-build-05.log`) took it to **518,516 KB** and then **462,296 KB**, roughly 18 MB per production build,
+none of it reclaimed. So the trend within one hour of writing is −131 MB, and it is node work, not the missing engine,
+that is consuming it. That does not change the boundary — I will not prune a shared volume or delete another project's
+data — but it does change what restarting Docker Desktop will require, it bounds how many more gate sets this machine
+can certify, and it belongs in the one human-only action this stage is waiting on rather than in a silent retry loop.
