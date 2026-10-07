@@ -1212,3 +1212,71 @@ journey has run, the A13 operation question is still open and now has a named ti
 Stage 6 commit exists, and there is nothing pushed. The app tier closed here is the first Stage 6 obligation since
 §18 that did not need the engine, and it is the only one — which is the whole reason the map in §20.2 was worth
 building before waiting for the stack again.
+
+## 21. The Stage 6 implementation is committed and published on the stage branch — as work, not as a verdict (2026-10-07)
+
+**21.1 Why this happened now, and what it is not.** §18.4 and §19.13 both held the commits until a chain run
+existed at the head that carried them. The engine has not answered since (`timeout 20 docker version` → `124`, and
+the volume holding Docker's data is at 2.3 GB free of 476 GB, both re-measured for §20.9), and the tree at this
+point was 19 modified files plus 6 untracked paths living entirely on one disk that is 100 % used. Withholding the
+commits any longer protects nothing: a stage branch is where unqualified work belongs, and every file published
+here says in its own text which tiers are green and which have not run. **This is a publication of implementation,
+not a Stage 6 PASS.** No merge, no main, no deploy, no hosted project, no Stage 7.
+
+**21.2 The commit set.** Seven commits on top of `568b36f`, each with an explicit path list, in the order the
+dependency runs:
+
+| commit | paths |
+| --- | --- |
+| `feat(storage)` the bucket, minted key, state machine and `storage.objects` policies | `supabase/migrations/20261006120000_stage6_wedding_asset_storage.sql` |
+| `test(storage)` the two Stage 6 SQL batteries | `supabase/tests/stage6/` (00, 80, 90, run.sh) |
+| `test(api)` the Stage 6 HTTP battery + its two leak counters and the chain wiring | `supabase/tests/api/stage6_storage.test.mjs`, `supabase/tests/api/run.sh` |
+| `fix(tests)` the historical batteries Stage 6 invalidated | the two Stage 2 SQL files, Stage 3 publication SQL, Stage 4 pack-release SQL, the three Stage 5 SQL files, and `stage3_security.test.mjs` |
+| `feat(app)` the adapter, the host's panel, the page mount, the regenerated types | `weddingAssets.ts`, `WeddingAssetsPanel.tsx`, `EditProject.tsx`, `types.ts` |
+| `test(app)` the 26-case adapter battery + the driver's file-input primitive | `weddingAssetUploadRules.test.ts`, `stage5-browser-driver.mjs` |
+| `docs(stage6)` this audit's sections 13–20 plus the synced live claims | README, the two architecture docs, the readiness matrix, this file |
+
+Two things each commit message says out loud, because a message is the only place a reader meets the work before
+they meet the audit: the HTTP and browser tiers have not run at this head, and the Stage 6 `wedding_assets` probe in
+the Stage 3 suite stopped sending an `object_key` because a BEFORE INSERT mint trigger answers a supplied key ahead
+of the RLS `WITH CHECK` — which would have made an isolation case report a minting refusal instead of the thing it
+claims to test. `pnpm-lock.yaml` and `pnpm-workspace.yaml` are still untracked and still not staged: the final
+status line of the commit run lists exactly those two paths and nothing else.
+
+**21.3 The added-line secret scan, re-taken over the content that was actually committed.** §19.12 called its own
+run the pre-commit form of this obligation; this is the commit form. Assembled the same way — added lines of
+`git diff -U0` over the tracked paths, plus the full bodies of the nine untracked Stage 6 files, with the two pnpm
+files excluded — `q6-logs/s6-addedline-secret-scan-02.log` carries **candidate_lines=6135**, and `git diff --stat
+568b36f..HEAD` reports **6135 insertions**, so the census and the commit range describe the same bytes. Zero counts:
+AWS access keys, `ghp_`, `github_pat_`, Slack tokens, Google API keys, JWT-shaped strings, `VITE_SUPABASE_ANON_KEY=`
+with a value, and — after the first pass escaped its own dots — hosted `supabase.co` origins. Four patterns matched
+and each is classified in the log rather than passed over: `BEGIN PRIVATE KEY`, `sb_secret_` and `postgres://user:pass@`
+all appear once, inside the audit sentence at §19.12 that lists this sweep's own pattern names; `supabase.co`
+unescaped also catches the two file-path strings the batteries read `supabase/config.toml` through. The two
+long base64-shaped strings are this section's own sha256 literal (hex is a subset of the base64 alphabet) and the
+1×1 PNG the HTTP battery uploads as test bytes. All four app files in the range — `weddingAssets.ts`,
+`WeddingAssetsPanel.tsx`, `weddingAssetUploadRules.test.ts`, `EditProject.tsx` — contain **0** occurrences of the
+privileged role name, counted individually and appended to the same log, which is what the adapter's own I10 note
+promised. Conclusion: no privileged credential, secret value or hosted origin entered the range.
+
+**21.4 The push and the read-back.** `git push origin HEAD:refs/heads/stage6/storage-assets` →
+`568b36f..f0f5088`, `push_exit=0`, and `git ls-remote origin refs/heads/stage6/storage-assets` answers
+`f0f508844dca0b9a5bff78710c40d1827b2ca643`, equal to `git rev-parse HEAD` — `sha_match=YES`. The refspec is the
+stage branch only; `main` was not fetched, rebased, touched or pushed to.
+
+**21.5 Node gates at the pushed head, measured rather than inherited.** `q6-logs/s6-gates-pushed-head-01.log` was
+taken with `worktree_tracked_changes=0` and each `$?` read beside its own `npm run` with no pipe in between:
+`typecheck`, `product:check`, `dbtypes:check`, `lint` and `test` → **`gate_exit_code=0` for all five**, at
+`head=f0f5088…` with `head_after` identical. 185 active files and 0 contract violations, 20 migrations with 34 query
+column groups reconciled and 0 findings, 0 lint errors / 9 warnings, **31 files / 466 tests**. This is the first
+Stage 6 head that has carried its own green node run rather than borrowing one from the tree it was cut from.
+
+**21.6 What is still open, and it is unchanged in kind.** The serial HTTP chain at this head; the SQL batteries
+re-run at it rather than at the earlier chain head; the whole browser tier, including the three network observations
+(no privileged header leaves the browser, no non-loopback request, no `/object/public/`); the A13 operation-spelling
+question §20.3 hands to the running service; the production-build render check; the added-line scan re-taken over any
+range a later repair extends; and the Stage 6 journey file §19.7 deliberately left unwritten until a driver run can
+hold it. The single human-only action is the one §18.5 names: Docker Desktop restarted from an elevated context or
+its own GUI, on a volume whose free space its owner controls. Nothing in this section asserts that Stage 6 is
+qualified; it asserts that the work is published where it can be reviewed, and that the boundary §18.4 drew is
+still the boundary.
