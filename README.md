@@ -491,7 +491,9 @@ stage makes an orphan observable instead of letting it accumulate. Each battery 
 neither file proves an over-size upload is refused, that `allowed_mime_types` is enforced at the edge, or
 that a signed URL works. Those are the HTTP tier's measurements. Both batteries were green at the Stage 6
 tree — `chain_exit_code=0` for the replay that runs them beside every historical suite, with each total
-printed apart and the two Stage 6 counts never added to another stage's.
+printed apart and the two Stage 6 counts never added to another stage's. That replay is
+`q6-logs/s6-stage6chain-04.log` on **2026-10-06**, the same capture the Stage 6 section cites; it has not
+been re-run since, and §34.4 records why the files it measured are still this tree's files.
 
 `node scripts/tradition-pack-admin.mjs` is the maintenance operator's tool for authoring and approving
 a release: eleven verbs, no `delete` verb, no web panel, and it refuses to run without an explicit
