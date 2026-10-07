@@ -1325,8 +1325,12 @@ the nine characters `sb_secret_` with nothing after them, inside the client libr
 (`qw=t=>t.startsWith("sb_publishable_")||t.startsWith("sb_secret_")`). A search for that prefix followed by twenty or
 more token characters returns 0 across `dist/`, and a JWT shape (header payload, i.e. two dotted base64url segments)
 returns 0 — so the hit is a dependency recognising the shape of a credential this product never ships, not a
-credential. The local config still names only `http://localhost:8080`, and `supabase link`/`db push`/`db pull` were
-never run.
+credential. The closing sentence of this paragraph used to read "the local config still names only
+`http://localhost:8080`", and §24.4 found that claim by measuring rather than recalling it: it is false as written.
+`localhost:8080` is only `supabase/config.toml:68-69`'s auth `site_url` and redirect pattern; the application's own base
+URL, in the gitignored `.env.local`, is the loopback Kong port `http://127.0.0.1:54400`. Both are loopback and neither
+is a hosted project, so this paragraph's conclusion is unaffected, and `supabase link`/`db push`/`db pull` were never
+run.
 
 **22.4 The added-line scan for the range the audit commit extends.** The head this section publishes from adds 68 lines
 of prose and nothing else (`68 0 docs/audits/stage-6-storage-assets.md`); `q6-logs/s6-final-head-gates-01.log` carries
@@ -1421,3 +1425,90 @@ to expire — those are the HTTP tier's 33 cases, the six SQL batteries' 90 + 80
 this head, and the browser tier with its three network observations. The probe taken while writing this section
 returned `engine_probe_exit=124` again (`q6-logs/s6-engine-probe-11.log`). No merge, no main, no deploy, no hosted
 project, no Stage 7.
+
+## 24. The artifact at the published head, and the credential class the dist sweep had never been asked about (2026-10-07)
+
+**24.1 Why this section exists when §23 said nothing engine-free remained.** §23.6 closed by listing what was left and
+attributing all of it to the absent engine. Two items were not engine-bound after all: the production build, which needs
+only Node, and the question of what the built artifact actually *contains*. Answering the second overturned a sentence
+§22.3 published, so it cannot be left as a log entry — a claim this file states about its own evidence has to be corrected
+in this file.
+
+**24.2 The build taken at `0ff4d8c`, the head this stage has actually published.** §22.2 certified a build at `dbf02e4`
+and §23 re-took the five gates at `5470858`, but no build had been taken at the pushed head. `q6-logs/s6-final-head-build-03.log`
+does that: **`build_exit_code=0`**, `✓ built in 39.58s`, `index-fTteksTz.js` 577.47 kB (gzip 172.27), and
+`chunk_name_and_hash_set_identical=YES` with `differing_entries=0` against the 30-name list §22.2 measured — the expected
+result for a run whose only input change is prose, and the reason the census is of names and hashes rather than sizes.
+File counts, both methods stated because they differ and are reconciled here rather than left as an apparent
+discrepancy: grepping the escape-stripped output for the literal `dist/assets` yields **30** lines, while §22.2's
+**31** counts vite's printed total including `dist/index.html`; `find dist/assets -type f` → **30**, `find dist -type f` →
+**33**. `dist_ignored=YES`, with `worktree_tracked_changes_before=0` and `worktree_tracked_changes_after=0`, so the
+artifact never touches the tree.
+
+**24.3 The node gates at the same head, and the regress §22.7 was written to avoid.** `q6-logs/s6-final-head-gates-03.log`:
+typecheck, `product:check` (185 files, 0 violations), `dbtypes:check` (20 migrations, 19 public + 10 non-client, 19 client
+tables, 34 column groups, 0 findings), lint (0 errors, 9 warnings) and test (31 files / 466 tests, 103.46 s) →
+**`gate_exit_code=0` for all five**, each read adjacent to its own command, with `head_after` equal to the head the run
+started at. No section was written *for* that certification, which is exactly what §22.7 prescribes: `0ff4d8c` was its own
+certified head until this one. The head this section creates gets the same treatment — a log under its SHA, not another
+section predicting it.
+
+**24.4 What the artifact carries, which the I10 vocabulary could not see.** I10 has been operationalised all stage long as
+patterns of the *privileged* class: `service_role`, `sb_secret_` followed by token characters, a JWT shape,
+`postgres://user:pass@`, `BEGIN PRIVATE KEY`, a hosted `supabase.co` origin. Every one of those returns **0** in this fresh
+build, as it did in §22.3's. But that pattern set can never answer "does the bundle contain a credential?", because the
+credential a browser client is *supposed* to hold belongs to the other class. It is there: the local stack's
+`sb_publishable_…` key appears **twice** in `dist/assets/index-fTteksTz.js`, each time as the second argument sitting beside
+`http://127.0.0.1:54400` — Vite's `VITE_` replacement inlining `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` at
+the only two modules that read them (`src/integrations/supabase/client.ts`, `src/integrations/supabase/publicInvitation.ts`).
+The third `sb_publishable_` occurrence is the library predicate §22.3 already quoted. Provenance was measured rather than
+assumed, because "looks like a dependency default" was my first guess and it was wrong: the token is absent from
+`node_modules/@supabase/*`, and repo-wide (excluding `dist/`) it appears only in `.env.local`, on
+`VITE_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_LOCAL_PUBLISHABLE_KEY`.
+
+**24.5 Why that is a PASS, and the stronger evidence the sweep now produces.** `.env.example:3-5` is this repository's own
+contract for the class: "These are BROWSER-PUBLIC Supabase settings (they ship to every visitor in the JS bundle). They are
+NOT secrets and are NOT equivalent to a service_role / secret key", and `:15` narrows the field to "the ANON key only". The
+bundle holding a publishable key is therefore the design working, not I10 being bent around it — and the case for that got
+much stronger in the same run. The *same* gitignored file also carries `SUPABASE_LOCAL_SECRET_KEY`,
+`SUPABASE_LOCAL_SERVICE_ROLE_KEY` (a JWT) and `SUPABASE_LOCAL_DB_URL`; none is `VITE_`-prefixed, and the artifact returns 0
+for each of those shapes (`secret_prefix_with_token_value=0`, `jwt_shape=0`, `privileged_name_service_role_in_dist=0`,
+`postgres_url_with_credentials=0`, `private_key_marker=0`). So the sweep now demonstrates that the build-time env
+allow-list actually separates the two classes, which is a different and better claim than "no privileged string was found".
+`.gitignore:17` (`.env.*`) keeps the file untracked; `git ls-files` for `.env*` returns only `.env.example`.
+
+**24.6 The origin census, and the §22.3 sentence it repaired.** Every absolute URL host baked into the artifact, counted:
+`www.w3.org` 23 (SVG namespaces), `github.com` 4, `localhost` 3, `reactrouter.com` 2, `fonts.googleapis.com` 2,
+`127.0.0.1` 2, then `wa.me`, `reactjs.org`, `fonts.gstatic.com` once each. `hosted_supabase_origin=0` and, notably,
+`localhost:8080` **0** — the three bare `http://localhost` strings are library internals (a React Router origin-reading
+default, a gotrue `http://localhost:9999` constant, and supabase-js's trusted-host allow-list, which literally pushes
+`"*.supabase.co","*.supabase.in"` alongside `localhost`/`127.0.0.1`/`[::1]`). That allow-list is also the single
+`supabase.co` string in the bundle: a wildcard *pattern*, not an origin carrying a project ref. The project's own baked base
+URL is `http://127.0.0.1:54400`. Which is why §22.3's "the local config still names only `http://localhost:8080`" was
+wrong as written — `localhost:8080` exists only as `supabase/config.toml:68-69`'s auth `site_url` and redirect pattern, a
+different knob from the API base, and the paragraph there now says so. What survives the repair is its conclusion: every
+origin in every surface is loopback, and no hosted project is named.
+
+**24.7 A second inaccuracy, deliberately not written into the tracked record.** `.env.local`'s header comment claims its
+values "OVERRIDE the hosted-project defaults in `.env`", and there is no `.env` to override (measured: `ls .env` → no such
+file; only `.env.example` is tracked). The safety property the comment describes is delivered by the file's *absence* plus
+loopback values, not by an override. It is an ignored file, so editing its prose would add nothing to the repository's
+evidence; it is recorded here so the next reader knows the local config was read rather than recalled, and the comment is
+left for its owner.
+
+**24.8 The instrument defect in this section's own probe, corrected before the probe was cited.** `q6-logs/s6-engine-probe-12.log`
+first recorded `docker_info_exit=0` and `container_lookup_exit=1`. Both were read off the **end of a pipeline**, so they
+were the codes of `head` and `grep` — the same class of fault §22.2a records twice for the build, now caught in a probe.
+Re-measured with output redirected and `$?` adjacent to each command: `docker info` → **124, 0 bytes**; `docker ps -a` →
+**124, 0 bytes**; `docker version` → **124, 0 bytes**. The engine answers no RPC at all, so the presence or absence of the
+`localvivaahvarnam` containers is currently **unobservable, not established absent**, and no residue claim may be drawn
+from that file in either direction. Disk across the two readings minutes apart: `C: 476G 473–474G 2.1–2.2G 100% /c`.
+
+**24.9 What this section still does not prove.** A build is not behaviour. No browser has loaded this artifact, no request
+has been observed leaving it, no upload has been attempted, no policy consulted, no signed URL minted or expired. The
+engine-bound tiers are unchanged in kind — the serial HTTP chain, `stage6/run.sh both` re-measuring 90 + 80 and the historic
+suites at this head, the browser tier with its journeys authored and executed in one sitting (§19.7), the A13 operation
+spelling (§20.3). §24.4 does add one thing the browser tier can now check cheaply rather than discover: because the bundle's
+only baked Supabase origin is loopback, *any* non-loopback Supabase request observed from the built app would be a config
+regression rather than an unknown. The probe taken while finishing this section returned 124 again. No merge, no main, no
+deploy, no hosted project, no Stage 7.
