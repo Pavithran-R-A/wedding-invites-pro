@@ -2017,3 +2017,67 @@ four network observations, and the audit section that records all of them. Every
 without the engine has now been proven and pushed. Stage 6 is **not** fully qualified; saying so is the
 honest close of this sitting, and the boundary holds — no merge, no `main`, no deploy, no hosted Supabase,
 no Stage 7.
+
+## 32. One published mechanism claim corrected, and the M1 instrument rebuilt before it was ever run (2026-10-07)
+
+**32.1 The engine is still not there; this section is the work that did not need it.** Probe 24 repeated §31.5's measurement at
+14:00:48 UTC: `docker version --format '{{.Server.Version}}'` with the code read adjacent inside the same command returned
+`code=124` and an empty `server=`, and stderr was empty — the CLI never reached a daemon rather than reporting one unhealthy. The
+restart chosen at §30.3 has still not happened, so every item listed at §31.5 remains owed. What changed below was found by reading
+the battery, the migration and `run.sh` against each other, which costs no engine time and would otherwise have been discovered
+inside the one session that has it.
+
+**32.2 A sentence at `:1662` attributed the size half to a mechanism the code does not use.** §26.3 laid out M1 and then separated the
+two halves of the confirm edge's comparison: "…then for TYPE the comparison is client-value against client-value… `size` is not
+exposed the same way, because the recorded length is measured from real bytes" (`:1660-1662`). The migration does not read bytes.
+The confirm edge selects `metadata ->> 'mimetype'` and `metadata ->> 'size'` in one statement
+(`20261006120000_stage6_wedding_asset_storage.sql:150-157`) and compares each to the row's claim (`:172-180`), so **both** halves are
+sourced from the same jsonb blob, and any sentence that distinguishes them by *where the value comes from* was overstating the SQL.
+The line was written as an inference from `UPL-01`'s measured `size = 68` on a 68-byte PNG, and that observation is consistent with
+either "length measured from bytes" or "length taken from the request" — it separates nothing. The asymmetry that does have a
+mechanical basis is about the client's channels rather than the trigger: the upload's size is the body itself, which a client cannot
+declare independently of what it sends, whereas the type travels in a `Content-Type` header that can say anything
+(`weddingAssets.ts:256`, and `storagePut`'s `mime` argument at `stage6_storage.test.mjs:185-197`). So size remains *probably*
+faithful and type *probably* not — but the audit will not carry "probably" about a mechanism it can measure. The revised `UPL-07`
+reads `metadata->>'size'` and the length of the bytes the service hands back through the authenticated read endpoint in the same case,
+which settles both halves at once; if they ever disagree, `:1662` was false in a second way and this section is where that is recorded.
+
+**32.3 Three defects in the draft instrument, each of which would have failed the case for an unrelated reason.** Checked line by
+line against `stage6_storage.test.mjs`, all found without running anything, and all now fixed in
+`q6-logs/s6-m1-upl07-draft.md` (revision 2):
+- It asked the database for `octet_length(data)`. No case in the battery has ever touched a `data` column — `UPL-01` (`:496-513`)
+  reads `owner_id` and the two metadata keys and nothing else — and local storage can keep payloads off that column. Because
+  `sqlRows` (`:137-143`) runs `psql -v ON_ERROR_STOP=1` through `execFileSync`, a missing column does not yield a null and a note;
+  it throws out of the helper and the case *errors*. The byte ground now comes from `storageRead` (`:205-215`), whose behaviour is
+  already measured by `READ-01` (`:627-634`) comparing a returned buffer to `PNG` byte for byte.
+- It pinned the refusal to `statusCode '415'`. That code is measured for *disallowed declarations* (`UPL-04`, `:557-581`); nothing has
+  observed what a content-checking service does to an allowed declaration over markup, so the pin would have made a correct
+  refusal look like a failure. The case now prints `code`, `error` and `message` and asserts only the two facts the invariant lives
+  on: nothing is stored, and the row does not leave `staged`.
+- Its third branch matched `/mime type|not supported|markup|html|svg/i` — vocabulary this database never emits. `:128-180` raises a
+  closed set of six messages, all under `ERRCODE '42501'`, and the branch now matches against the two that can mean a
+  content disagreement (`… is stored as …, but this row claims …` and `… is … bytes, but this row claims …`) while the rest of the
+  body is printed for the record rather than guessed at.
+The teardown mapping was checked against the same file rather than assumed, because `supabase/tests/api/run.sh` fails the *whole*
+HTTP tier if `wedding_assets` or `storage.objects(wedding-assets)` does not return to its pre-run count: a refused upload with no
+object goes through `dropStaged` (`:1003-1009`, measured for exactly that shape), and any object-bearing shape goes through
+`removeAsset` (`:1011-1024`), which the trigger permits from either `staged` or `ready` since only `tombstoned`-onward and
+`ready`-sideways are refused (`:128-137`).
+
+**32.4 Two assumptions the same reading corrected, both of which had been carried forward.** First, the HTTP tier has no case-count
+assertion: `supabase/tests/api/run.sh` ends on the residue comparison and on the orphan check, and the only pre-flight refusals are
+the bucket-config guards at `stage6_storage.test.mjs:316-319`, which stop the run if `file_size_limit` or `allowed_mime_types` is not
+the design's values. The "33/33" used throughout this audit is therefore a description of a node summary, not a gate — so adding
+`UPL-07` breaks no count, and any future statement that a count "must" match should name which assertion enforces it or stop saying
+it. Second, provenance of the tree these heads were certified on: `node_modules` currently carries both `/.package-lock.json` (npm)
+and `/.modules.yaml` (pnpm), with `node_modules/vite` a symlink into `.pnpm/` dated 2026-10-05 19:02, matching the mtime of the
+untracked `pnpm-lock.yaml` and `pnpm-workspace.yaml` that §26.6 and §29.3 already document as an outside install. So the five gates at
+every head certified from that moment onward — including `ea5be7f` and the `dist/` rebuild at `dbd8e60` — were measured on a
+pnpm-layout tree while the repository's committed lockfile is npm's. That is disclosed, not repaired: the results are what they are,
+the pair remains untracked and unstaged, and a clean `npm ci` tree is the thing the next certification run should be taken on if one
+is wanted rather than assumed. Free space at the time of writing is 1,197,828 KB, above both floors in §26.8.
+
+**32.5 Stage 6 remains not qualified, and the blocker is unchanged.** Nothing here moved a gate toward green: §32.2 *weakens* a
+published claim rather than strengthening one, and §32.3 is an instrument that has still never executed. M1 is still open, M2's
+mid-stream-abort question is still open, and the engine-sited list at §31.5 stands in full. The boundary holds — no merge, no `main`,
+no deploy, no hosted Supabase, no Stage 7.
