@@ -2256,3 +2256,71 @@ performed by the staged instrument as it stands, because `needlesFor()` carries 
 credentials and not the signed-URL token. The a11y repair at `8e62c38` is still *code* whose 44 px
 target has never been measured on a screen (§33's own boundary). Stage 6 is **not qualified**, it is
 committed, pushed, and bounded by §18.4 until the engine answers.
+
+## 35. A security paragraph asserted a sweep with no capture ID, and named battery cases a reader could not check (2026-10-07)
+
+Taken at `dff78c1`, with the engine still silent (probe 32, `probe_code=124`). Two facts, one repair, and
+a self-correction about an evidence figure this branch's operator notes carry.
+
+**35.1 How the instance surfaced.** §34.5's rule is that a measurement figure in tracked copy must carry
+the capture it came from. Re-running that search with a **wider** pattern vocabulary than the one that
+found §34's three instances — `confirms|measures|measured|sweep|prints|battery` over `README.md`, rather
+the narrower phrasings the earlier pass used — surfaced one more sentence of the same class, at
+`README.md:357-360`: "The Stage 6 HTTP battery measures the refusals around that (a presented key, a
+stranger's object, a second write to an existing key), and the bundle sweep taken at the Stage 6 tree
+confirms no privileged key shape appears in `src/`, `index.html` or `dist/`." Both halves assert a
+measurement. Neither named a run.
+
+**35.2 The substance held; the attribution did not.** This is §34.5's distinction again, arriving from the
+opposite side: the sentence was **right but uncited**. Checked against the source rather than memory, the
+three refusal shapes are real named cases — `MINT-02` at `supabase/tests/api/stage6_storage.test.mjs:428`
+(a key a client presents, refused in seven spellings), `UPL-02` at `:515` (a stranger holding its own
+legitimate staged row still cannot write into the owner's prefix), `A7` at `:807` and `A7b` at `:822` (a
+second write to a live key, refused as a duplicate and as the absence of any UPDATE policy). Checked
+against `q6-logs/s6-http-iter-02.log`, three of them print `✔` there (`MINT-02`, `UPL-02`, `A7b`) beside
+that run's `fail 0`. The rewrite therefore cites the three it saw printed and leaves `A1` and `A7` out of
+the sentence — the paragraph must not gain a citation I did not look at.
+
+**35.3 One draft corrected before it shipped, by reading the log instead of recalling it.** My first
+rewrite described the sweep as covering "the service-role, JWT-secret and DB-URL shapes". `q6-logs/`
+`s6-i10-valuescan-06.log` keys on three values labelled `SUPABASE_LOCAL_SECRET_KEY`,
+`SUPABASE_LOCAL_SERVICE_ROLE_KEY` and `SUPABASE_LOCAL_DB_URL`; there is no "JWT secret" label, and the
+second is a 164-character value against the first's 41. The shipped sentence quotes the log's own field
+names (`src_files_with_hit=0`, `index_html_lines_with_hit=0`, `dist_files_with_hit=0`,
+`q6_logs_files_with_hit=0`, `tracked_at_HEAD_files_with_hit=0`, `added_lines_main_to_HEAD_with_hit=0`)
+so a reader can diff it against the file. Same pass, the `dist/` half of the old sentence was true but
+loose ("no privileged key shape"): the sweep is **value**-keyed, and the separate hosted-contact
+address-form check — run-book §16's engine-free pre-flight, re-confirmed on the current artifact by the
+same search — is what establishes that the only `supabase.co` occurrence inside the bundle is the literal
+`"*.supabase.co"` in the bundled `supabase-js` host list: a name in code, not an address. The rewritten
+sentence does not claim the values sweep proved the latter.
+
+**35.4 The artifact-currency measurement, and one of my own evidence figures that is not reproducible.**
+§33 requires the browser tier to run against `dist/` built from the head that carries it, so before the
+engine returns I measured whether the head moving twice (both docs-only) forces a rebuild.
+`git diff --name-only 8e62c38 HEAD` prints exactly two paths — `README.md` and this file — so no build
+input moved; `git status --short` shows only the two untracked pnpm files that are never staged; and the
+artifact's fingerprints re-measure as `dist/` = 33 files / 1,030,852 B with `EditProject-BlByx_ME.js`
+present, matching the build recorded at §31 and the certification at `s6-head-cert-8e62c38.log:59`.
+Newest mtime under `dist/` is `2026-10-07 20:15:23 +0530` (`dist/index.html`), which is that build. The
+decision recorded from this: **the browser tier may be authored and executed against the existing artifact
+with no rebuild**, and any code commit between now and that sitting voids it.
+
+The self-correction travels with it. Run-book §18's line 569 publishes a *third* fingerprint,
+`manifest prefix 27cf3557c0bda1d4`, and I could not reproduce it: `s6-dist-rebuild-8e62c38.log:10`
+shows it was the sha256
+of `/tmp/dist-manifest-new.txt`, a temp written by an ad-hoc inline command whose recipe exists in no
+script (searching `q6-logs/*.sh` for `dist-manifest` returns nothing). Six candidate recipes re-run on
+today's tree — sorted names, sorted full paths, per-file sha256 list, that list's paths alone, md5 of the
+names, concatenated bytes — produce six different digests, none equal to it. So this section does not
+report that fingerprint as matching; the currency claim rests on the empty code diff, the file count, the
+byte total and the chunk name, all of which a reader can re-run. **Rule adopted:** an artifact
+fingerprint must be produced by a recipe written into the capturing script itself, with the manifest file
+kept beside the log. A number that survives only in `/tmp` is not evidence even when the neighbouring
+evidence is sound — it is the same defect §34.5 names for an uncited count, one layer down, in my own
+operator record rather than in published copy.
+
+**35.5 What §35 does not license.** No engine tier has been re-run at this head: the SQL batteries (90 and
+80, plus the historic stage 2–5 suites), the 33-case HTTP chain, UPL-07 revision 2, the `pg_roles`
+read, A13, and the browser tier with N1–N4 all still belong to §18's blocked order. Attribution fixes
+make the copy honest; they do not qualify the stage. Stage 6 remains **not qualified**.

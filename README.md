@@ -355,9 +355,17 @@ No secret belongs in this repository. The app only ever reads a browser-public p
 added a second kind of secret-bearing surface — a host's own files — and it is held the same way: the
 bucket is private, the object key is minted by the database rather than accepted from a client, and the
 only read path the product has is a short-lived signed URL issued to the owning account. The Stage 6
-HTTP battery measures the refusals around that (a presented key, a stranger's object, a second write to
-an existing key), and the bundle sweep taken at the Stage 6 tree confirms no privileged key shape
-appears in `src/`, `index.html` or `dist/`.
+HTTP battery carries the refusals around that as named cases — `MINT-02` (a key a client presents),
+`UPL-02` (a stranger writing into the owner's prefix), `A7b` (a second write to a key that already has
+bytes) — and each of the three is printed `✔` in `q6-logs/s6-http-iter-02.log`, taken on
+**2026-10-06** with that run's `fail 0`; the chain has not been re-run since, and §34.4 records why the
+test file that run executed is still this tree's file. The privileged-value sweep re-taken at `dff78c1`
+(`q6-logs/s6-i10-valuescan-06.log`, taken at `dff78c1`, whose five node gates are recorded beside it in
+`q6-logs/s6-head-cert-dff78c1.log`) prints
+`tracked_at_HEAD_files_with_hit=0` and `added_lines_main_to_HEAD_with_hit=0` for each of the three
+privileged shapes it keys on (`SUPABASE_LOCAL_SECRET_KEY`, `SUPABASE_LOCAL_SERVICE_ROLE_KEY`,
+`SUPABASE_LOCAL_DB_URL`), with `src_files_with_hit=0`, `index_html_lines_with_hit=0`,
+`dist_files_with_hit=0` and `q6_logs_files_with_hit=0` beside them.
 
 ## Product docs
 
