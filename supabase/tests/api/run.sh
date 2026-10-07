@@ -88,6 +88,12 @@ psql_q "select '  db: ' || version()"
 BASE_WEDDINGS=$(psql_q "select count(*) from public.weddings")
 BASE_USERS=$(psql_q "select count(*) from auth.users")
 BASE_DRAFTS=$(psql_q "select count(*) from public.invitation_drafts")
+# Stage 6 added the two stores an HTTP run can leave behind *without* leaving a row in any of the
+# three above: a registry row and, one layer further out, the bytes that row points at. An object
+# whose registry row is gone is exactly the orphan class the stage's removal ordering exists to make
+# observable, so it is counted here rather than trusted to the suite's own teardown.
+BASE_ASSETS=$(psql_q "select count(*) from public.wedding_assets")
+BASE_OBJECTS=$(psql_q "select count(*) from storage.objects where bucket_id = 'wedding-assets'")
 
 # --- 3. preconditions that make the refusals mean something --------------------------
 # Several tests below assert that a table is *not reachable* over REST. That assertion
@@ -153,8 +159,10 @@ echo "==> Post-run check: the local database is back where it started"
 NOW_WEDDINGS=$(psql_q "select count(*) from public.weddings")
 NOW_USERS=$(psql_q "select count(*) from auth.users")
 NOW_DRAFTS=$(psql_q "select count(*) from public.invitation_drafts")
+NOW_ASSETS=$(psql_q "select count(*) from public.wedding_assets")
+NOW_OBJECTS=$(psql_q "select count(*) from storage.objects where bucket_id = 'wedding-assets'")
 LEAK=0
-for pair in "weddings:$BASE_WEDDINGS:$NOW_WEDDINGS" "auth.users:$BASE_USERS:$NOW_USERS" "invitation_drafts:$BASE_DRAFTS:$NOW_DRAFTS"; do
+for pair in "weddings:$BASE_WEDDINGS:$NOW_WEDDINGS" "auth.users:$BASE_USERS:$NOW_USERS" "invitation_drafts:$BASE_DRAFTS:$NOW_DRAFTS" "wedding_assets:$BASE_ASSETS:$NOW_ASSETS" "storage.objects(wedding-assets):$BASE_OBJECTS:$NOW_OBJECTS"; do
   name=${pair%%:*}; rest=${pair#*:}; was=${rest%%:*}; now=${rest#*:}
   if [[ "$was" != "$now" ]]; then
     echo "FATAL: $name went from $was to $now rows — the run did not clean up." >&2
