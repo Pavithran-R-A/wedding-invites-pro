@@ -227,16 +227,23 @@ const WeddingAssetsPanel = ({ weddingId }: WeddingAssetsPanelProps) => {
           </span>
         </span>
         {/* A radio rather than a button: "which stored file does this new one stand in for" is a
-            choose-one question among rows, and a button made it look like a second action. */}
-        <input
-          type="radio"
-          name="asset-replace-target"
-          checked={asset.id === targetId}
-          onChange={() => { setTargetId(asset.id); }}
-          disabled={busy !== null || asset.uploadStatus !== 'ready'}
-          aria-label={`Replace this file: ${kindLabel(asset.assetKind)}`}
-          className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
-        />
+            choose-one question among rows, and a button made it look like a second action.
+            The wrapper is not decoration. A radio is 16 CSS px at `h-4 w-4` under this project's
+            `html { font-size: 1rem }`, and the accessibility instrument sizes a press area from the
+            control's own `<label>` — unwrapped, that is a 16x16 target against the 24px floor and the
+            44px host-workbench figure in `docs/product/design-principles.md`. `p-3.5` makes the label
+            44x44; the matching negative margin keeps the row's geometry as drawn. */}
+        <label className="-m-3.5 shrink-0 cursor-pointer p-3.5">
+          <input
+            type="radio"
+            name="asset-replace-target"
+            checked={asset.id === targetId}
+            onChange={() => { setTargetId(asset.id); }}
+            disabled={busy !== null || asset.uploadStatus !== 'ready'}
+            aria-label={`Replace this file: ${kindLabel(asset.assetKind)}`}
+            className="mt-0.5 block h-4 w-4 accent-primary"
+          />
+        </label>
       </div>
 
       <div className="flex flex-wrap gap-2">

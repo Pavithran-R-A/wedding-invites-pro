@@ -2081,3 +2081,86 @@ is wanted rather than assumed. Free space at the time of writing is 1,197,828 KB
 published claim rather than strengthening one, and §32.3 is an instrument that has still never executed. M1 is still open, M2's
 mid-stream-abort question is still open, and the engine-sited list at §31.5 stands in full. The boundary holds — no merge, no `main`,
 no deploy, no hosted Supabase, no Stage 7.
+
+## 33. A Stage 6-introduced accessibility defect, found and repaired while the engine was still down
+
+§30.4 left the browser tier unstarted, which made the waiting useful in a different way than the §16
+pre-flight: the tier's instrument is a tracked file, so its thresholds can be read now and held against the
+component this stage added. The instrument asserts two things about actionable controls, and both are
+`check`s rather than `measure`s:
+
+- `scripts/stage5-a11y-mobile.mjs:687-690` — *no enabled control is smaller than 24×24 CSS px*
+  (`MIN_TARGET_PX = 24`, `:89`);
+- `:697-701` — *no enabled control in the host workbench is smaller than 44×44 CSS px*, whose comment
+  states the provenance plainly: 44 is "this product's own acceptance target … stated in
+  `docs/product/design-principles.md` … not merely the AAA ask §30 assumed". That document carries it twice
+  (`:30` "Touch targets at least 44×44px", `:97` "| Touch target | ≥44×44px, ≥8px apart |").
+
+The instrument counts a radio as actionable — its `INTERACTIVE` selector is
+`'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link]'` (`:136`) —
+and it sizes a press area from the control's own `<label>`, not from the control: `const wrap =
+el.closest('label'); const effective = wrap ? rectOf(wrap) : own;` (`:182-183`). So the panel's
+replace-target control was measured against those two checks before any browser ran:
+
+| fact | value | how it is known |
+|---|---|---|
+| the control | `<input type="radio">` with `className="… h-4 w-4 …"` | `WeddingAssetsPanel.tsx:238` as committed at `a10da61` |
+| its box | 1rem = **16 CSS px** square | Tailwind `h-4`/`w-4` under this project's `src/index.css:109` `html { … }` with `font-size: 1rem` |
+| its label | none — the row uses `aria-label`, and no `<label>` wraps it | `:231-239`; confirmed structurally, not by reading alone (33.4) |
+| effective target | therefore its own 16×16 | `:182-183`, the no-wrap branch |
+| verdict | below the 24 px floor **and** below the 44 px workbench assertion | `:687-690`, `:697-701` |
+
+This is a defect Stage 6 introduced: the panel is `S6-6a` work, and every other control in the same
+component was written at `h-11`.
+
+### 33.1 The five sibling controls were rejected as defects, with a reason that had to be measured
+
+The panel also carries four `size="sm"` buttons and one `size`-less `Input`, each given `h-11` in
+`className` while the shared component's variant supplies `h-9` (`src/components/ui/button.tsx:21`) or
+`h-10` (`input.tsx:11`). Whether those conflict is a cascade question, and the built stylesheet said the
+wrong-looking thing: in `dist/assets/index-DSeE7ILB.css` the offsets are `.h-10{`=10387, `.h-11{`=10407,
+`.h-12{`=10428 but `.h-8{`=10680 and `.h-9{`=10697 — the smaller utilities come *later*, so equal-specificity
+CSS order would let `h-9` beat `h-11` and five more sub-44 controls would have been "found".
+
+They are not defective, because the merge happens before the cascade. `src/lib/utils.ts` is
+`twMerge(clsx(inputs))`, and `Button`/`Input` build their class list through `cn`, so a conflicting height
+utility is dropped and the caller's `h-11` is the only height on the element. The distinction is worth
+recording because it is the kind that turns an honest-looking sweep into five invented defects: had `cn`
+been plain `clsx`, the panel would carry six failures instead of one, and the repair would have been a
+different change.
+
+### 33.2 The repair, and what it deliberately does not claim
+
+`WeddingAssetsPanel.tsx` now wraps that radio in its own `<label className="-m-3.5 shrink-0 cursor-pointer p-3.5">`.
+`p-3.5` is 0.875rem = 14 px, so the label box is 14 + 16 + 14 = **44 px** on both axes — the figure the
+instrument asserts, reached by the mechanism it recognises rather than by enlarging a radio, which is what
+`:680-681` prescribes ("a 16px radio inside a padded label is a label-sized press target"). The negative
+margin keeps the row's geometry as drawn; its cost is that the label's box overhangs the row's own `p-3`
+(12 px) by 2 px, which the tier's overflow check (`:665-666`) measures rather than my assertion.
+
+Pinned with `src/test/weddingAssetsPanelTargets.test.tsx`, which asserts the DOM relation the instrument
+consumes (`radio.closest('label')` non-null) and that the radio keeps its own `aria-label` so a future
+wrapping cannot leave it unnamed. It asserts nothing about pixels — jsdom lays nothing out, and a number
+invented there would be exactly the kind of claim this audit has had to retract twice.
+
+**Before → after, both captured:**
+
+    $ npx vitest run src/test/weddingAssetsPanelTargets.test.tsx      # panel unwrapped
+    vitest_before_code=1
+    AssertionError: expected null not to be null      (57| expect(radio.closest('label')).not.toBeNull())
+    Test Files  1 failed (1) · Tests  1 failed | 1 passed (2)
+
+    $ npx vitest run src/test/weddingAssetsPanelTargets.test.tsx      # panel wrapped
+    vitest_after_code=0
+    Test Files  1 passed (1) · Tests  2 passed (2)
+
+The `1 failed | 1 passed` shape of the first run is the part that matters: the naming assertion already
+passed and the structural one failed, so the red was the missing label and not a broken harness. The full
+five node gates for this tree are in `../q6-logs/` under this head's own SHA, per §22.7.
+
+**Not claimed.** That 44 px is *measured on screen* — that is the browser tier's own obligation, and it is
+also the tier that has to confirm the overhang, the `elementFromPoint` centre (`:183`) still answering to
+the radio itself, and the `gap-2` 8 px separation `design-principles.md:97` asks for. The panel header's
+`NOT YET QUALIFIED` block stays where it is: this repair makes the tier one failure poorer, not one verdict
+richer. §26.7's discipline also applies — the change was made in a clean worktree with no gate in flight,
+and `dist/` is rebuilt from the head that carries it so the browser tier measures these bytes.
