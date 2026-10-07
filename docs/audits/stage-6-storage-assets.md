@@ -1814,3 +1814,69 @@ question (`UPL-07` for M1, a fault-injection case for M2) are unchanged and stil
 SQL and browser tiers. Probe 17 (`q6-logs/s6-engine-probe-17.log`, `timeout 10 docker version` → `124`) is the
 seventeenth consecutive unanswered engine probe, and free `C:` fell from 306,044 KB to 130,764 KB across §26's and
 §27's work while my own commands were the only ones running against it.
+
+## 28. §27's certification gap is closed, and the engine diagnosis got a second, corrected reading (2026-10-07)
+
+The human took the two machine actions §27 had to escalate (`q6-logs/s6-section28-cert-01.log` addendum: restart
+Docker, free `C:`). This section records what each produced, measured rather than assumed, and one correction to a
+reading taken in the middle of that work.
+
+**28.1 Disk freed; it is volatile, and none of it is ours.**
+`free C:` went 171,812 KB (probe 17) → 253,216 → 464,168 KB by 12:53 UTC. It then fell to 204,444 KB at the start of
+the re-certification run and rose to 478,988 KB by the end of that same run (`q6-logs/s6-section28b-testcert-01.log`).
+Two of my own commands overlap that window — `npx supabase --version` had to download the CLI (2.120.0; nothing named
+`supabase` is on this host's `PATH`, so every call pays it) while vitest ran — but the swings are larger than either
+explains, which is the same external consumption §26.8 measured. `df`'s `%USE` column still reads 100 because 464 MB of
+498 GB is 0.09 %. Consequence unchanged: the graduated floor in `s6-section28-cert.sh` stays, and a gate counts only if
+it actually ran.
+
+**28.2 The one gate §27 recorded as not certified is now certified at the same head.**
+`npm run test` at `2aecb11` gave `gate_exit_code=0`, `Test Files 31 passed (31)`, `Tests 466 passed (466)`,
+`Duration 116.15s`. `local_equals_remote=YES`, `worktree_tracked_changes_at_end=0`, and the two untracked pnpm files
+were never staged. §27's head therefore now stands at **five of five node gates green**, and the sentence "the `test`
+gate is NOT certified at 2aecb11" is superseded by this one — §27 is left in place untouched, because it recorded the
+state honestly at the time it was written. The capture was scanned for privileged *values* before it entered
+`q6-logs/`: `SUPABASE_LOCAL_SECRET_KEY` (length 41), `SUPABASE_LOCAL_SERVICE_ROLE_KEY` (164) and
+`SUPABASE_LOCAL_DB_URL` (55) each scored `lines_with_hit=0`, as did the `postgresql://` shape —
+`privileged_value_hits_total=0`, so the raw file is I10-clean and was kept as `s6-section28b-test-raw.log`.
+
+**28.3 A structural correction to what is actually blocked, found by reading the runner rather than the run-book.**
+`supabase/tests/stage6/run.sh:44-47` starts its **own** throwaway cluster (`postgres:16-alpine`, container
+`vivaahvarnam-stage6-$$`) and its header states the boundary: plain Postgres plus the RLS bootstrap and the storage
+fixture. So the SQL tier needs *an engine*, not the `localvivaahvarnam` Supabase stack — it was wrong to lump it in
+with the HTTP and browser tiers, which do need `supabase start`. The runner's escape hatch is
+`STAGE6_LOCAL=1` against an already-running cluster, but that path needs `psql`, and `psql` is absent both from the
+host `PATH` and from WSL Ubuntu. Installing a system dependency was not done silently. Net: 90/80 registry-and-policy
+and the historic stage2–5 suites remain blocked, but on the narrower and cheaper condition of a working engine only.
+
+**28.4 Where the engine actually is.** `com.docker.backend` and `Docker Desktop` are running with `StartTime`
+6 Oct 15:10 — i.e. the backend was **not** recycled by the restart. The `docker-desktop` WSL distro, which is that
+backend's VM, reports `State: Stopped` while `Ubuntu` reports `Running`. The CLI is healthy on both sides (WSL's
+reports 29.8.1; `docker context ls` answers and shows `desktop-linux*` on
+`npipe:////./pipe/dockerDesktopLinuxEngine`, so no stale `DOCKER_HOST`), and `docker context ls` reads only local
+config, so it is not engine evidence. Every command that does contact the daemon times out: host `docker version` 90 s
+→ 124, host `docker ps` 60 s → 124, and from inside WSL `docker version` → `code=124`, `docker ps` → `code=124`. One
+`docker ps` did answer earlier (`exit=0`, header row only, zero containers) — the only engine reply in eighteen probes.
+The weakest reading the evidence allows: a VM that is stopped, not a socket or naming fault on this side; consistent
+with the stack having been lost rather than merely paused.
+
+**28.5 Correction, because two of these numbers were first read wrongly.** The WSL probe was initially written as
+`… | head -8; echo "exit=$?"`, which reports `head`'s status, not docker's — and it printed an empty `server=` field
+that looked like a successful version query. Re-run with the code captured adjacent to each command (§ the standing
+rule, and `s6-engine-runbook.md` §0's own instruction) gave the `code=124` values above. Recorded here because the
+same pipeline-tail reading, left uncorrected, would have made the engine look reachable and this stage would have
+published a tier that never ran.
+
+**28.6 Instruments staged for the engine sitting, so it is executed rather than designed.**
+`q6-logs/s6-stack-start-masked.sh` makes §1 of the run-book executable: the raw `supabase start` output goes to `/tmp`,
+is masked by both structure (`postgresql://`, JWT-shaped, the summary table's `URL` row) and the three privileged
+*values*, and only then may a copy enter `q6-logs/` — the script prints hit counts and exits 7 rather than keeping a
+log that carries a credential. `q6-logs/s6-m1-upl07-draft.md` is the paste-ready M1 case with its three outcomes
+pre-named; §8's warning stands that it must not be applied while a head is being certified, and this head's
+certification is what §28.2 just completed.
+
+**28.7 Net effect on the stage.** The node tier at the published head is complete: `2aecb11` is five-gates green with
+remote equal to local. Nothing new was proven about the implementation, so nothing was repaired. Blocked on the engine
+alone: the SQL batteries (90/80 plus historic stage2–5), the HTTP tier, `UPL-07`/M1, the `pg_roles` measurement §5
+requires before §25.3's recalled ranking can be corrected, and the browser tier with its four network observations.
+The boundary is unchanged — no merge, no `main`, no deploy, no hosted Supabase, no Stage 7.
