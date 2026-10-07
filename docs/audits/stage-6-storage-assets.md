@@ -1531,3 +1531,76 @@ main comparison must be taken from `git ls-remote` (or an explicit fetch of the 
 `git rev-parse origin/main` or `for-each-ref` — the tracking ref in this working copy is permanently stale by design.
 The config was read, not modified, and nothing was rebased, reset or force-pushed: `main` is unmoved, and the only push
 in `q6-logs/s6-section24-push-01.log` is the branch fast-forward `0ff4d8c..f6786c6`.
+
+## 25. A value-keyed sweep of I10's log surface found what the word sweep could not see (2026-10-07)
+
+**25.1 Why this section exists.** §24.5 reported I10 clean over the artifact, and §19.6 and §22.3 before it did the
+same over `src/` and `dist/`. Every one of those sweeps was keyed on *words* — `service_role`, `anon_key`, `eyJ` —
+so each could only ever find a secret that someone had chosen to name. Invariant I10 as written in §3's table covers
+"a secret that could bypass RLS … in `src/`, `index.html`, `dist/`, **or any log this stage writes**", and the log
+surface had never been swept by anything stronger than that vocabulary. This section re-takes it keyed on the actual
+credential *values* rather than on their names, which makes the vocabulary question irrelevant: a value match needs no
+cooperation from whoever wrote the line. It found one thing.
+
+**25.2 Method, stated because the method is the finding.** The four local credential values were read out of the
+gitignored `.env.local` into shell variables and used only as `grep -F -e` patterns; no value, and no prefix of any
+value, was ever printed — the logs record name, character length, hit count and file paths. Surfaces: `src/`,
+`index.html`, `dist/`, every Stage 6 evidence log, every migration/test/doc, `git grep` over the tracked tree at HEAD,
+and every added line in `1b1ef6d..HEAD` (the true base, taken per §24.10). `q6-logs/s6-i10-valuescan-01.log` and
+`s6-i10-valuescan-02.log`.
+
+**25.3 The finding, its exposure, and the repair.** `SUPABASE_LOCAL_DB_URL` — the direct PostgreSQL connection string,
+whose userinfo carries the local database password and which bypasses RLS more completely than `service_role` does —
+appeared in **two of this stage's own logs**, once each, at `q6-logs/s6-g15-storage-start.log:22` and
+`q6-logs/s6-g17-start-storage.log:182`. Neither line was typed by a human or pasted deliberately: both are the Supabase
+CLI's own start-summary table, captured because the session logged the command that started Storage. That is exactly how
+a log-surface leak happens, and it is why the pattern vocabulary never saw it — no line contained the word `secret`.
+
+Exposure measured rather than argued: `q6-logs/` sits outside the repository, so `git grep -F` over every tracked file
+at HEAD returns 0 occurrences, the added-line scan over the whole `1b1ef6d..HEAD` range returns 0, and nothing in either
+file was ever pushed or attached to a report. The two values that I10 names first — the secret key and the
+`service_role` JWT — return 0 everywhere, including in these two logs. Repair: the value was replaced in place with
+`[REDACTED_DB_URL]` by a literal-safe `perl -pi` (quotemeta, not regex, so the password's own punctuation cannot cause
+an under-match), nothing else in either file was edited, and each file now carries an appended note stating what was
+masked, when, and why. **Prevention rule for the engine session, which is the reason to publish this rather than leave
+it in a log: raw `supabase start` output must never be written into `q6-logs/` unmasked.** A start capture is the most
+likely place in this stage to print a credential, and the next session will run it.
+
+**25.4 The rest of the value sweep, as measured.** After the redaction, over a bounded surface of **436** files
+enumerated by explicit directory rather than by recursion: secret key (41 chars) 0 hits, `service_role` JWT (164 chars)
+0 hits, direct DB URL (55 chars) 0 hits, publishable key (46 chars) **2** hits — `dist/assets/index-fTteksTz.js` and
+`dist/assets/PublicInvitation-BCmmzCTc.js`. Those two names are the same name+hash pair §22.2 and §24.2 certified, so
+the sweep provably ran against the artifact this branch describes rather than a rebuilt one, and the only credential in
+the bundle remains the class `.env.example:3-5` authorises. The result corroborates §24.4 with a different instrument,
+which is worth recording even though it changes no verdict.
+
+**25.5 Two instrument failures, recorded because they were caught late.** The first widened attempt used
+`grep -rlF .` from the parent directory and silently began walking `s5qual/node_modules`; the second pruned
+`node_modules` but not `s5qual/.git`, and began grepping loose object files. Both were killed rather than allowed to
+finish, and `s6-i10-valuescan-02.log` says so at its head. Both were caught because the run took long, **not** because
+a number looked wrong — which is the weaker of the two detection paths available. Rule taken from it: a sweep prints
+its own file count before it prints any hit, so an unbounded surface is visible in the log even when the run completes.
+The same discipline caught a smaller error in this section's companion note: the static census that corroborates 90 and
+80 first printed **92** and **82**, because a `grep` for the assertion helpers matches their own `CREATE FUNCTION`
+lines as well as their call sites. Corrected in `q6-logs/s6-instrument-audit-01.log`, which now records the
+definition-subtracted counts: registry 6 ok + 84 eq = **90**, policies 2 ok + 78 eq = **80**.
+
+**25.6 The instrument question §25.5 was chasing, answered: there is no gap.** The worry was legitimate — `run.sh`
+pins no absolute assertion total anywhere, and its `lines` style only checks that a suite's reported number equals the
+PASS lines it printed, which a short-but-internally-consistent run would satisfy. It is answered inside each battery.
+`80_asset_registry.sql:738` refuses below 89 and `90_storage_policies.sql:776` refuses below 79, and because the
+counter increments only on a pass while a failed assertion raises and aborts its `DO` block (which makes `psql` exit
+non-zero, which the runner hard-fails on), the counter can only be low because an assertion stopped running. Each floor
+is one below its own measured total *including* the floor's own `L1` line, so exactly one assertion — the floor's own,
+which cannot go missing without the block failing — sits outside its reach: 88 of 90, or 78 of 80, trips it. Stage 6's
+two suites are registered with style `lines` (`run.sh:209`), so the floor, the runner's equality cross-check and the
+call-site census pin 90 and 80 three ways. This is a confirmation, so per §22.7 it is not the reason this section
+became a head — §25.3 is.
+
+**25.7 What still has no answer.** All of it is the engine, and probe 15 is now fifteen for fifteen:
+`docker_info_exit=124`, `docker_ps_exit=124`, both with 0 bytes of output
+(`q6-logs/s6-engine-probe-15.log`). Disk is worse than the last reading in this file: `df -k /c` reports
+**593,304 KB free of 498,133,316** at 100 % used, against the 2.1–2.2 GB §22 recorded. That does not change the
+boundary — I will not prune a shared volume or delete another project's data — but it does change what restarting
+Docker Desktop will require, and it belongs in the one human-only action this stage is waiting on rather than in a
+silent retry loop.
