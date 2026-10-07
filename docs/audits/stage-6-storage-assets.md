@@ -2164,3 +2164,95 @@ the radio itself, and the `gap-2` 8 px separation `design-principles.md:97` asks
 `NOT YET QUALIFIED` block stays where it is: this repair makes the tier one failure poorer, not one verdict
 richer. §26.7's discipline also applies — the change was made in a clean worktree with no gate in flight,
 and `dist/` is rebuilt from the head that carries it so the browser tier measures these bytes.
+
+## 34. The README carried a delivery claim the repository had already outgrown, and three numbers with no run ID attached (2026-10-07)
+
+The engine is still down — this sitting opened with probe 31 at `timeout 45 docker version` →
+`probe_code=124`, the thirty-first consecutive timeout — so this section is the work a dead engine does
+not block: re-reading the *live* claims in `README.md` against the repository as it now stands, rather
+than against the tree each claim was first written into. Four defects were found, every one of them
+decidable from a file or from `git`, and all four are repaired in the same commit as this section.
+
+**34.1 The false one.** `README.md`'s Stage 6 closing paragraph ended "…was blocked by §18, which is
+also why Stage 6 carries no commit and no push." That sentence is not merely stale, it is the wrong
+direction: it told a reader the stage was *undelivered* when in fact the stage is committed and pushed.
+Measured this sitting, adjacent rather than remembered:
+
+    local_head=8e62c386667b537031969e39fe167c3e4707d928
+    8e62c386667b537031969e39fe167c3e4707d928  refs/heads/stage6/storage-assets
+    git_status_short=only the two untracked foreign pnpm files
+
+`origin/main` was not touched by this stage and `git branch -r` still lists Stage 5's branch beside it.
+The replacement wording keeps the boundary and moves the cost onto the right axis: what the engine's
+death withholds is *qualification*, not delivery, and the missing artefact is a re-run, not a push.
+
+**34.2 Which earlier sections §34.1 supersedes, named rather than edited.** This file is append-only
+(`:8`), and three of its own sections say the thing `README.md` repeated: **§14.9** (`:696`) "the
+migration itself remains uncommitted and therefore unpushed"; **§18.6** (`:860`) "the stage as a whole
+has no green chain, no commit and no push"; **§19.13** (`:1035`) "there is still no Stage 6 commit, no
+push and no remote SHA to verify against." All three were accurate when written — §29 and §30 are the
+sections that later recorded the commits and the read-back — and none is rewritten here. What is worth
+saying once is that the phrase "no commit" in §18.6 and §19.13 always meant *no implementation commit at
+a state with a green chain*, because §10.5 (`:378`) had already recorded `c2f9872` pushed to this very
+branch — timestamped `2026-10-05 19:02:53 +0530` at `:348`, more than a day before either section was
+written. A reader who took the later phrase literally would conclude the branch was
+empty; it was documentation-only. `README.md`'s sentence had exactly that failure, which is how it got
+found.
+
+**34.3 Three numbers with no provenance, now carrying their run IDs.** The Stage 6 section lists the SQL
+chain, the HTTP battery and the §16 isolation result as measured — all true — without naming the capture
+each came from, so they read as current-tree evidence at any head. Each figure was traced back to its
+log and dated, and the dates line up with the engine's death rather than with the tree's history:
+
+| Claim | Capture | Stamp as measured | Result as printed |
+| --- | --- | --- | --- |
+| 90 and 80 Stage 6 assertions + the historic re-measurements | `q6-logs/s6-stage6chain-04.log` | 2026-10-06 16:43 | `chain_exit_code=0`; `80_asset_registry` PASSED (90), `90_storage_policies` PASSED (80), each with `PASS lines observed` beside it |
+| 33 HTTP tests | `q6-logs/s6-http-iter-02.log` | 2026-10-06 17:14 | `tests 33 / suites 6 / pass 33 / fail 0`, 21.9 s |
+| §16's repaired Stage 3 case | `q6-logs/s6-stage3-isolation-01.log` | 2026-10-06 17:18 | `pass 56 / fail 0`, and the repaired case is in the passing list by name: `✔ a child row cannot be attached to another account's wedding via wedding_assets` |
+
+So no engine-tier number in this stage is newer than **2026-10-06 17:18**, and the README now says so.
+The whole-directory HTTP run beside them (`s6-api-run-01.log`, 17:15) is `api_run_exit_code=1` and stays
+red as the record of the §16 defect — the isolation run repaired and measured that one file, it did not
+re-run the directory, and no serial chain has gone green since.
+
+**34.4 The part that strengthens rather than weakens the figures: `supabase/` has not moved since.** A
+dated measurement is only honest if the reader knows whether the thing measured still exists. Checked
+directly:
+
+    git diff --stat eb88405 HEAD -- supabase/     →  (no output)
+    git diff --stat eb88405 HEAD -- src/          →  6 files changed, 1403 insertions(+)
+
+`eb88405` is the last commit that touches `supabase/` (the §16 historical-battery repair). Every
+migration, every SQL battery and every HTTP test file HEAD carries is therefore **byte-identical to the
+bytes those 2026-10-06 runs executed** — the figures are old, the tree they describe is this tree, at
+least for the files those tiers read. What has changed since is `src/` alone (the adapter, the panel,
+two unit-test files), and neither tier imports it: `stage6_storage.test.mjs` pulls only `node:test`,
+`node:assert/strict`, `node:child_process`, `node:fs`, `node:path`, `node:url` and `@supabase/supabase-js`,
+and the SQL batteries are `psql` scripts run against a fixture head. This is not a re-run and does not
+pretend to be one — the stack itself is gone, and a migration that is *applied* to a container that no
+longer exists is not being enforced by anything right now. What it does mean is that when the engine
+returns, a green replay of those two tiers would be a replay *of this head's files*, not a repair of a
+drift the README had quietly hidden.
+
+**34.5 The stale count, and the false premise that nearly replaced it.** `README.md` said "185 files at
+the current Stage 6 tree". Every certification log from §26 through §33 does print 185, so the number
+was current *for those heads*; `8e62c38` added `src/test/weddingAssetsPanelTargets.test.tsx`
+(`git log --diff-filter=A` on that file), and the head certification at `8e62c38`
+(`q6-logs/s6-head-cert-8e62c38.log`) prints **`Product contract OK — 186 active file(s) scanned, 0
+violation(s)`** with `gate_exit_code=0` beside all five gates and `test_summary_present=YES`. The README
+now carries 186 with that head and log named, and calls the move a third one rather than the second.
+
+This is also where a correction about my own working notes belongs, because the fix was nearly wrong in
+the other direction: an earlier sitting recorded "my count attempt used the wrong pattern" for
+`src/test/weddingAssetUploadRules.test.ts` and left "26 unit tests" flagged unverified. Re-measured with
+`grep -c -E "^\s*(test|it)\("` the file returns **26**, so the README's figure needed no change — the
+defect was in the probe, not in the claim. The lesson is the same one §34.5 carries for 185: an
+unverified number and a wrong number are different problems, and only one of them is repaired by
+editing copy.
+
+**34.6 What §34 does not license.** No engine tier has been re-run. The browser tier has not started, so
+the four network observations (N1–N4, run-book §18) remain unperformed — and N4 in particular cannot be
+performed by the staged instrument as it stands, because `needlesFor()` carries the six configured
+credentials and not the signed-URL token. The a11y repair at `8e62c38` is still *code* whose 44 px
+target has never been measured on a screen (§33's own boundary). Stage 6 is **not qualified**, it is
+committed, pushed, and bounded by §18.4 until the engine answers.

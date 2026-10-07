@@ -168,8 +168,13 @@ measured, and where:
   historical suites re-measured against a schema that now contains Stage 6: 42/76 outcome, 46/49 draft
   invariant, 284 publication-boundary, 464 privilege and RLS attacks, 103 catalogue, 428 + 57 pack
   documents and tooling, and 122 / 50 / 124 review-binding, vocabulary and document-resolution
-  (`bash supabase/tests/stage6/run.sh`; the joint replay printed `chain_exit_code=0`)
-- **33 HTTP tests against the running local stack** (`supabase/tests/api/stage6_storage.test.mjs`):
+  (`bash supabase/tests/stage6/run.sh`; the joint replay printed `chain_exit_code=0`). That replay is
+  `q6-logs/s6-stage6chain-04.log`, taken on **2026-10-06**, and it has not been re-run since — but it is
+  not describing a stale tree either: `git diff --stat eb88405 HEAD -- supabase/` prints **nothing**, so
+  every migration, SQL battery and HTTP test file HEAD carries is byte-identical to the one that run
+  executed. What moved since is `src/` only, and none of these tiers import it
+- **33 HTTP tests against the running local stack** (`supabase/tests/api/stage6_storage.test.mjs`,
+  `q6-logs/s6-http-iter-02.log` on 2026-10-06: **33 tests / 6 suites / 33 pass / 0 fail**, 21.9 s):
   real tokens, real bytes, real refusals, and a teardown that *prints* `wedding_assets total=0` and
   `objects in the bucket=0` from the database instead of asserting it cleaned up after itself. Three
   of its forecasts were reversed by measurement — an unauthenticated download is `400 NoSuchKey`, not
@@ -181,7 +186,9 @@ measured, and where:
 - One Stage 3 case was proven wrong by Stage 6 and repaired, not relaxed: it hand-supplied an
   `object_key`, and because BEFORE triggers run before an RLS `WITH CHECK` is consulted, it had begun
   to assert the mint guard while claiming to assert isolation (§16). Measured alone afterwards:
-  **56 pass / 0 fail**
+  **56 pass / 0 fail** (`q6-logs/s6-stage3-isolation-01.log`, 2026-10-06), with the repaired case —
+  "a child row cannot be attached to another account's wedding via `wedding_assets`" — named in the
+  passing list rather than inferred from a total
 - **26 unit tests over the adapter itself** (`src/test/weddingAssetUploadRules.test.ts`, no engine
   needed): every refusal the tab reaches for on its own is asserted *together with* "nothing was asked
   of the stack", the register payload is shown to carry no `object_key` in any shape, the write is
@@ -197,10 +204,14 @@ measured, and where:
 
 And the two things this section must not be read as granting. **Nothing here has been shown to a host
 in a browser, and the serial HTTP chain has not gone green at this state** — the single run that would
-cover the migration, the batteries, the adapter and the §16 repair together was blocked by §18, which
-is also why Stage 6 carries no commit and no push. **No guest is affected by any of it**: Stage 6 ships
-host-private upload and management only, preview is through a short-lived signed URL, and the published
-snapshot still asserts no `object_key` (§7, and B28 in the Stage 3 battery).
+cover the migration, the batteries, the adapter and the §16 repair together is the one §18 blocked, so
+every engine-tier number above belongs to 2026-10-06 and none has been re-measured since. What that
+costs is *qualification*, not delivery: Stage 6 **is** committed and pushed to
+`stage6/storage-assets`, and `git ls-remote origin refs/heads/stage6/storage-assets` read back
+`8e62c38` — the same SHA as local `HEAD` — when this section was last reconciled. **No guest is
+affected by any of it**: Stage 6 ships host-private upload and management only, preview is through a
+short-lived signed URL, and the published snapshot still asserts no `object_key` (§7, and B28 in the
+Stage 3 battery).
 
 ## Implemented foundations requiring a configured backend
 
@@ -394,9 +405,11 @@ npm audit --omit=dev --audit-level=high
 ```
 
 `npm run product:check` is the contract guard: **29 rules** over the active surfaces this tree scans
-(185 files at the current Stage 6 tree; that count has moved twice since the rule list was first
-written — once for the storage adapter and the host's file panel, once for the adapter's own unit
-battery) — retired brand names, fabricated social proof and per-guest pricing
+(**186 files** at `8e62c38`, from `q6-logs/s6-head-cert-8e62c38.log`; the count has moved three times
+since the rule list was first written — once for the storage adapter and the host's file panel, once
+for the adapter's own unit battery, and once for `8e62c38`'s panel tap-target test, which is the file
+that took it from the 185 every earlier certification printed) — retired brand names, fabricated
+social proof and per-guest pricing
 language, the retired scaffold vocabulary, which tables may be named outside the data adapter, the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets
