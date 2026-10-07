@@ -17,6 +17,17 @@
 // `prettier --no-semi` so the file stays readable. Prettier is not a project dependency;
 // no check reads this file's layout, only its structure.
 //
+// The Stage 6 regeneration is the exception to that second edit, and the exception is
+// recorded rather than smoothed over. CLI 2.119.0 prints the same unformatted stdout here;
+// `prettier` is not installed on this machine and nothing was installed to obtain it, so
+// the raw output was *diffed* against this file instead of formatted into it. The diff had
+// one line of schema in it — `wedding_assets.upload_status` in each of `Row`, `Insert` and
+// `Update`, at the position and with the optionality the generator itself chose — and that
+// delta was applied in this file's existing one-key-per-line style. Rule 1 of
+// `npm run dbtypes:check` is what makes this verifiable rather than merely tidy: it
+// compares every column of every public table against the migrations, so the claim is that
+// the file matches the schema the generator printed, not that it matches a formatter.
+//
 // That qualifier is load-bearing, because the previous version of this file had been
 // tidied further by hand. `NonNullable<Json>` had been replaced with `Json` on six NOT NULL
 // jsonb columns (in each of their `Row`, `Insert` and `Update` forms), and the guest door's
@@ -820,6 +831,7 @@ export type Database = {
           object_key: string
           size_bytes: number | null
           updated_at: string
+          upload_status: string
           wedding_id: string
         }
         Insert: {
@@ -832,6 +844,7 @@ export type Database = {
           object_key: string
           size_bytes?: number | null
           updated_at?: string
+          upload_status?: string
           wedding_id: string
         }
         Update: {
@@ -844,6 +857,7 @@ export type Database = {
           object_key?: string
           size_bytes?: number | null
           updated_at?: string
+          upload_status?: string
           wedding_id?: string
         }
         Relationships: [

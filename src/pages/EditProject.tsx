@@ -83,6 +83,7 @@ import AuthoringOutline from '@/components/invitation/AuthoringOutline';
 import AuthoritativeIssues from '@/components/invitation/AuthoritativeIssues';
 import { ContentNotice, useWeddingContentRows } from '@/components/invitation/ContentEditor';
 import TraditionPackPanel from '@/components/invitation/TraditionPackPanel';
+import WeddingAssetsPanel from '@/components/invitation/WeddingAssetsPanel';
 import PublicationPanel from '@/components/invitation/PublicationPanel';
 
 interface EditorState {
@@ -858,6 +859,10 @@ const EditProject = () => {
               </figure>
             ) : null}
           </section>
+
+          <Separator />
+
+          <WeddingAssetsPanel weddingId={id} />
 
           <Separator />
 
