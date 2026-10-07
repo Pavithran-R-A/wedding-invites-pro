@@ -1735,3 +1735,82 @@ run finished with no command of mine executing. At that slope the production bui
 a saving but a necessity: it would need its own ~18 MB plus output, and an `ENOSPC` in the middle of a gate produces an
 invalid attempt that has to be disclosed and re-measured, which costs more than it spares. Recorded here because the
 omission in §26.6 is a judgement about the machine, not a relaxation of the convention.
+
+## 27. The independent security pass finally ran, what a second reader confirmed, and the one inference it made that the battery has not measured (2026-10-07)
+
+**27.1 The instrument worked this time, and that is the finding §26.5 said it owed.** §26.5 recorded that the
+delegated reviewer had produced no report because Windows forbids `:` in a filename while plugin-scoped agent
+transcripts are named `agent-<plugin>:<agent-type>-<id>.jsonl` — the file existed only as a 0-byte truncated
+`agent-aecc` and its task record froze at `running`. This pass used a **non-plugin** agent type, whose transcript
+name contains no colon, and it delivered: `duration_ms=211236`, `tool_uses=20`, six questions and both open items
+answered from the files. It was briefed read-only, told the engine was down so anything needing the stack must be
+marked UNPROVEN rather than guessed, and told not to run npm, vitest, builds, docker or git writes because the §26
+certification was executing concurrently. `git status --short` after it showed the same two external untracked
+`pnpm-*` files and nothing else. Full report and my per-item verdicts: `q6-logs/s6-security-review-independent-01.log`.
+
+**27.2 It independently confirmed all six questions, and answered one of them better than §26 did.** Q1 (credential
+surface), Q2 (client-influenced server-assigned columns), Q3 (no public URL, signed URL never persisted), Q4 (error
+swallowing and removal order), Q5 (grants versus policies) and Q6 (the panel never claims `ready` early) came back
+VERIFIED at the same lines §26.2 cites, reached without reading §26 first. Its Q5 is the stronger argument of the
+two: §26.2 argued from the DDL that revoking `EXECUTE` on the three trigger functions costs nothing, whereas this
+pass pointed at battery cases that *already run as* `authenticated` and succeed (`80_asset_registry.sql:228`, `:390`,
+`90_storage_policies.sql:193`) against the case that asserts `authenticated` holds no `EXECUTE` on any of the three
+functions (`90:303-312`). That is behaviour as evidence rather than DDL as reasoning, which is this audit's usual
+standard, so it replaces my formulation.
+
+**27.3 Its three findings, checked against the files, produced no new proven defect.**
+*(1, medium)* the confirm edge's type half may compare one client value against itself — **this is §26.3 and M1,
+reached independently**, which is the useful part: a second reader with no stake in the adapter's design landed on
+the same unproven sentence in the migration (`20261006120000…sql:167-171`, `:37-38`). *(2, low)* `weddingAssets.ts:207`
+cleans a failed upload with `deleteRow` alone, so a refused upload that left bytes would produce the delete guard's
+"still in storage" refusal and the host would read a misleading sentence. Verified in the file — and **already
+disclosed by the code's own comment at `:203-206`**, which names exactly that consequence. It is reachable only
+through M2's mid-stream abort, so §26.4's discipline holds: no repair on an unproven condition. The repair it
+proposed (`retirePair` for `deleteRow`) was checked and is safe whether or not bytes exist — `staged → tombstoned`
+is legal (`20261006120000…sql:127-135` blocks only tombstoned-onward and ready-sideways) and a Storage `DELETE` over
+an absent key is the measured 200-with-`[]` — so it is the pre-named fix if the fault-injection case shows a partial
+object. *(3, low)* `is_generated` and the full `asset_kind` vocabulary including `generated_output` are client-writable
+(`20260925120400_stage2_assets_entitlements_secrets.sql:14-15`, `:25`). Verified, then graded down by two facts it
+could not have known: nothing in `src/` reads `is_generated` (only `types.ts:828`/`:841`/`:854` and
+`src/test/weddingAssetUploadRules.test.ts:282-284`, which asserts the adapter forwards the kind), and §19.3
+(`:895-896`) says the platform "*would*" produce such a derivative — conditional presentation, not a claim of
+enforcement. No published sentence is contradicted and no user-visible state is forged, so this is a Stage 2 schema-
+governance note carried forward, not a Stage 6 defect.
+
+**27.4 The one place where the independent reasoning overreached, and it is the place that matters.** It writes that
+UPL-04 "proves the bucket decides MIME on the declared header", therefore markup declared `image/png` "**would** be
+accepted". What UPL-04 (`stage6_storage.test.mjs:557-581`) measures is that a *disallowed declaration is sufficient to
+refuse* — real PNG bytes under `text/html` answered `415`. That does not establish that an allowed declaration is
+sufficient to *accept*, because a service may gate on the header and additionally sniff on the write path; the two
+propositions are different, and only the second one makes the confirm edge's type half self-comparing. Its own closing
+line concedes byte-sniffing is UNPROVEN on this host, so the overreach is in the sentence, not the conclusion. This is
+exactly the gap `UPL-07` in `q6-logs/s6-m1-upl07-draft.md` was written to close, and it is why that draft's expected
+values are three outcomes rather than one.
+
+**27.5 The pass settled a severity question §26 had left implicit: even in the bad case, this is integrity, not XSS.**
+It traced where asset bytes can land. The only consumer is `WeddingAssetsPanel.tsx:269-277`, an `<img src>` or an
+`<audio src>` chosen by `inlineMedia(asset.mimeType)` — never `innerHTML`, and the label at `:272` is React-escaped.
+The app's single `dangerouslySetInnerHTML` (`src/pages/EditProject.tsx:851`) is fed by `sanitizeSvg(design.previewSvg)`
+at `:613`, a platform template rather than a wedding asset. So if M1's accepted-and-ready branch is what the engine
+finds, the sentence to change is "refusing the type at the bucket is stronger than sanitising it later" — a claim about
+which layer enforces a type — not a claim that markup could execute. That distinction is what the repair has to be
+measured against, and it was not in §26.
+
+**27.6 Five structural reasons the audit had not stated, all verified here, none of them a hole in Stage 6.**
+Cross-wedding key squatting is impossible because of the *content* of the minted prefix — an owner-checked `wedding_id`
+plus the row `id` — together with `object_key UNIQUE` (`20260925120400…:19`); §26.2 argued only that a presented key is
+refused. The `..` and leading-slash CHECKs (`:20-22`) catch neither a single `.` segment nor a `%2e%2e` spelling, so
+they are belt-and-braces whose real protection is that no surface accepts a client key — a note for any future surface.
+A signed URL is a bearer artefact for its 60 s and hands the bytes to any holder regardless of RLS; it is never
+persisted (`WeddingAssetsPanel.tsx:97`, `:211`) and the panel's own copy says so (`:279-280`), but "never stored" was
+never a claim about reuse inside the TTL, and this is the honest limit of the mechanism. `label text` (`:16`) has no
+length CHECK, so an owner can write a long label to their own row — storage hygiene, carried forward with the
+`is_generated` note, no injection. And the two-host race surface is empty for a reason §26 never gave: the registry
+policies bind a wedding to a single `owner_user_id`, so only one account can ever hold a given row writable.
+
+**27.7 Net effect on the stage.** The security tier is no longer a self-review — the disclosure in §26.1/§26.5 is
+closed. No new defect was proven, so nothing was repaired, and the two measurements that decide the remaining open
+question (`UPL-07` for M1, a fault-injection case for M2) are unchanged and still engine-blocked, along with the HTTP,
+SQL and browser tiers. Probe 17 (`q6-logs/s6-engine-probe-17.log`, `timeout 10 docker version` → `124`) is the
+seventeenth consecutive unanswered engine probe, and free `C:` fell from 306,044 KB to 130,764 KB across §26's and
+§27's work while my own commands were the only ones running against it.
