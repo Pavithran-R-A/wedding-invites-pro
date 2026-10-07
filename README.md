@@ -88,7 +88,7 @@ still no customer-visible pack content:
 - The digest is computed in Postgres with core `sha256` and `encode`, **not** pgcrypto, so the
   guarantee does not depend on an extension being installed; the maintenance CLI renders the packet
   and computes nothing
-- **186 HTTP tests** across five files with real JWTs, including that none of `internal_api`'s nineteen
+- **220 HTTP tests** across six files with real JWTs, including that none of `internal_api`'s nineteen
   functions is reachable from a browser at all (the requested name never resolves in the exposed
   profile, so the answer is `404` rather than a permission error that would confirm existence)
 - A maintenance CLI, `node scripts/tradition-pack-admin.mjs`: eleven verbs, deliberately not a web
@@ -551,8 +551,8 @@ bash supabase/tests/api/run.sh
 `run.sh` reads `.env.local` (gitignored) and **refuses to run at all** unless `SUPABASE_LOCAL_URL` is a
 loopback host *and* its port matches the `[api]` port in this repository's `supabase/config.toml` — a
 mistaken pointer at someone else's stack fails both gates. It issues real sign-ups, real tokens and one
-tampered JWT, and asserts what comes back through HTTP. Five files, **186 tests, 0 failed, 0 skipped**,
-each printing its own total:
+tampered JWT, and asserts what comes back through HTTP. At the Stage 5 head that was five files, **186
+tests, 0 failed, 0 skipped**, each printing its own total:
 `stage3_security.test.mjs` (56 — isolation, the anonymous surface, what a customer may never
 do), `stage3_publication.test.mjs` (38 — the `api` surface, versions, credentials, the guest door,
 rotation and revocation; its 38th test is Stage 5's, which probes `internal_api`'s maintenance verbs and
@@ -565,10 +565,13 @@ HTTP, including that every reviewer, authorship and machine-disclosure column is
 the edge) and `stage5_admin_cli.test.mjs` (36 — the maintenance CLI against the real stack, each refusal
 paired with the mutation that proves the refusal is the tool's and not the test's).
 `run.sh` discovers its files by glob, so at the Stage 6 tree there is a **sixth**:
-`stage6_storage.test.mjs`, **33 tests**, which passed when run on its own against the running stack and
-has not been through the joint serial chain at this state (§18) — the same is true of the repaired
-`stage3_security.test.mjs`, measured alone at 56 pass / 0 fail. The totals above therefore describe the
-five files at the Stage 5 head, and are not silently widened.
+`stage6_storage.test.mjs`, **34 tests** — the 33 above plus `UPL-07`, the case that measures which
+half of the confirmation edge has content behind it. All six have since been through the joint serial
+chain together: **220 tests, 0 failed, 0 skipped** (capture `q6-logs/s6-api-run-04.log`, re-taken
+2026-10-07), and the runner's own residue check came back with every counter — weddings, `auth.users`,
+drafts, asset rows and bucket objects — at the zero it started from. `UPL-07`'s finding is a Stage 6
+defect that was repaired in the adapter rather than in the database; §36 of
+`docs/audits/stage-6-storage-assets.md` records what the tier does and does not now guarantee.
 `--local` is always explicit: `supabase link`, `db push`, `db pull` and
 `db reset --linked` are not part of this project's workflow and are never run.
 

@@ -2324,3 +2324,117 @@ operator record rather than in published copy.
 80, plus the historic stage 2–5 suites), the 33-case HTTP chain, UPL-07 revision 2, the `pg_roles`
 read, A13, and the browser tier with N1–N4 all still belong to §18's blocked order. Attribution fixes
 make the copy honest; they do not qualify the stage. Stage 6 remains **not qualified**.
+
+## 36. `UPL-07` ran on the recovered engine, found the defect it was built to find, and the type guarantee moved to the layer that holds the bytes (2026-10-07)
+
+The engine came back at 21:46:50 (`q6-logs/s6-engine-runbook.md` §24 carries the fresh-daemon proof) and the tiers were taken in the recorded order: stack readiness,
+the whole HTTP chain, both SQL chains, `UPL-07`, `pg_roles`, `A13`. The captures are
+`q6-logs/s6-api-run-04.log` (`api_run_exit_code=0`, 31,188 masked bytes, `leak_total=0`,
+`mask_check=PASS`), `q6-logs/s6-sql-chain-05.log` (`sql_chain_exit_code=0`, registry 90 and storage
+policy 80, plus every historic stage 2-5 suite `PASSED`), `q6-logs/s6-a13-isolated-01.log`, and
+`q6-logs/s6-api-run-03.log` — the earlier red run (`api_run_exit_code=1`) that carried the finding,
+whose failure is the subject of this section rather than of a repair note.
+
+**What was measured, quoted from the capture.**
+
+    UPL-07 html: put=200 ... recorded mime=image/png size=70 | served=200 bytes=70 prefix=[<html><body><img src=x o]
+    UPL-07 html: confirm=200 code=none message=none state=ready
+    UPL-07 svg:  put=200 ... recorded mime=image/png size=83 | served=200 bytes=83 prefix=[<svg xmlns="http://www.w]
+    UPL-07 svg:  confirm=200 code=none message=none state=ready
+
+Markup bytes, declared as an accepted type, were stored, were served back as the same bytes, and the
+row reached `ready` describing them as `image/png`. Of the three outcomes §26.3 pre-registered for this
+instrument (`:1666`, and the case as run is the revision §32 built), the run landed on outcome 3 — the one that says the case must fail rather than record.
+
+**The cause is architectural, and it was read out of the stack rather than argued.** `storage.objects`
+in this build has no column that holds payload bytes at all (the measured column list), and the
+storage service runs `STORAGE_BACKEND=FILE` with `FILE_STORAGE_BACKEND_PATH=/mnt`, keeping bytes on
+disk. A `SECURITY INVOKER` trigger that can see only that table can therefore compare a row's claim
+against `metadata`, and the two metadata keys it reads play different games: `->>'size'` is the length
+the service measured (70 and 83 above, equal to the served length in both cases), while
+`->>'mimetype'` is the `Content-Type` the uploader sent. So the size half of the confirmation edge has
+content behind it and the type half is a claim repeated back to itself. That is why `UPL-07` branch 1
+had to fail: nothing was broken in the SQL, the SQL was never able to hold that guarantee.
+
+**Statements this supersedes, named here and not edited anywhere.** The applied migration
+`20261006120000_stage6_wedding_asset_storage.sql:37-38` ("refusing the type at the bucket is stronger
+than sanitising it later") describes a declaration gate as if it were a content gate; `:167-171` ("the
+claim is checked against the bytes rather than trusted") describes the metadata comparison as a byte
+comparison. §26.3's conditional at `:1721-1722` — "If the service sniffs, both sentences are exactly
+right" — is now answered by its other branch: the service does not sniff on this host. And `:1662`'s
+sentence about size being measured from real bytes is *confirmed* by these two lines (recorded 70 =
+served 70, recorded 83 = served 83) where §20 had said it was only inferred. The migration file is
+deliberately untouched: editing a comment in an applied migration would make the tracked file disagree
+with what is deployed, and §34's load-bearing property — `git diff eb88405 HEAD -- supabase/` prints
+nothing, so a replay at this head is a replay of this head's own files — is worth more than a tidy
+comment.
+
+**The repair, and where it had to go.** `src/integrations/supabase/weddingAssets.ts` gained
+`SIGNATURE_BYTES`, `asciiRun`, `matchesSignature` and `contentRefusal`, and `uploadAsset` now calls
+`contentRefusal` immediately after `fileRefusal` and before `registerAsset`, so a file whose head does
+not belong to the type it declares is refused without a row, without a key and without a byte leaving
+the tab. The markers are the four accepted types' own: PNG's eight-byte signature, JPEG's `FF D8 FF`,
+WebP's `RIFF`...`WEBP` pair, and MP3's `ID3` tag or frame sync (`FF` then 111xx — a JPEG's second byte
+`D8` fails the `E0` mask, so the image and audio sets do not overlap). A new refusal sentence,
+`NOT_THOSE_BYTES`, carries it, and the three places in this module that asserted database-side content
+verification were restated to what the mechanism does.
+
+**The unit tier covers it, and the coverage was probed rather than assumed.**
+`src/test/weddingAssetUploadRules.test.ts` grew a `describe` block with five cases: markup behind an
+allowed declaration (both HTML and SVG heads) refused with zero steps recorded; a real signature
+belonging to *another* accepted type refused, which is what makes the gate per-type rather than a hunt
+for any magic; a head too short for the claim refused; all four accepted types accepted when their own
+signature is present, which is what stops the gate from quietly deleting a class; and the same bytes
+re-declared, where the JPEG head passes under `image/jpeg` and refuses under `image/png`. The file now
+holds 31 cases and the whole suite 473 (`Test Files 32 passed`, `Tests 473 passed`). Mutating
+`contentRefusal` to `return null` failed 4 of those 31, so the suite notices the gate; the mutation was
+reverted and `grep -c MUTATION-PROBE` returns 0. The stand-in `File` gained a third fact (the head,
+through `slice().arrayBuffer()`) and the file's own boundary paragraph was rewritten to say that the
+byte reading is still the browser's, not this tier's.
+
+**What the HTTP tier asserts now, and why that is not the case being weakened.** `UPL-07` keeps its
+payloads and its prints and now asserts five facts instead of branching on guesses: the PUT is accepted
+(measured, and the reason the byte gate cannot live here), the served bytes still begin with `<` (so a
+green run cannot be a run that silently measured an image), the recorded type equals the *declaration*,
+the recorded size equals the served length, the matching claim reaches `ready`, and a same-state
+re-description to `text/html` is refused `403`/`42501` with the message naming the disagreement and the
+row left unchanged — the guard's `:121-129` path falling through to the confirmation at `:138`, which
+no case in this file had walked before. Two of those assertions are change detectors, not
+characterisations: if a future storage build sniffs on write, `recordedMime` stops equaling the
+declaration and the case fails with instructions to move the gate server-side; if the recorded size
+stops matching the served length, the edge has lost the one comparison with evidence behind it and the
+case fails for that reason. The guarantee did not disappear — it moved to a layer that can deliver it
+and is tested there, which is the only direction this stage's "no test weakening" rule permits.
+
+**The residual, stated plainly because a repaired comment is not a closed boundary.** The adapter is
+not a privilege boundary. A signed-in caller who bypasses `uploadAsset` and speaks REST and Storage
+directly can still store markup behind an `image/png` declaration and confirm it, and nothing in this
+stack's database can refuse that, for the file-system reason above. What stands between such a row and
+a browser is: the bucket's declaration gate (`UPL-04` measured it refusing `text/html` and
+`image/svg+xml` as *declared*), the object's own recorded type of `image/png`, a private bucket whose
+bytes are reachable only by the owner's session or a 60-second signed URL, and the renderer's
+sanitising boundary (`src/test/sanitizeSvg.test.ts`, product-contract rule `markup-injection-sink`),
+which is the control Stage 0 placed there for exactly this reason. So invariant I4's type half is
+**not** a database invariant on this backend, and attacks A8/A9 are answered by the upload gate plus the
+renderer boundary rather than by storage. Whether a stored asset actually renders through that boundary
+is a browser-tier question, and the browser tier has not run yet.
+
+**Consequence for the stage's status: Stage 6 is still not qualified.** After this change the tier
+totals are HTTP 220 tests / 0 failed across six files (`s6-api-run-04.log`), SQL 90 registry + 80
+storage-policy with all historic suites green (`s6-sql-chain-05.log`), unit 473, with `typecheck` exit
+0, `product:check` 186 active files / 0 violations, `lint` 0 errors and 9 warnings. What remains is the
+browser tier with N1-N4 and §33's a11y re-measurement, and because `src/` moved, §21.1's "no rebuild
+needed" finding no longer applies — `dist/` has to be rebuilt from the head that carries this section
+before that tier means what it claims.
+
+**36.1 Two operator findings, recorded because they generalise.** (1) The `product:check` active-file
+count is a *filesystem walk*, so the number a reader can reproduce depends on what the tree holds at
+that moment — this stage has seen 185, 186 and 193 printed from trees whose tracked contents differed by
+build output and by installed-package layout. The published figure therefore keeps its capture ID
+(`q6-logs/s6-head-cert-8e62c38.log`) rather than being restated as "now", which is §35's rule applied
+one stage later. A draft edit of the README from 186 to 193 was made during this sitting, re-measured
+against the checker at the current tree (186), and reverted rather than committed — an uncommitted
+figure is a note, a committed one is a claim. (2) §19.1's parse-before-the-scarce-gate discipline was
+followed: `node --check` on the battery at exit 0 before the chain was started, and the tier was
+re-run whole rather than only the changed file, because the residue check is a property of the serial
+chain and not of one file.
