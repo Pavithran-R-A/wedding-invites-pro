@@ -1356,3 +1356,68 @@ were both measured at `dbf02e4`, which already contains §20 and §21. The conve
 docs-only head created after a section is certified by re-taking the gate set at it and recording the run in
 `q6-logs/` under that head's own SHA, rather than by writing a predicted result into the document it is certifying.
 A reader who wants the number at the final head reads the log named by the closing report, not the prose.
+
+## 23. The three things provable without an engine, taken at the head §22 created (2026-10-07)
+
+**23.1 Why this section exists while the stack is down.** The closure tier is engine-bound, but three obligations were
+still unmet and none of them needed Postgres: the gate set at the head §22's own commit created (which §22.7 promised
+rather than predicted), I10 over the two surfaces no added-line scan has ever covered — the whole tracked tree and this
+stage's own evidence directory — and a static answer to the question "when the engine comes back, will this runner
+actually execute the batteries, and is the Stage 0 billing guard still asserted at a head that archived it?" All three
+are answered below by measurement; none of them is a substitute for the tiers §23.6 still owes.
+
+**23.2 The gates at `5470858`.** `q6-logs/s6-final-head-gates-02.log`, each `$?` read beside its own command, tree
+tracked-clean before and after, `head_after` equal to `head`: typecheck **0**, `product:check` **0** (185 active files,
+0 violations), `dbtypes:check` **0** (20 migrations; 19 public + 10 non-client tables; 19 client tables; 34 query column
+groups, 0 findings), lint **0** (0 errors, 9 warnings), test **0** (31 files, 466 tests, 108.65s). So the head that
+carries §22 has its own green run rather than inheriting `dbf02e4`'s, which is what §22.7 said would happen.
+
+**23.3 The SQL runners, verified without a database.** `bash -n` over `supabase/tests/api/run.sh` and the `rls`,
+`stage2`, `stage4`, `stage5`, `stage6` runners returns **0 for all six** — a syntax error discovered now costs one
+engine-blocked afternoon less than one discovered when the stack returns. Then the wiring itself, read rather than
+trusted: `stage6/run.sh` enumerates Stage 2's outcome suite (per chain), Stage 3's draft-invariant and publication
+suites, Stage 2's attack and catalog suites **in the same order `stage2/run.sh` uses** (outcome before attacks, because
+the attack suite seeds rows the outcome counts were measured against), then Stage 4's two suites, Stage 5's three, and
+Stage 6's own two via `[89]*.sql`, with a guard that exits 1 if that glob matches nothing — the §13.2 failure shape,
+where an invisible stage still prints a pass. Each suite's transaction mode was cross-checked against the runner that
+owns it: `50_pack_release` `tx` and `60_reviewed_fixture` `rollback` match `stage4/run.sh`, and Stage 5's three suites
+are `tx` in `stage5/run.sh` and `tx` here, with its `*_rollback.sql` glob genuinely empty (three files, none of them
+rollback-named). No suite is executed under a mode its own runner does not use.
+
+**23.4 The coverage question that resolves to "not a hole", answered from the files.** `bash supabase/tests/rls/run.sh`
+— the Stage 0 gate ADR 0005 calls *the* gate, 24 assertions, the one that grew the paid-state INSERT cases — is **not**
+invoked by the Stage 6 chain, and reading the two relevant migrations says that is correct rather than an oversight.
+Its selector is `grep -vE '_stage([2-9]|[1-9][0-9]+)_'`, a range rather than an alternation for the reason printed
+beside it: it deliberately qualifies the *published* Stage 0/1 shape and aborts on anything later. And at this head the
+object it guards no longer exists — `20260925120700_stage2_archive_legacy_scaffold.sql:52` runs
+`DROP TRIGGER IF EXISTS projects_paid_status_guard ON public.projects` and line 73 moves the enum out with
+`ALTER TYPE public.paid_status SET SCHEMA legacy`. So "the Stage 0 suite was not re-run at the Stage 6 head" reads like
+a gap and is not one; the live equivalent of the property — a client may not mint its own billing state — is asserted
+by `supabase/tests/stage2/20_attacks.sql`, which names `entitlements` **29** times, including INSERT probes at lines
+356, 435, 459 and 1298–1314 on the chain this runner does execute. This section records the reasoning because the
+census line alone would have invited someone to re-open it.
+
+**23.5 I10 over the two surfaces the added-line scans never reached** (`q6-logs/s6-i10-treesweep-01.log`). The tracked
+tree is **256 files**; over it, every value-shaped pattern returns 0 files and 0 lines: `service_role` followed by 20+
+key characters, `sb_secret_` likewise, a three-segment JWT, `AKIA…`, `ghp_…`, `github_pat_…`, `xox[baprs]-…`, `AIza…`,
+an `ANON_KEY=` with a value, and a 15+ character hosted `supabase.co` ref. This stage's evidence directory is
+**152 files / 816 kB**, outside the repo and never committed, and its value-shaped privileged patterns also return 0.
+Every non-zero match was read rather than counted; they are **six files** across four classes. Three lines of this audit
+(1015, 1253, 1335) name the sweep's own pattern labels. `.env.example:12` holds the literal placeholder
+`https://your-project-ref.supabase.co`, and the Stage 5 audit quotes that same placeholder. `s6-final-head-build-01.log`
+matches the secret-prefix regex through its own variable name, `sb_secret_followed_by_token_chars`, because underscores
+are word characters. And the two shape logs carry Storage **signed-URL tokens** from an earlier HTTP battery run (`…/object/sign/wedding-assets/…?token=eyJhbGciOi…`). That last one is the
+match worth stating plainly instead of waving: I10 forbids a privileged key, and a signed URL is not one — it is an
+expiring grant for exactly one object, issued by the local stack to a session that already owned the row, its decoded
+body is the object path (`{"url":"wedding-assets/weddings…`), and the stack that minted it is the one currently
+refusing to start. What would violate I10 is a `service_role` value, and there is none in any surface swept here:
+`src`, `index.html` and `dist` contain **0** files even with the bare role *name*, while `supabase/migrations` (11
+files), `supabase/tests` (23) and `docs` (11) name that role because granting to it and refusing it are the point of
+those files.
+
+**23.6 What this section does not prove, unchanged.** None of the above observes a running system. No header has been
+shown not to leave the browser, no REST path shown unreachable, no byte shown written or refused, no signed URL shown
+to expire — those are the HTTP tier's 33 cases, the six SQL batteries' 90 + 80 plus the historic suites re-measured at
+this head, and the browser tier with its three network observations. The probe taken while writing this section
+returned `engine_probe_exit=124` again (`q6-logs/s6-engine-probe-11.log`). No merge, no main, no deploy, no hosted
+project, no Stage 7.
