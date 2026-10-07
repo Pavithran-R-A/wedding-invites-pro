@@ -1880,3 +1880,55 @@ remote equal to local. Nothing new was proven about the implementation, so nothi
 alone: the SQL batteries (90/80 plus historic stage2–5), the HTTP tier, `UPL-07`/M1, the `pg_roles` measurement §5
 requires before §25.3's recalled ranking can be corrected, and the browser tier with its four network observations.
 The boundary is unchanged — no merge, no `main`, no deploy, no hosted Supabase, no Stage 7.
+
+## 29. The published head is five gates green, and nineteen engine probes finally got a root cause (2026-10-07)
+
+**29.1 §28's head is certified.** `2b0d101` (`1 file changed, 66 insertions(+)`, the audit alone) gave
+`typecheck`, `product:check`, `dbtypes:check`, `lint`, `test` all at `gate_exit_code=0`;
+`Product contract OK — 185 active file(s) scanned, 0 violation(s)`; `Database contract OK — 20 migration
+file(s)`, `19 public + 10 non-client table(s)`, `34 query column group(s) reconciled, 0 finding(s)`;
+lint `9 problems (0 errors, 9 warnings)`; `Test Files 31 passed (31)` / `Tests 466 passed (466)`;
+`local_equals_remote=YES`, `worktree_tracked_changes=0`, the two pnpm files still unstaged and untracked.
+Evidence: `q6-logs/s6-section29-cert-01.log` and `q6-logs/s6-section29-test-raw.log`.
+
+**29.2 The instrument lied once and was re-measured rather than believed.** In that first run the test gate
+printed `gate_exit_code=0` but its capture (12,900 bytes) ended at the last per-test line with **no
+`Test Files / Tests / Duration` summary** — compare 19,037 bytes with the block at `2aecb11` minutes
+earlier. A zero exit code does not carry a count, and the counts are what this audit cites. No `FAIL`
+line and no non-zero code appeared in either capture, so it is classified as a truncated-report gap
+during a violent disk swing, not a test failure; the gate was re-run alone (free `C:` 938,384 KB) and gave
+`code=0` with `31 passed (31)` / `466 passed (466)` in 111.16 s. The first capture is recorded as a gap,
+not used as evidence.
+
+**29.3 Disk, restated because the picture changed.** Free `C:` over one sitting: 464,168 → 204,444 →
+353,684 → 478,988 → 230,176 → 944,552 → 1,556,328 KB. It roughly tripled with nothing of mine releasing
+it, so §26.8's "we are the ones consuming it" reading was wrong for the upward direction: this is a shared
+host whose pressure moves both ways. The graduated floor stays — it costs nothing and it is what caught
+§27's gap — but the earlier framing that the gate set is the driver is corrected here.
+
+**29.4 Root cause of the nineteen probes, located inside the VM.** After the human's restart, the engine
+still answered nothing, and the diagnosis got three layers deeper:
+- `wsl --start -d docker-desktop` is rejected by this WSL build; starting the distro by *invoking* it
+  works, and `wsl -l -v` then reports `docker-desktop  Running` — so the VM filesystem comes up on demand.
+- With the VM up, five more `docker version` polls over ~2.5 minutes all gave `code=124`, and inside the
+  VM: `ps -ef | grep -E 'dockerd|containerd|vpnkit'` matched nothing, and `/var/run/docker.sock` does not
+  exist there. **The engine VM is alive with no daemon running in it.**
+- `com.docker.backend` and `Docker Desktop` have `StartTime` 6 Oct 15:10 — the supervisor that launches
+  `dockerd`, `vpnkit` and the Windows named-pipe binding was never recycled, which is exactly the failure
+  mode nineteen `exit=124` probes describe. The CLI is healthy on both sides (WSL reports Docker 29.8.1;
+  `docker context ls` answers and shows `desktop-linux` on the expected pipe, and Ubuntu's
+  `/var/run/docker.sock` exists but is the same dead path).
+Four repairs were considered and refused: hand-starting `dockerd` inside Docker Desktop's own VM would
+produce an engine with no port forwarding and no pipe binding on a host another project shares;
+`wsl --shutdown` recycles the Ubuntu distro too; pruning Docker storage and deleting another project's
+data remain refused; and installing a system Postgres for the runner's `STAGE6_LOCAL=1` path would both be
+a silent system dependency and a different server build than the `postgres:16-alpine` the batteries were
+written against. What is needed is a real Docker Desktop engine restart from the GUI — a human action.
+
+**29.5 Stage position.** Node tier: complete at the published head. Blocked on §29.4's single cause: the
+SQL batteries (90 registry / 80 policy, plus the historic stage2–5 suites), the HTTP tier, `UPL-07`/M1, the
+`pg_roles` row §5 requires before §25.3's recalled ranking can be replaced, and the browser tier with its
+four network observations. No repair was made in this section — nothing new was proven about the
+implementation, and the only defect-class candidate (M1) has its instrument staged at
+`q6-logs/s6-m1-upl07-draft.md`, unapplied, waiting for an engine. Boundary unchanged: no merge, no `main`,
+no deploy, no hosted Supabase, no Stage 7.
