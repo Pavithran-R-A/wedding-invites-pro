@@ -6,13 +6,14 @@
 // adapter reaches for on its own, the payload it sends, and the order of the calls it makes.
 //
 // Boundary, stated because a passing suite here proves less than it looks like it does. There is
-// no network, no PostgREST, no Storage service and no Postgres in this file. `fileRefusal`'s
-// verdicts are checked as *decisions*, not as bytes: the file object stands for the two facts the
-// adapter reads off a `File` (`size` and `type`) and passes through untouched, so nothing here can
-// show that a browser reads a real file's size or type correctly. Whether the bucket actually
-// refuses a 5 MiB + 1 upload, whether `allowed_mime_types` is enforced at the edge, whether the
-// minting trigger refuses a presented key and whether the confirmation edge compares claims to
-// objects — those are the SQL tier (`supabase/tests/stage6/`) and the HTTP tier
+// no network, no PostgREST, no Storage service and no Postgres in this file. `fileRefusal`'s and
+// `contentRefusal`'s verdicts are checked as *decisions*, not as bytes: the file object stands for
+// the three facts the adapter reads off a `File` (`size`, `type` and the head it slices) and passes
+// through untouched, so nothing here can show that a browser reads a real file's size, type or
+// first bytes correctly. Whether the bucket actually refuses a 5 MiB + 1 upload, whether
+// `allowed_mime_types` is enforced at the edge, whether the minting trigger refuses a presented key
+// and whether the confirmation edge compares claims to objects — those are the SQL tier
+// (`supabase/tests/stage6/`) and the HTTP tier
 // (`supabase/tests/api/stage6_storage.test.mjs`), and no assertion below may be read as them.
 //
 // What a refusal must mean here is specific: the adapter's own rule is that nothing is asked of the
@@ -175,9 +176,40 @@ const CEILING = 5242880;
 const READ_BACK_KEY = "weddings/00000000-0000-4000-8000-000000000000/photo/99999999-9999-4999-8999-999999999999";
 const PREVIOUS_KEY = "weddings/00000000-0000-4000-8000-000000000000/photo/88888888-8888-4888-8888-888888888888";
 
-// A `File` is read for two facts and then passed through, so the stand-in carries exactly those
-// two. Producing a real 5 MiB buffer would measure the browser, not this adapter.
-const file = (size: number, type: string): File => ({ size, type, name: "upload" }) as unknown as File;
+// A `File` is read for three facts and then passed through, so the stand-in carries exactly those
+// three. Producing a real 5 MiB buffer would measure the browser, not this adapter.
+const ascii = (run: string): Uint8Array => new Uint8Array([...run].map((char) => char.charCodeAt(0)));
+
+/** One head per accepted type, long enough for the longest marker the adapter looks for (WebP's
+ *  second half sits at byte 8). These are the same markers `matchesSignature` names, so a case that
+ *  sends one is asserting the adapter's *decision*, not the existence of the format. */
+const PNG_HEAD = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
+const JPEG_HEAD = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0]);
+const WEBP_HEAD = new Uint8Array([...ascii("RIFF"), 0, 0, 0, 0, ...ascii("WEBP"), 0x56, 0x4c]);
+const MP3_HEAD = new Uint8Array([...ascii("ID3"), 3, 0, 0, 0, 0, 0]);
+/** Markup, sent behind a declaration the bucket accepts — the exact shape the Stage 6 HTTP battery
+ *  measured as stored-and-confirmed, and the reason this gate exists at all. */
+const HTML_HEAD = ascii("<html><body><img src=x onerror=alert(1)>");
+const SVG_HEAD = ascii('<svg xmlns="http://www.w3.org/2000/svg" onload=alert(1)>');
+
+const HEAD_BY_TYPE: Record<string, Uint8Array> = {
+  "image/png": PNG_HEAD,
+  "image/jpeg": JPEG_HEAD,
+  "image/webp": WEBP_HEAD,
+  "audio/mpeg": MP3_HEAD,
+};
+
+const file = (size: number, type: string, head?: Uint8Array): File => {
+  const bytes = head ?? HEAD_BY_TYPE[type] ?? PNG_HEAD;
+  return {
+    size,
+    type,
+    name: "upload",
+    // `contentRefusal` takes the head through the same two calls a browser would: `slice` then
+    // `arrayBuffer`. Handing it a Blob stand-in keeps this file off the browser's byte reading.
+    slice: () => ({ arrayBuffer: () => Promise.resolve(bytes.slice().buffer) }),
+  } as unknown as File;
+};
 
 const draft = (overrides: Partial<AssetDraft> = {}): AssetDraft => ({
   assetKind: "photo",
@@ -282,6 +314,63 @@ describe("the pre-flight gate: a refusal that asks for nothing", () => {
     const out = await uploadAsset(WEDDING, draft({ assetKind: "generated_output" }), file(1024, "image/png"));
     expect(out.error).toBe(null);
     expect(fake.payload("insert")).toMatchObject({ asset_kind: "generated_output" });
+  });
+});
+
+describe("the byte gate: a type claim that has to mean the file's own head", () => {
+  // The shape the Stage 6 HTTP battery (`UPL-07`, capture `s6-api-run-03.log`) measured reaching a
+  // running stack: markup bytes behind a declaration the bucket accepts. The server answered that the
+  // object was stored as declared, so this gate is the only place in the product that compares the
+  // claim to the bytes.
+  it("refuses markup bytes declared as an accepted image type, and asks the stack for nothing", async () => {
+    const html = await uploadAsset(WEDDING, draft(), file(HTML_HEAD.length, "image/png", HTML_HEAD));
+    expect(html.error).toMatch(/does not hold the bytes/);
+    expect(fake.steps()).toEqual([]);
+
+    const svg = await uploadAsset(WEDDING, draft(), file(SVG_HEAD.length, "image/png", SVG_HEAD));
+    expect(svg.error).toMatch(/does not hold the bytes/);
+    expect(fake.steps()).toEqual([]);
+  });
+
+  it("refuses a real signature that belongs to another accepted type, so the gate is per-type and not a hunt for any magic", async () => {
+    const out = await uploadAsset(WEDDING, draft({ mimeType: "image/webp" }), file(1024, "image/webp", PNG_HEAD));
+    expect(out.error).toMatch(/does not hold the bytes/);
+    expect(fake.steps()).toEqual([]);
+  });
+
+  it("refuses a file too short to carry the signature it claims", async () => {
+    const out = await uploadAsset(WEDDING, draft(), file(2, "image/png", new Uint8Array([0x89, 0x50])));
+    expect(out.error).toMatch(/does not hold the bytes/);
+    expect(fake.steps()).toEqual([]);
+  });
+
+  it("sends each accepted type whose own signature is present, so no class is refused by the gate", async () => {
+    const cases: Array<[string, string, Uint8Array]> = [
+      ["photo", "image/png", PNG_HEAD],
+      ["photo", "image/jpeg", JPEG_HEAD],
+      ["photo", "image/webp", WEBP_HEAD],
+      ["audio", "audio/mpeg", MP3_HEAD],
+    ];
+    for (const [assetKind, mimeType, head] of cases) {
+      fake.planDb(okInsert, okRow(ROW, READ_BACK_KEY, "ready"));
+      fake.planStorage({ upload: noBytes() });
+      const out = await uploadAsset(WEDDING, draft({ assetKind, mimeType }), file(1024, mimeType, head));
+      expect(`${assetKind}/${mimeType}: ${out.error}`).toBe(`${assetKind}/${mimeType}: null`);
+      expect(fake.ops()).toEqual(["db:insert", "storage:upload", "db:update"]);
+    }
+  });
+
+  it("reads the head from the file rather than from the declaration, so a re-declared file cannot talk its way past", async () => {
+    // Same bytes, two claims: the JPEG signature is what decides, not the string in the draft.
+    fake.planDb(okInsert, okRow(ROW, READ_BACK_KEY, "ready"));
+    fake.planStorage({ upload: noBytes() });
+    const honest = await uploadAsset(WEDDING, draft({ mimeType: "image/jpeg" }), file(1024, "image/jpeg", JPEG_HEAD));
+    expect(honest.error).toBe(null);
+    fake.planDb();
+
+    const relabelled = await uploadAsset(WEDDING, draft(), file(1024, "image/png", JPEG_HEAD));
+    expect(relabelled.error).toMatch(/does not hold the bytes/);
+    expect(fake.steps()).toEqual([]);
   });
 });
 

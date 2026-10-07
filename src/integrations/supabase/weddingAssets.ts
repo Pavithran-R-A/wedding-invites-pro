@@ -25,11 +25,12 @@
 //     the publishable anon one, so invariant I10 holds by inspection — and deliberately nothing in
 //     this comment names the privileged role, because a credential sweep of `src/` would otherwise
 //     have to explain this file to itself.
-//   * It validates only the two facts the bucket itself enforces — the allowed MIME set and the
-//     5 MiB ceiling — and does it before any byte leaves the tab, because the bucket's refusal
-//     arrives as a storage error the host cannot read. The rest of the vocabulary (`asset_kind`,
-//     the non-blank name) stays the database's: an unknown kind is answered by its CHECK, and no
-//     copy of that list is kept here to rot. `WeddingAssetsPanel.tsx` offers four kinds to click,
+//   * It validates three things and nothing more. Two of them restate what the bucket itself
+//     enforces — the allowed MIME set and the 5 MiB ceiling — because the bucket's refusal arrives
+//     as a storage error the host cannot read. The third is the file's own signature bytes, which
+//     the server cannot check at all (see `contentRefusal`). Everything else, `asset_kind` and the
+//     non-blank name included, stays the database's: an unknown kind is answered by its CHECK, and
+//     no copy of that list is kept here to rot. `WeddingAssetsPanel.tsx` offers four kinds to click,
 //     which is a presentation list and not a second rule — `generated_output` is absent because it
 //     names a derivative the platform would produce rather than a file a host uploads, and any kind
 //     the table does not know is still answered by the CHECK rather than by that list.
@@ -41,7 +42,9 @@
 // passing by ignoring the code. What still has not happened is a call from this module to a running
 // stack: the Stage 6 HTTP battery speaks REST and Storage directly rather than through these
 // functions, and the browser tier has not run at all. Every statement above about what the database
-// does was read off the migration and the Stage 6 SQL battery, not measured through an adapter call.
+// does was read off the migration, the Stage 6 SQL battery and the HTTP battery's `UPL-07` case —
+// the last of those is where the confirmation edge was put markup bytes behind an allowed
+// declaration and answered that the object was stored as declared.
 
 import { supabase } from './client';
 import { describe, codeOf } from '@/lib/safeError';
@@ -81,6 +84,8 @@ const TOO_LARGE = `the file is larger than the ${Math.round(MAX_BYTES / 1024 / 1
 const UNSUPPORTED_TYPE = 'the file is not one of the accepted types: a JPEG, PNG or WebP image, or an MP3';
 const EMPTY_FILE = 'the file has no bytes in it';
 const KIND_NEEDED = 'choose what kind of asset this is before uploading';
+const NOT_THOSE_BYTES =
+  'the file does not hold the bytes of the type it says it is, so nothing was uploaded';
 /** 42501 on the confirmation edge means the row's claim about the bytes did not match the object
  *  found at the minted key — the one refusal where "upload it again" is the host's next move. */
 const PERMISSION_REFUSED = '42501';
@@ -99,7 +104,9 @@ export interface AssetEntry {
 }
 
 /** A host's own words about the file, as the form holds them. The size and type are what the row
- *  will *claim*; the confirmation edge is where the database checks those claims against bytes. */
+ *  will *claim*. The confirmation edge tests the size claim against the object's measured length,
+ *  which is content-derived; it tests the type claim against the MIME the service recorded from the
+ *  uploader's own header, so `contentRefusal` is what makes this draft's type mean something. */
 export interface AssetDraft {
   assetKind: string;
   label: string;
@@ -144,6 +151,45 @@ const fileRefusal = (draft: AssetDraft, file: File): string | null => {
   return null;
 };
 
+/** The head length the signatures below need. WebP is the longest: `RIFF` at byte 0 and `WEBP` at
+ *  byte 8, so 12 bytes; 16 leaves room for a type whose marker sits further in. */
+const SIGNATURE_BYTES = 16;
+
+const asciiRun = (head: Uint8Array, from: number, to: number): string =>
+  head.length >= to ? String.fromCharCode(...head.subarray(from, to)) : '';
+
+/** Does the file's own first bytes belong to the type it declares? Each accepted type is named by a
+ *  marker that no other accepted type can produce: PNG's eight-byte signature, JPEG's `FF D8 FF`
+ *  start-of-image, WebP's `RIFF`...`WEBP` pair, and an MP3's `ID3` tag or a frame sync (`FF` followed
+ *  by 111xx — `D8`, the JPEG second byte, fails the `E0` mask, so the two sets do not overlap). */
+const matchesSignature = (head: Uint8Array, mimeType: string): boolean => {
+  switch (mimeType) {
+    case 'image/png':
+      return head.length >= 8
+        && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, index) => head[index] === byte);
+    case 'image/jpeg':
+      return head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+    case 'image/webp':
+      return asciiRun(head, 0, 4) === 'RIFF' && asciiRun(head, 8, 12) === 'WEBP';
+    case 'audio/mpeg':
+      return asciiRun(head, 0, 3) === 'ID3' || (head.length >= 2 && head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
+    default:
+      return false;
+  }
+};
+
+/** Why the bytes are checked here rather than by the database. Measured on this stack (HTTP battery
+ *  case `UPL-07`, capture `s6-api-run-03.log`): markup PUT with an allowed declaration was stored,
+ *  `storage.objects.metadata->>'mimetype'` came back equal to the declaration the same client sent,
+ *  and the confirmation edge accepted the row's matching claim — because `storage.objects` has no
+ *  byte column in this build (`STORAGE_BACKEND=FILE`), so a trigger here can only compare claims to
+ *  metadata, never to content. The size half of that edge *is* content-derived and stays; the type
+ *  half only holds where the bytes are, which is this side of the wire. */
+const contentRefusal = async (draft: AssetDraft, file: File): Promise<string | null> => {
+  const head = new Uint8Array(await file.slice(0, SIGNATURE_BYTES).arrayBuffer());
+  return matchesSignature(head, draft.mimeType) ? null : NOT_THOSE_BYTES;
+};
+
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
@@ -176,9 +222,11 @@ export async function previewAsset(objectKey: string): Promise<QueryResult<strin
 // ---------------------------------------------------------------------------
 
 /**
- * Steps 1-3 of §5.3, as one call: register (no key supplied), upload the bytes to the key the
- * database minted, then confirm — where the trigger re-reads `storage.objects` and refuses if the
- * row's claimed type and size are not what those bytes actually are.
+ * Steps 1-3 of §5.3, as one call: check the bytes, register (no key supplied), upload the bytes to
+ * the key the database minted, then confirm — where the trigger re-reads `storage.objects` and
+ * refuses if the row's claimed size is not the object's measured length, or its claimed type is not
+ * the MIME the service recorded for that object. The recorded type is the uploader's own declaration
+ * (see `contentRefusal`), which is why the markup check happens here rather than there.
  *
  * A failure at the upload or confirmation step rolls the row back rather than leaving it behind:
  * `staged` with no object is orphan class O2, and the honest way to avoid it is to remove the row
@@ -192,6 +240,10 @@ export async function uploadAsset(
 ): Promise<QueryResult<AssetEntry>> {
   const refusal = fileRefusal(draft, file);
   if (refusal !== null) return refused(refusal);
+  const byteRefusal = await contentRefusal(draft, file);
+  if (byteRefusal !== null) return refused(byteRefusal);
+  const bytesRefusal = await contentRefusal(draft, file);
+  if (bytesRefusal !== null) return refused(bytesRefusal);
 
   const registered = await registerAsset(weddingId, draft);
   if (registered.error !== null) return { data: null, error: registered.error };
@@ -262,8 +314,10 @@ async function putObject(objectKey: string, file: File, contentType: string): Pr
 }
 
 /** Step 3. The claims sent here are the ones the row was registered with, and the trigger compares
- *  them against the object's own recorded MIME and size — a row that cannot match its bytes stays
- *  `staged` rather than becoming a false `ready`. */
+ *  them against what the object's own record says — its measured length, and the MIME the service
+ *  stored for it. A row that cannot match its object stays `staged` rather than becoming a false
+ *  `ready`; the type half of that match is only as independent as the upload's declaration was,
+ *  which is why `contentRefusal` ran before step 1. */
 async function confirmAsset(
   weddingId: string,
   assetId: string,

@@ -129,6 +129,13 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
   'base64');
 const NOT_A_PNG = Buffer.from('not a png at all, just bytes with a claimed type', 'utf8');
+/** Markup payloads declared as an allowed image type. `UPL-04` proves the bucket refuses the
+ *  *declaration* of `text/html` and `image/svg+xml`; these two hold the declaration to an allowed
+ *  value and change only the bytes, which is the direction no case has gone. */
+const HTML_BYTES = Buffer.from(
+  '<html><body><img src=x onerror="alert(1)">wedding invite</body></html>', 'utf8');
+const SVG_BYTES = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><text>invite</text></svg>', 'utf8');
 /** One byte over the bucket's ceiling. */
 const TOO_BIG = Buffer.alloc(EXPECTED_MAX_BYTES + 1, 0x41);
 
@@ -617,6 +624,81 @@ describe('S6 UPLOAD', () => {
     assert.equal(truthful.status, 200, JSON.stringify(truthful.body));
     assert.equal(truthful.body[0].upload_status, 'ready');
     await removeAsset('hostA', row);
+  });
+
+  test('UPL-07 an ALLOWED declaration over markup bytes measures which half of the confirm edge has content behind it', async () => {
+    for (const [name, bytes] of [['html', HTML_BYTES], ['svg', SVG_BYTES]]) {
+      const row = inserted(await stageRow('hostA', weddingOf('hostA'),
+        { mime_type: 'image/png', size_bytes: bytes.length }));
+      const up = await storagePut(row.object_key, bytes, 'image/png', { as: 'hostA' });
+
+      // Three readings, taken before the PATCH can change anything:
+      //  - `recordedMime` / `recordedSize` are the two values the confirm edge itself selects
+      //    (migration `:150-157`), so they are what the comparison is actually built on;
+      //  - `servedLength` is the length of the bytes the service hands back through the read
+      //    endpoint — the only ground for "real bytes" that does not assume where the payload is
+      //    kept, because this build has no byte column to read (`STORAGE_BACKEND=FILE`). `prefix`
+      //    names the payload for the record.
+      const [recordedMime, recordedSize] = sqlRows(
+        `select coalesce(metadata->>'mimetype','ABSENT')||'|'||coalesce(metadata->>'size','ABSENT')
+           from storage.objects where bucket_id = '${BUCKET}' and name = '${row.object_key}'`,
+      )[0]?.split('|') ?? ['absent', 'absent'];
+      const read = await storageRead(row.object_key, { as: 'hostA' });
+      const servedLength = read.bytes.length;
+      const prefix = read.bytes.subarray(0, 24).toString('utf8').replace(/[^\x20-\x7e]/g, '.');
+      console.log(`UPL-07 ${name}: put=${up.status} statusCode=${up.body?.statusCode ?? 'none'} `
+        + `code=${up.body?.code ?? 'none'} `
+        + `error=${up.body?.error ?? 'none'} message=${up.body?.message ?? 'none'} | `
+        + `recorded mime=${recordedMime} size=${recordedSize} | served=${read.status} `
+        + `bytes=${servedLength} prefix=[${prefix}]`);
+
+      assert.equal(up.status, 200, `${name}: ${JSON.stringify(up.body)}`);
+      // The payload really is the markup this case sent, so a green run below cannot be a run that
+      // quietly measured an image.
+      assert.equal(prefix.startsWith('<'), true, `${name}: served bytes do not start as markup: [${prefix}]`);
+      // The two facts that make this tier the wrong home for a content-type rule, asserted rather
+      // than narrated: the recorded type is the uploader's own declaration, and the recorded size is
+      // the served length. `allowed_mime_types` and this metadata column are both keyed on what the
+      // client *said*, so markup behind an allowed declaration is storable here by design, and the
+      // product's markup refusal lives where the bytes are — `contentRefusal` in
+      // `src/integrations/supabase/weddingAssets.ts`, covered by
+      // `src/test/weddingAssetUploadRules.test.ts`. If a future storage build sniffs on write,
+      // `recordedMime` stops equaling the declaration and this assertion is the finding; the check
+      // belongs back here at that point, not in the browser.
+      assert.equal(recordedMime, 'image/png',
+        `${name}: the recorded type is no longer the client's declaration — content sniffing appeared, `
+        + 'so the byte gate should move server-side and this case must be re-scoped, not just relaxed');
+      assert.equal(recordedSize, String(servedLength),
+        `${name}: the recorded size stopped matching the served length, so the size half is no longer `
+        + 'content-derived and the confirm edge has lost the one comparison with real evidence behind it');
+
+      const confirm = await patchRow('hostA', row.id,
+        { upload_status: 'ready', mime_type: 'image/png', size_bytes: bytes.length },
+        { represent: true });
+      console.log(`UPL-07 ${name}: confirm=${confirm.status} code=${confirm.body?.code ?? 'none'} `
+        + `message=${confirm.body?.message ?? 'none'} state=${rowState(row.id).status}`);
+      // The claim that matches the record is accepted, which is what shows the edge runs at all: the
+      // row is `ready` describing markup as a PNG. Recorded here as the boundary, not as a passing
+      // guarantee — audit §36 carries the consequence for invariant I4's type half.
+      assert.equal(confirm.status, 200, `${name}: ${JSON.stringify(confirm.body)}`);
+      assert.equal(confirm.body[0].upload_status, 'ready', name);
+
+      // And the same row, one PATCH later, refuses a claim that does *not* match the record. This is
+      // the enforcing half of the case: it proves the comparison ran rather than that the edge is
+      // absent, and it is the shape a browser that mislabels its own upload would meet.
+      const relabel = await patchRow('hostA', row.id,
+        { mime_type: 'text/html' }, { represent: false });
+      assert.equal(relabel.status, 403, `${name}: ${JSON.stringify(relabel.body)}`);
+      assert.equal(relabel.body.code, '42501', `${name}: ${JSON.stringify(relabel.body)}`);
+      assert.match(relabel.body.message, /is stored as .* but this row claims/,
+        `${name}: refused for a reason other than the type disagreement — read the printed message`);
+      // Refused *and* unchanged: the guard's same-state re-description path (`:121-129`, falling
+      // through to the confirmation at `:138`) must not half-apply a claim it then rejects.
+      assert.deepEqual(rowState(row.id),
+        { mime: 'image/png', size: String(bytes.length), status: 'ready' },
+        `${name}: the refused re-description left a changed row behind`);
+      await removeAsset('hostA', row);
+    }
   });
 });
 
