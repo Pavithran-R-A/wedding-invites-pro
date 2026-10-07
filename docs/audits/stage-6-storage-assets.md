@@ -1975,3 +1975,45 @@ extended-range scan. Still open, all behind §30.3's one cause: the SQL batterie
 its four network observations. Stage 6 is therefore **not** fully qualified, and this section says so rather
 than letting the certified tiers imply otherwise. Boundary unchanged: no merge, no `main`, no deploy, no
 hosted Supabase, no Stage 7.
+
+## 31. The artifact the browser tier needs was rebuilt and re-matched, and one deletion of my own caused it (2026-10-07)
+
+**31.1 Why `dist/` was missing.** During the 0-KB disk emergency (§26.8, §28) I reclaimed my own
+`s5qual/dist` — 1,074 KB. That was legitimate at the time and it is the certified artifact's directory,
+so the browser tier's target had to be restored. Stated plainly because the audit's earlier habit note
+("build to a throwaway `--outDir` so the certified `dist/` is never overwritten") was written precisely to
+protect an artifact that was later deleted outright: the constraint is not *overwriting* it, it is that the
+browser tier cannot run against an absent build.
+
+**31.2 Rebuild at `dbd8e60`, engine-free, and it matches §22 exactly.** `npm run build` → `build_exit=0`
+(read adjacent), `built in 50.61s`, `dist_file_count=33` — the same count §22 certified — and the 30 bare
+asset names under `dist/assets` compared with `comm -3` against `q6-logs/s6-g4-asset-names.txt` gave
+`diff_count=0`. Chunk names *and* content hashes therefore reproduce, which is the same identity claim §22
+made about the artifact at that head. `worktree_tracked_changes=0` (`dist` is gitignored, `.gitignore:11`).
+Net disk cost of this build was 2,244 KB (1,334,936 → 1,332,692) because the vite cache was already warm,
+so §2's "≈18 MB per build" is the cold number, not the warm one. Evidence:
+`q6-logs/s6-dist-rebuild-dbd8e60.log`.
+
+**31.3 I10 re-taken on the rebuilt artifact.** `q6-logs/s6-i10-valuescan.sh` again, output
+`s6-i10-valuescan-05.log`: the three privileged values (41, 164 and 55 characters) score **0** on every
+surface — `src/`, `index.html`, `dist/`, `q6-logs/`, tracked-at-HEAD and added-lines. The publishable key
+(46) scores `dist_files_with_hit=2` and nothing else, which is §24's designed exception, not a new finding.
+The trailing counts (`SECRET_KEY` 2 files, `SERVICE_ROLE` 12, `DB_URL` 2) are *variable names* in scripts,
+docs and CI, each with a value-hit of 0.
+
+**31.4 Certifications landed this sitting.** `2b0d101` → §28.1; `d30fe0a` → §29.1; `dbd8e60` → all five
+gates `gate_exit_code=0` with `Test Files 31 passed (31)` / `Tests 466 passed (466)` at 121.99s,
+`test_summary_present=YES`, `local_equals_remote=YES`, `worktree_tracked_changes=0`
+(`q6-logs/s6-section31-cert-dbd8e60.log`). Each head was pushed immediately with an explicit refspec and
+read back; hosted `main` stayed at `1b1ef6dcc6c7893c42afc29787e3724ab062eb1b` at every check.
+
+**31.5 Still one blocker, unchanged and human-sited.** Probes 21–23: `docker version` → `code=124` at
+13:41, 13:46 and 13:50 UTC, and `Get-Process com.docker.backend` still reports StartTime 6 Oct 15:10 — the
+engine's supervisor has not been recycled, so the fix chosen at §30.3 has not happened yet. What Stage 6
+still needs from an engine, in run-book order: the HTTP tier, `supabase/tests/stage6/run.sh both` (90
+registry / 80 policy, plus the historic stage2–5 suites), `UPL-07` for M1, the `pg_roles` row that replaces
+§25.3's recalled ranking, the A13 `allow_only_operation('object.list')` spelling, the browser tier with its
+four network observations, and the audit section that records all of them. Everything that could be proven
+without the engine has now been proven and pushed. Stage 6 is **not** fully qualified; saying so is the
+honest close of this sitting, and the boundary holds — no merge, no `main`, no deploy, no hosted Supabase,
+no Stage 7.
