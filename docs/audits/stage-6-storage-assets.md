@@ -1692,3 +1692,46 @@ costs about 18 MB, and an `ENOSPC` in the middle of a gate would produce an inva
 costing more than it saves. Note also that the tree is currently a **pnpm** tree (`node_modules/.modules.yaml` and `node_modules/.pnpm`
 present, `vite` a symlink): the same external installer that re-drops the byte-identical `pnpm-lock.yaml` + `pnpm-workspace.yaml` pair
 converted it after `5731b35` was certified. That pair remains untracked and unstaged here, as it does everywhere else in this stage.
+
+**26.7 Correction to §26.3's open-items list, found by reading the HTTP battery instead of the adapter's comment.**
+§26.3 ended with two measurements the engine supposedly owed, and it drafted them from the adapter's own uncertainty
+markers (`weddingAssets.ts:204-206`) rather than from the battery that had already gone and checked them. Re-reading
+`supabase/tests/api/stage6_storage.test.mjs` changes both halves, so the correction is published rather than the
+original left standing.
+
+*The orphan question is mostly closed already, and it was closed by an assertion, not by hope.* **UPL-04** (`:557-581`)
+registers a staged row with a disallowed `mime_type` claim, PUTs real PNG bytes under that declaration in each of three
+spellings, and asserts the bucket's `415 InvalidMimeType` **and** `objectPresent(row.object_key) === false` at `:572`,
+then that the confirmation answers `42501` with `no stored object exists at …` and that the row is still `staged`.
+**UPL-05** (`:583-597`) does the same for the ceiling: one byte over, `EntityTooLarge`, and `objectPresent(...) === false`
+at `:592`. So the shape §6/M2 worried about — a refused upload leaving bytes so that the staged-row delete trips the
+delete guard and reports itself as "the asset record could not be removed" — is measured against for both refusal
+classes the product can produce at the bucket, and the answer is that nothing is left behind. What is genuinely still
+uncovered is narrower: a refusal that arrives *mid-stream*, after bytes began reaching the service. Nothing in the
+battery contradicts the adapter's worry and nothing confirms it; it needs a client-injectable fault, and it is recorded
+in `q6-logs/s6-engine-runbook.md` §7 as the lower-priority of the two rather than dropped.
+
+*The MIME question survives, and reading the battery made it sharper rather than softer.* **UPL-04 tests one direction
+only**: the declared type is *disallowed* while the bytes are real PNG, which the bucket refuses. It never tests the
+direction that invariant I4 and the blueprint's "no user-supplied SVG or HTML" rule actually depend on — a request that
+declares an **allowed** type (`image/png`) over bytes that are HTML or SVG. If the storage service records the declared
+header, that upload is accepted, the row's `mime_type` claim matches `metadata->>'mimetype'` because both are the same
+client value (`weddingAssets.ts:238` fills the row, `:256` sends the header), the pair reaches `ready`, and the payload
+is markup served under a signed URL that calls itself a PNG — in which case the migration's "refusing the type at the
+bucket is stronger than sanitising it later" (`20261006120000…sql:37-38`) and "checked against the bytes rather than
+trusted" (`:167-171`) both overstate what the design enforces. If the service sniffs, both sentences are exactly right.
+This is now the single measurement that decides the section's verdict, it is one PUT with the helpers that already
+exist, and its three outcomes (refused by the bucket / accepted and confirmable / accepted but caught elsewhere) are
+written out in run-book §7 so the engine session cannot mistake the middle one for a pass.
+
+*Nothing was edited in anticipation of the answer.* No comment in the migration, no sentence in the readiness copy, and
+no battery case was changed by §26 or by this correction, because each of those edits is only honest after the PUT has
+been made and its refusal or acceptance read.
+
+**26.8 The disk reading that made the build omission a rule rather than a preference.** The five gates re-taken at
+`0d3d6a8` (`q6-logs/s6-section26-cert-01.log`) consumed **306,044 → 231,900 KB** of free space on `C:` on their own —
+about 74 MB per gate set, most of it in the last two gates — and the drive fell another ~5 MB in the minute after the
+run finished with no command of mine executing. At that slope the production build this head deliberately omits is not
+a saving but a necessity: it would need its own ~18 MB plus output, and an `ENOSPC` in the middle of a gate produces an
+invalid attempt that has to be disclosed and re-measured, which costs more than it spares. Recorded here because the
+omission in §26.6 is a judgement about the machine, not a relaxation of the convention.
