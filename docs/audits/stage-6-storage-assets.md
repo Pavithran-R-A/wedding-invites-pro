@@ -1512,3 +1512,22 @@ spelling (§20.3). §24.4 does add one thing the browser tier can now check chea
 only baked Supabase origin is loopback, *any* non-loopback Supabase request observed from the built app would be a config
 regression rather than an unknown. The probe taken while finishing this section returned 124 again. No merge, no main, no
 deploy, no hosted project, no Stage 7.
+
+**24.10 A stale number this section inherited, and the mechanism §11 could not see from the other clone.** The push
+read-back for §24 first recorded `origin_main_sha=1b1ef6d… (unchanged, expected 328f0e3fef5a prefix)` — one line
+containing both the correct measurement and an incorrect expectation, and the expectation came from session context
+rather than from the file. §11 already settled the fact: hosted `main` **is** `1b1ef6d`, the base the Stage 6 directive
+named, and `328f0e3` is a stale cache that "says nothing about the server". What §11 could not record is *why* the cache
+survives in **this** clone, and the answer is a config value rather than a forgotten fetch:
+
+```
+$ git config --get-all remote.origin.fetch
++refs/heads/stage5/pack-driven-authoring-review:refs/remotes/origin/stage5/pack-driven-authoring-review
+```
+
+The fetch refspec is pinned to one branch, so `git fetch origin main` refreshes `FETCH_HEAD` but can never update
+`refs/remotes/origin/main`, which still reads `328f0e3` here. Consequence for every later stage in this clone: a base or
+main comparison must be taken from `git ls-remote` (or an explicit fetch of the ref wanted), never from
+`git rev-parse origin/main` or `for-each-ref` — the tracking ref in this working copy is permanently stale by design.
+The config was read, not modified, and nothing was rebased, reset or force-pushed: `main` is unmoved, and the only push
+in `q6-logs/s6-section24-push-01.log` is the branch fast-forward `0ff4d8c..f6786c6`.
