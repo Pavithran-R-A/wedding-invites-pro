@@ -153,6 +153,14 @@ export async function openBrowser({ cdpPort = 9411 } = {}) {
             type: msg.params.type,
             hasResponseBody: false,
           });
+        } else if (msg.method === 'Network.requestWillBeSentExtraInfo') {
+          /** The header set the network service actually put on the wire. `requestWillBeSent` carries
+           *  what the *renderer* proposed, and Chrome applies referrer policy, cookies and its own
+           *  defaults afterwards — so a page under `<meta name=referrer content=no-referrer>` still
+           *  shows a proposed `Referer` here. Reading only the proposed set would let the harness
+           *  report a leak the browser never sent. */
+          const entry = requests.get(msg.params.requestId);
+          if (entry) entry.sentHeaders = msg.params.headers ?? {};
         } else if (msg.method === 'Network.responseReceived') {
           const entry = requests.get(msg.params.requestId);
           if (entry) {
@@ -398,26 +406,45 @@ function makePage(name, targetId, s, session, requests, open) {
      *  *reacted* is deliberately not claimed here — a journey asks that by waiting for the control
      *  the file enables, and `pressButtonWhenReady` reports `disabled` as the product's verdict. */
     async setFileByLabel(labelText, filePath) {
-      const lookup = `(() => {
+      // Chrome 154 removed `DOM.requestNodeId` and the `objectId` form of `DOM.describeNode` (both
+      // answer `-32601 … wasn't found` / `-32000 Either nodeId, backendNodeId or objectId must be
+      // specified`), so a Runtime remote object can no longer be turned into a node id. The node is
+      // therefore marked in the page and found again through the DOM tree — `DOM.getDocument` →
+      // `DOM.querySelector` → `DOM.setFileInputFiles` — which this Chrome still answers. Measured on
+      // 2026-10-08 against the running preview: the marked input came back holding
+      // `{name:'s6-cdp-probe.png', size:70, type:'image/png'}`.
+      const mark = await evaluate(`(() => {
+        document.querySelectorAll('[data-stage6-file]').forEach((el) => { delete el.dataset.stage6File; });
         const el = (${FIND_BY_LABEL})(${JSON.stringify(labelText)}, 'any');
-        return el && el.type === 'file' ? el : null;
-      })()`;
-      const evaluated = await s('Runtime.evaluate', { expression: lookup, returnByValue: false });
-      if (evaluated.exceptionDetails) {
-        throw new Error(`[${name}] file-input lookup for "${labelText}" threw: ${
-          evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text}`);
-      }
-      if (!evaluated.result?.objectId) {
+        if (!el || el.type !== 'file') return false;
+        el.dataset.stage6File = '1';
+        return true;
+      })()`);
+      if (mark !== true) {
         throw new Error(`[${name}] no file input answers to the label "${labelText}"`);
       }
-      await s('DOM.enable').catch(() => {});
-      const { nodeId } = await s('DOM.requestNodeId', { objectId: evaluated.result.objectId });
-      await s('DOM.setFileInputFiles', { files: [filePath], nodeId });
-      const held = await evaluate(`(() => {
-        const el = (${FIND_BY_LABEL})(${JSON.stringify(labelText)}, 'any');
-        const f = el?.files?.[0];
-        return f ? { name: f.name, size: f.size, type: f.type, count: el.files.length } : null;
+      const clearMarks = () => evaluate(`(() => {
+        document.querySelectorAll('[data-stage6-file]').forEach((el) => { delete el.dataset.stage6File; });
+        return 1;
       })()`);
+      let held = null;
+      try {
+        await s('DOM.enable');
+        const { root } = await s('DOM.getDocument', { depth: 0 });
+        const found = await s('DOM.querySelector', {
+          nodeId: root.nodeId, selector: '[data-stage6-file="1"]' });
+        if (!found?.nodeId) {
+          throw new Error(`[${name}] the marked file input was not in the DOM tree the page reported`);
+        }
+        await s('DOM.setFileInputFiles', { files: [filePath], nodeId: found.nodeId });
+        held = await evaluate(`(() => {
+          const el = (${FIND_BY_LABEL})(${JSON.stringify(labelText)}, 'any');
+          const f = el?.files?.[0];
+          return f ? { name: f.name, size: f.size, type: f.type, count: el.files.length } : null;
+        })()`);
+      } finally {
+        await clearMarks();
+      }
       if (held === null) {
         throw new Error(`[${name}] "${labelText}" still holds no file after DOM.setFileInputFiles`);
       }
