@@ -80,13 +80,16 @@ describe("product contract checker", () => {
   it("holds every table the adapter actually queries inside the adapter rule", () => {
     // Stage 4 found this rule's table list named seven of the nine tables the adapter reads:
     // `wedding_people`, `venues` and the new `tradition_pack_releases` were absent, so a stray
-    // `.from()` on them outside the adapter would have passed CI. The list is now derived from
+    // `.from()` on them outside the adapter would have passed CI. Stage 7 also adds
+    // `wedding_assets`, which Stage 6 correctly recorded as a missing adapter boundary.
+    // The list is now derived from
     // what the adapter does, so a future table that leaves it out is a visible gap in this
     // assertion rather than an invisible one in the gate.
     const stray = [
       `const a = await supabase.from('wedding_people').select('*');`,
       `const b = await supabase.from('venues').select('*');`,
       `const c = await supabase.from('tradition_pack_releases').select('*');`,
+      `const d = await supabase.from('wedding_assets').select('*');`,
     ].join("\n");
     expect([
       ...new Set(

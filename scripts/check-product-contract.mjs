@@ -223,7 +223,7 @@ export const RULES = [
   },
   {
     id: "canonical-table-read-outside-the-adapter",
-    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases)['"]\s*\)/g,
+    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|wedding_assets|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases)['"]\s*\)/g,
     message: "queries a canonical wedding table outside the adapter",
     fix: "add the read to src/integrations/supabase/ so its columns, errors and refusals stay in one place",
     scope: ["src/"],
@@ -559,7 +559,10 @@ export function selfTest() {
     "legacy-table-as-current-terminology": `// each row of the projects table is a customer`,
     "guest-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_public_invitation', { raw_token: token });`,
     "ad-hoc-supabase-client": `const supabase = createClient(url, anonKey);`,
-    "canonical-table-read-outside-the-adapter": `const { data } = await supabase.from('weddings').select('*');`,
+    "canonical-table-read-outside-the-adapter": [
+      `const { data } = await supabase.from('weddings').select('*');`,
+      `const { data } = await supabase.from('wedding_assets').select('*');`,
+    ],
     "service-role-key-in-browser-code": `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
     "tradition-pack-identity-branch": `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
     "tradition-selected-from-identity": [
