@@ -145,14 +145,13 @@ stack only — no hosted project, and no customer-visible pack content:
   ([`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md)).
   A host choosing no pack and writing every word is still the only path a real family can take
 
-## Built in Stage 6: private files, measured at the SQL, HTTP and unit tiers — never in a browser
+## Verified in Stage 6: private files, measured at the SQL, HTTP, unit and browser tiers
 
-Stage 6 gave a host's own uploaded files a home. The wording of this section is deliberately not
-"Verified in Stage 6", because the browser tier has never run at the state that carries this code and
-the serial HTTP chain has not gone green at it: the **local Docker engine died mid-stage** and has not
-answered a request since
-([`docs/audits/stage-6-storage-assets.md`](docs/audits/stage-6-storage-assets.md) §18). What *is*
-measured, and where:
+Stage 6 gave a host's own uploaded files a home, and every tier that can measure one has now run at the
+state that carries this code — **including a browser**. The local Docker engine died mid-stage and the
+recovery, the blocked set and its closure are recorded in
+[`docs/audits/stage-6-storage-assets.md`](docs/audits/stage-6-storage-assets.md) §18 → §§36–37; the numbers
+below are re-takes at head, each with the capture it came from. What is measured, and where:
 
 - One forward migration (`20261006120000_stage6_wedding_asset_storage.sql`) turns Storage on for one
   bucket: `wedding-assets`, private, 5 MiB per object, and `allowed_mime_types` of `image/jpeg`,
@@ -164,54 +163,65 @@ measured, and where:
   is visible as exactly that
 - Three `storage.objects` policies, for `authenticated` only, and **no UPDATE policy at all** — which
   is why an upload cannot be `upsert`ed over somebody else's object
-- **Two Stage 6 SQL batteries, 90 and 80 assertions**, on both migration chains, alongside the
-  historical suites re-measured against a schema that now contains Stage 6: 42/76 outcome, 46/49 draft
-  invariant, 284 publication-boundary, 464 privilege and RLS attacks, 103 catalogue, 428 + 57 pack
-  documents and tooling, and 122 / 50 / 124 review-binding, vocabulary and document-resolution
-  (`bash supabase/tests/stage6/run.sh`; the joint replay printed `chain_exit_code=0`). That replay is
-  `q6-logs/s6-stage6chain-04.log`, taken on **2026-10-06**, and it has not been re-run since — but it is
-  not describing a stale tree either: `git diff --stat eb88405 HEAD -- supabase/` prints **nothing**, so
-  every migration, SQL battery and HTTP test file HEAD carries is byte-identical to the one that run
-  executed. What moved since is `src/` only, and none of these tiers import it
-- **33 HTTP tests against the running local stack** (`supabase/tests/api/stage6_storage.test.mjs`,
-  `q6-logs/s6-http-iter-02.log` on 2026-10-06: **33 tests / 6 suites / 33 pass / 0 fail**, 21.9 s):
-  real tokens, real bytes, real refusals, and a teardown that *prints* `wedding_assets total=0` and
-  `objects in the bucket=0` from the database instead of asserting it cleaned up after itself. Three
-  of its forecasts were reversed by measurement — an unauthenticated download is `400 NoSuchKey`, not
-  401; a second write to an existing key is `400` code `409`, not an overwrite; and a DELETE that RLS
-  refuses answers `200 []` (§15) — so every refusal in it is re-read with a following `SELECT`
-  rather than inferred from a status code
+- **Two Stage 6 SQL batteries, 90 and 80 assertions**, on both migration chains, re-run alongside the
+  historical suites against a schema that now contains Stage 6: 42/76 outcome, 46/49 draft invariant, 284
+  publication-boundary, 464 privilege and RLS attacks, 103 catalogue, 428 + 57 pack documents and
+  tooling, and 122 / 50 / 124 review-binding, vocabulary and document-resolution —
+  `q6-logs/s6-sql-chain-05.log` on **2026-10-07**, `sql_chain_exit_code=0`. Every total labelled "at
+  Stage 6 head" there is a re-measurement of an older suite, not a carried-forward figure, and the two
+  runners' totals are never added to each other
+- **220 HTTP tests / 0 fail across six files** against the running local stack
+  (`q6-logs/s6-api-run-04.log`, 2026-10-07), of which `supabase/tests/api/stage6_storage.test.mjs` is
+  **34 tests / 6 suites**: real tokens, real bytes, real refusals, and a teardown that *prints*
+  `wedding_assets total=0` and `objects in the bucket=0` from the database instead of asserting it
+  cleaned up after itself. Three of its forecasts were reversed by measurement — an unauthenticated
+  download is `400 NoSuchKey`, not 401; a second write to an existing key is `400` code `409`, not an
+  overwrite; and a DELETE that RLS refuses answers `200 []` (§15) — so every refusal in it is re-read
+  with a following `SELECT` rather than inferred from a status code
 - `supabase/tests/api/run.sh` now counts **both** stores an HTTP run can dirty silently
   (`public.wedding_assets` and `storage.objects` in this bucket) beside the three it already checked
 - One Stage 3 case was proven wrong by Stage 6 and repaired, not relaxed: it hand-supplied an
   `object_key`, and because BEFORE triggers run before an RLS `WITH CHECK` is consulted, it had begun
-  to assert the mint guard while claiming to assert isolation (§16). Measured alone afterwards:
-  **56 pass / 0 fail** (`q6-logs/s6-stage3-isolation-01.log`, 2026-10-06), with the repaired case —
+  to assert the mint guard while claiming to assert isolation (§16). It then went back into the serial
+  chain: **56 pass / 0 fail** for that file inside `s6-api-run-04.log` above, with the repaired case —
   "a child row cannot be attached to another account's wedding via `wedding_assets`" — named in the
   passing list rather than inferred from a total
-- **26 unit tests over the adapter itself** (`src/test/weddingAssetUploadRules.test.ts`, no engine
-  needed): every refusal the tab reaches for on its own is asserted *together with* "nothing was asked
-  of the stack", the register payload is shown to carry no `object_key` in any shape, the write is
-  shown to ask for `upsert: false`, and the §5.3 orderings — register/upload/confirm, and
-  tombstone/collect/delete — are pinned including both rollbacks. Three deliberate mutations of the
-  adapter (a widened MIME set, a `>=` ceiling, an `upsert: true`) each broke the case that should
-  notice, so this suite is not passing by ignoring the code (§20)
-- The browser-facing half is **code, not demonstrated behaviour**: `src/integrations/supabase/weddingAssets.ts`
-  and the workbench's file panel compile, lint and ship in the production bundle, and no browser has
-  ever driven either. The unit tier above measures the adapter's *decisions*; it does not measure a
-  click, a file picker, a real byte count or a signed URL opening in an `<img>`.
-  `feature-readiness.md` therefore labels the row `FOUNDATION`, not `IMPLEMENTED`
+- **31 unit tests over the adapter itself** (`src/test/weddingAssetUploadRules.test.ts`, no engine
+  needed, inside a 473-test / 32-file suite): every refusal the tab reaches for on its own is asserted
+  *together with* "nothing was asked of the stack", the register payload is shown to carry no
+  `object_key` in any shape, the write is shown to ask for `upsert: false`, and the §5.3 orderings —
+  register/upload/confirm, and tombstone/collect/delete — are pinned including both rollbacks. Four
+  deliberate mutations of the adapter (a widened MIME set, a `>=` ceiling, an `upsert: true` — §20.6 —
+  and `contentRefusal` returning `null`, §36) each broke the case that should notice, so this suite is
+  not passing by ignoring the code
+- **The browser tier ran, and it is what moved this row from `FOUNDATION` to `IMPLEMENTED` (local stack
+  only).** `scripts/stage6-browser-assets.mjs` drives the **production bundle** on `127.0.0.1:4173`
+  against this repository's own stack, and `q6-logs/s6-browser-run-03.log` prints
+  **138 checks / 23 measurements / 0 findings**: a real file through the panel's own picker; the key the
+  database minted read back and matched; the bytes behind a signed preview link verified to be the bytes
+  uploaded; audio drawn as `<audio controls>`; replace and remove leaving no orphan object; a second
+  account refused at the page, the REST read, the direct object read, the signed-URL mint and the row
+  insert while the owner's own read still succeeded; the N1–N4 network and privacy checks (origins,
+  credentials, no public-path read, and the minted token found nowhere but one media `src`); the
+  accessibility re-measurement at 375×740 and 768×1024; and a teardown that left `0` accounts, `0` rows
+  and `0` objects. Its strongest line is the one the unit tier could only assert about decisions: each of
+  the five upload refusals — including **markup behind an `image/png` declaration** and **a JPEG head
+  behind one** — is proved by the request count *not moving at all*
 
-And the two things this section must not be read as granting. **Nothing here has been shown to a host
-in a browser, and the serial HTTP chain has not gone green at this state** — the single run that would
-cover the migration, the batteries, the adapter and the §16 repair together is the one §18 blocked, so
-every engine-tier number above belongs to 2026-10-06 and none has been re-measured since. What that
-costs is *qualification*, not delivery: Stage 6 **is** committed and pushed to
-`stage6/storage-assets`, and `git ls-remote origin refs/heads/stage6/storage-assets` read back
-`8e62c38` — the same SHA as local `HEAD` — when this section was last reconciled. **No guest is
-affected by any of it**: Stage 6 ships host-private upload and management only, preview is through a
-short-lived signed URL, and the published snapshot still asserts no `object_key` (§7, and B28 in the
-Stage 3 battery).
+And the four things this section must not be read as granting. **Local stack only**: no hosted Supabase
+project, production bucket or real family file was touched, and the 60-second preview expiry is measured
+as the shape of a minted link, never as an elapsed-time observation. **No crash-path browser evidence**:
+a `staged` row orphaned between register and upload, retries and interrupted `PUT`s are pinned in unit
+tests against a stand-in, not driven over a failing network. **One checker coverage gap, recorded rather
+than repaired**: `canonical-table-read-outside-the-adapter` still does not name `wedding_assets`
+(§37.10), so it guards the adapter convention for nine of the ten tables product code touches directly —
+today the gap covers nothing, because all five of that table's `.from()` calls are in the adapter. **And
+no guest is affected by any of it**: Stage 6 ships host-private upload and management only, preview is
+through a short-lived signed URL, and the published snapshot still asserts no `object_key` (§7, and B28 in
+the Stage 3 battery). Stage 6 is committed and pushed to `stage6/storage-assets` with the remote SHA read
+back after every push; the tiers above ran at `5c8215c`, and the head carrying this prose is certified by
+its own re-take of the gate set — logged in the audit's evidence captures, never asserted here from a
+parent's green run.
 
 ## Implemented foundations requiring a configured backend
 
@@ -498,10 +508,11 @@ stage makes an orphan observable instead of letting it accumulate. Each battery 
 `storage.objects` rows directly as a *stand-in* for bytes a service put there, and says so at the top:
 neither file proves an over-size upload is refused, that `allowed_mime_types` is enforced at the edge, or
 that a signed URL works. Those are the HTTP tier's measurements. Both batteries were green at the Stage 6
-tree — `chain_exit_code=0` for the replay that runs them beside every historical suite, with each total
+tree — `sql_chain_exit_code=0` for the replay that runs them beside every historical suite, with each total
 printed apart and the two Stage 6 counts never added to another stage's. That replay is
-`q6-logs/s6-stage6chain-04.log` on **2026-10-06**, the same capture the Stage 6 section cites; it has not
-been re-run since, and §34.4 records why the files it measured are still this tree's files.
+`q6-logs/s6-sql-chain-05.log` on **2026-10-07**, the same capture the Stage 6 section cites; the earlier
+`s6-stage6chain-04.log` (2026-10-06) still describes the same `supabase/` files, and §34.4 records how that
+was checked rather than assumed.
 
 `node scripts/tradition-pack-admin.mjs` is the maintenance operator's tool for authoring and approving
 a release: eleven verbs, no `delete` verb, no web panel, and it refuses to run without an explicit

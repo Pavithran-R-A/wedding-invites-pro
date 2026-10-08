@@ -21,10 +21,18 @@
 // through the adapter's own sentence, which is printed verbatim below. `generated_output` is
 // deliberately absent — it names a derivative the platform would produce, not a file a host uploads.
 //
-// NOT YET QUALIFIED. No browser journey has driven this panel and no HTTP battery has run against
-// the adapter it calls, because the local Docker engine stopped answering during this stage (see
-// audit §18). What follows is written for review; nothing here may be reported as verified until
-// the Stage 6 browser tier has run at the SHA that carries it.
+// QUALIFIED LOCALLY, and qualified by a browser rather than by review. `scripts/stage6-browser-assets.mjs`
+// signs a real host in against the shipped bundle and drives every branch below: the five byte-gate
+// refusals — each proved by "no request left the page and no row was registered" rather than by its
+// sentence alone, because two of the five print the same sentence — then an upload that reaches
+// `ready`, the signed preview read back as the bytes that were uploaded, an `<audio>` row, a
+// replacement, a removal — each with the database read back after the click. A second account aimed at
+// the same wedding is refused before this panel ever mounts (the project page refuses it first), so that
+// journey proves isolation at the page, REST, Storage and RLS layers rather than as an empty panel.
+// Audit §37 of `docs/audits/stage-6-storage-assets.md` carries that run, including N1-N4's traffic
+// findings and the touch-target re-measurement at 375x740 and 768x1024. What the tier does not claim
+// is the 60-second expiry: it reads a preview while the link is live, and the refusal of an expired
+// one belongs to the HTTP battery.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {

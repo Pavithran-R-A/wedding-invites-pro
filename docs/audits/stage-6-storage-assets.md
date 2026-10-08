@@ -2438,3 +2438,279 @@ figure is a note, a committed one is a claim. (2) §19.1's parse-before-the-scar
 followed: `node --check` on the battery at exit 0 before the chain was started, and the tier was
 re-run whole rather than only the changed file, because the residue check is a property of the serial
 chain and not of one file.
+
+## 37. The browser tier ran, and it answered §36's open question in the browser rather than in prose (2026-10-08)
+
+§36 ended with two sentences this section exists to retire: "*Whether a stored asset actually renders
+through that boundary is a browser-tier question, and the browser tier has not run yet*", and
+"**Consequence for the stage's status: Stage 6 is still not qualified**". The first is now measured. The
+second was true when written and is superseded below, at 37.9 — a reader who arrives from §36 should read
+that paragraph as the state of play on 2026-10-07, not as the stage's status.
+
+### 37.1 What ran, against what, and where the capture is
+
+`scripts/stage6-browser-assets.mjs` is a new instrument in the same lineage as
+`scripts/stage3-authed-journey.mjs`: it speaks CDP directly to a headless Chromium, drives the
+**production bundle** served by `npm run preview` on `http://127.0.0.1:4173`, and talks to this
+repository's own local stack on `http://127.0.0.1:54400`. It takes no shortcuts around the product: files
+reach the page through the real `<input type=file>` over CDP, uploads run through
+`src/integrations/supabase/weddingAssets.ts` as the panel calls it, and every claim about the database is
+read back with `psql` after the browser action rather than inferred from a toast. It exits 1 if it printed
+a finding, and throws if the harness itself mis-behaved, so "the script finished" is not a pass signal —
+the pass signal is its own last line.
+
+Admitted run: **`q6-logs/s6-browser-run-03.log`**, run tag `stage6ui-muyyz5da-zpld5`, at
+`5c8215c`, against the `dist/` that head was built and certified with
+(`q6-logs/s6-head-cert-5c8215c.log`: `local_head` = `remote_sha` = `5c8215c…`, `build_exit_code=0`,
+`✓ built in 1m 16s`, `dist_manifest_sha256=78563cff1743611b104675ae75b90cccb416ec01` over 33 listed files,
+newest `dist` mtime `2026-10-07 22:51`, and `gate_exit_code=0` for all five node gates in the same capture).
+That artifact, not the earlier 12:02 panel build, is the bundle the tier drove; the prelude's needle is
+proof it could not have been the older one, because the sentence it searches for — `the file does not hold
+the bytes of the type it says it is` — arrived in `src/` with the §36 repair (`ea66e60`, committed at
+22:42 that evening), ten hours and forty minutes after `s6-panel-build-01.log` and nine minutes before this build.
+The run's tail reads `==> checks 138, measurements 23, findings 0` then `STAGE 6 BROWSER TIER: PASS`, and
+exit 0. Masked before it was kept (`bash q6-logs/s6-mask-check.sh s6-browser-run-03.log` →
+`leak_total=0`, `mask_check=PASS`, re-read on 2026-10-08 as `mask_exit_code=0`). Runs 01 and 02 are in the
+same directory and are **not** admitted: each ended in a finding caused by the instrument, and 37.7 lists
+them. Assertion lines land in five areas — `A` 63, `B` 10, `C` 25, `D` 46, plus 6 prelude lines — where
+`..`-marked lines are measurements kept for context and `ok`-marked lines are the 138 checks.
+
+The prelude is a gate, not decoration: it scans **987 KB of shipped JS/CSS/HTML** for the byte-gate
+refusal sentence (so the bundle being driven is one that contains the Stage 6 adapter), for the loopback
+target, and for *any* hosted Supabase origin baked in ("none"), then reads the bucket row it expects to
+write into and prints `5242880 / image/jpeg,image/png,image/webp,audio/mpeg / public=false`.
+
+### 37.2 Journey A — the panel, and the five refusals proved by silence
+
+`[A:panel]` (5 lines) checks the panel is a labelled section whose own heading names it, that an empty
+registry says so in the panel's own words, that a loaded-empty list carries no alert, that it **claims no
+guest delivery** (§7's ruling, asserted as rendered copy rather than as a code reading), and that the
+kind select offers exactly `photo,monogram,decorative,audio` — `generated_output` absent, because it names
+a derivative the platform would produce and not a file a host uploads.
+
+`[A:refusals]` (25 lines) is the part §36 left hanging. Five cases — a file with no bytes, a type the
+bucket does not accept, a file above the 5 MiB ceiling, **markup behind an `image/png` declaration**, and
+**a JPEG signature behind an `image/png` declaration** — each get the same five assertions: the upload
+button was offered once the file was held; the panel prints the adapter's own refusal; the alert line
+actually re-rendered for *this* case (a measurement, so a stale toast cannot satisfy the next four);
+**nothing was registered and no bytes were stored**, printed as `PUTs 0→0, register POSTs 0→0, rows 0,
+objects 0→0` beside what the picker held; and the panel still lists no row.
+
+That middle assertion is the whole evidence value of this area. A refusal that reaches the page *after* a
+`POST` is a UI courtesy. A refusal where the request count does not move is the adapter's
+`fileRefusal`/`contentRefusal` ordering doing what `src/test/weddingAssetUploadRules.test.ts` claims it
+does, in a browser, with a real `File` object. The two signature-byte cases are the answer to §36's
+residual paragraph: the declared-type forgery that `STORAGE_BACKEND=file` makes unenforceable at the
+database is refused **before any request leaves the page**, because the only layer that can read the
+bytes' head is the one holding them. §36's "not a database invariant on this backend" stands exactly as
+written; what changed is that the layer that does hold it is now measured, in the browser that would
+consume the asset.
+
+`[A:upload]` (12) then does the accepted path: a real 70-byte PNG becomes one row named what the host
+typed, printing `70 bytes` and the stored state rather than a promise, with `upload_status ready` (the
+confirmation edge), the **key minted from the row id** (`weddings/<wedding>/photo/<row>`) and not from
+anything the browser sent, one storage object at that key, `metadata size 70, metadata mimetype
+image/png` agreeing with the row, and the object's `owner_id` the uploading account (elided in the log).
+`[A:preview]` (7) presses Preview and follows the minted link: the path is a
+`/storage/v1/object/sign/wedding-assets/…` sign path and not the public one, it is *the* key the database
+minted, a 287-character token is present (so 37.4's needle hunt has a live needle), the `alt` text is
+built from the host's own words, and an out-of-band `GET` proves **the bytes behind the signed link are
+the bytes the host uploaded** — `HTTP 200, 70 of 70 bytes, head 137,80,78,71,13,10,26,10`. `[A:audio]` (5)
+registers an `audio/mpeg` file with an ID3 head and asserts the panel draws `<audio controls>` rather than
+a broken `<img>`, and that only one preview is on screen at a time. `[A:replace]` (9) replaces the photo
+row and asserts one row where the replaced one was, the old key gone from the registry, a **freshly minted
+key of the same grammar** in its place, the old object's bytes gone and the new ones present, and the new
+row's claims matching its own object. `[A:remove]` (5) removes the audio row and asserts its bytes left
+storage — no orphan object — and, the line that matters for §5.3, that **the delete guard was satisfied by
+the adapter's order rather than by a forced delete**: every surviving row is still `ready`, so the
+tombstone → collect → delete sequence actually ran and no `storage.allow_delete_query` shortcut was taken
+by the product path.
+
+### 37.3 Journey B — a second account, and one honest non-observation
+
+`[B:isolation]` (10 lines) signs up a second account, points it at the *first* wedding and probes every
+route by which somebody else's file could become visible: the page never lists another wedding's file (it
+prints its own "could not be opened" copy), names no object key (asserted as *no key-shaped string in the
+rendered text*), mints no preview link (no successful sign request on host-2's session), a REST read for
+that wedding returns `HTTP 200, body []`, a direct object read **by the exact minted key** is refused
+`HTTP 400 … Object not found`, a non-owner cannot mint a signed URL for that key, a non-owner cannot
+register a row against another wedding (`HTTP 403`, code `42501`, row-level security), the owner's registry
+is exactly as journey A left it (`1 row(s) … 0 row(s) anywhere carry the 'intruder' label`), and — the
+line that keeps the six refusals above honest — the same object is **still readable by its owner**
+(`owner read HTTP 200`), so the refusals were not a dead bucket.
+
+One measurement here is a limit on the section, not on the product: `[B:isolation] whether the panel even
+mounted for a stranger` reports **it did not** — the project page refused first. So B licenses *storage,
+REST and RLS* isolation, and it licenses "a stranger never reaches the panel". It does **not** license any
+claim about what the panel would render if it were mounted for a non-owner, because that state was never
+reached and this tier did not force it. Journey B's precondition guard (`state.photoKey` must exist before
+the string `undefined` can be used as a probe needle) is what caught run 01 attempting exactly that.
+
+### 37.4 Journey C — N1 to N4, with the two header views made explicit
+
+The convention is printed before any assertion, because it changes a count by a third: **112 http(s)
+entries, of which 34 are `OPTIONS` preflights**; origin tallies count every entry, media and auth
+assertions use non-`OPTIONS` only. Origins seen: `http://127.0.0.1:4173` 29 (the local preview of the
+production bundle), `http://127.0.0.1:54400` 80 (this repository's own stack),
+`https://fonts.googleapis.com` 1 and `https://fonts.gstatic.com` 2 (declared in `index.html`). Nothing
+else. **N1** holds that as a check plus a non-vacuity guard (`112 http request(s), 21 of them on the
+storage path`) and a scheme census that allows the three in-page `data:image/svg+xml;base64,…` URLs it
+finds rather than pretending they were not there. **N2**: 42 authorized requests, all to the local API;
+the three signed media `GET`s carried **no** `authorization` header (a credential on them would turn a
+short-lived link into a copyable session); non-vacuity by request type (`Fetch, Image, Media`). **N3**:
+zero requests on `/object/public/`, with `/object/sign/` appearing 10 times as the positive sibling, so
+the zero is a measured refusal and not an unused code path.
+
+**N4** is the token-containment check, and it is the reason this section had to learn something about
+Chrome. The 287-character token — taken from the `?token=` of a minted sign URL, and recorded as being in
+the *hunt set* rather than in a printed value — appears on screen exactly where the panel renders media
+(media `src` hits 1; body text false; text nodes none; hrefs 0; field values 0; status/alert regions 0), is
+not persisted anywhere (`localStorage 0, sessionStorage 0, cookie false`), and appears in **0 of 105
+recorded log lines** — that last one scanned from the raw capture before masking, because the raw scan is
+the evidence and the mask is only what lets the log be kept.
+
+The referrer half needed a repair to be true. `Network.requestWillBeSent` carries the header set the
+**renderer proposed**; `Network.requestWillBeSentExtraInfo` carries what went **on the wire**, after Chrome
+applies referrer policy. A page under `<meta name="referrer" content="no-referrer">` therefore shows a
+proposed `Referer` in the first view and sends none. Reading only the proposed set would have let this
+harness report a leak the browser never committed — and, worse, reading only the *wire* set without
+checking that it was captured would have let an absent view masquerade as a clean one. So three lines
+stand together, verbatim from the capture:
+
+* `N4 referrer: proposed against sent, for the signed requests` — *3 signed request(s): 3 proposed a
+  referer, 3 had the wire view captured, 0 of those put one on the wire* (measurement)
+* `N4: the wire header set was captured for every signed preview request` — *3 of 3 had
+  `Network.requestWillBeSentExtraInfo` reported — an absent wire view must not read as an unmeasured pass*
+* `N4: the preview request carries no referrer on the wire` — *0 signed request(s) sent a referer (the
+  renderer proposed 3)*
+
+with the policy itself bound in the page that made the request (`meta[name=referrer]
+content="no-referrer"`). I10's share of this area is the same rule as everywhere else: the tier redacts
+the service key up front, tracks discovered tokens as bookkeeping, and never prints one.
+
+### 37.5 Journey D — §33's a11y repair re-measured in the browser, at two viewports
+
+46 lines, 23 each at `375x740 · dpr 3 · mobile` and `768x1024 · dpr 2 · tablet`, and they measure the
+repair §33 shipped rather than restating it. The replace radio is `16x16` on its own and **`44x46`
+effective through its wrapping label**, its own centre still answers to the radio, its label's box sits
+within 3 px of the drawn row's border (`left edge −677 px past the border box, right edge 1 px past`,
+negative meaning inside; §33.2 had predicted a 2 px overhang and the measured figure is 1 px), and the
+label's box does not swallow the text run's centre. The `column-gap 8px` §33 asked for is read back off
+computed style. Every named control clears 24 px (`Preview` 70x44, `Remove` 69x44, the kind select and the
+two inputs at the full column width, `Upload file` 86x44, `Replace the chosen file` 157x44), each carries
+a name, the panel holds at least one media element before any host/path claim is made, the `img` preview
+points at `127.0.0.1:54400` on the sign path and never at a public object path, and the document has
+**0 px** horizontal overflow at both viewports. Two screenshots are written beside the log
+(`q6-logs/s6-panel-375x740.png`, `s6-panel-768x1024.png`).
+
+### 37.6 Chrome 154 removed two CDP shapes the Stage 3 driver depended on
+
+Run 01 failed on `DOM.requestNodeId` → `-32601 wasn't found`, then on the `objectId` forms of
+`DOM.describeNode` and `DOM.setFileInputFiles` → `-32000 Either nodeId, backendNodeId or objectId must be
+specified`. Both are browser-side removals, not repository regressions; the driving `chrome-devtools-mcp`
+server is pinned to an upstream commit ahead of its last release tag, so the API surface moved under a
+script that had passed for a whole stage. The working shape is
+`DOM.enable` → `DOM.getDocument({depth:0})` → `DOM.querySelector({nodeId, selector})` →
+`DOM.setFileInputFiles({files, nodeId})`, which is what `setFileByLabel()` in
+`scripts/stage5-browser-driver.mjs` now does: it clears stale `data-stage6-file` marks, resolves the input
+from its label in-page, marks it, sets the file through the selector path, reads `{name,size,type,count}`
+back off the element, clears the marks in `finally`, and throws if no file input answers the label **or**
+if it still holds no file.
+
+Two consequences worth stating. The repair lives in the **tracked Stage 3 driver**, so that driver is now
+Chrome-154-proof too — but it has not been re-run since, and this section does not claim Stage 3's browser
+tier at any head. And `setFileInputFiles` is genuinely gone in the `objectId` form, so any script that kept
+that shape, including in the evidence logs, describes a browser that is no longer installed here.
+
+### 37.7 The tier's own instruments were wrong eight times before the tier could be trusted
+
+Every one of these was root-caused with a measurement and then repaired in the instrument. Run 01 and run
+02 were each stopped by findings of this kind rather than by product defects. **None was repaired by
+weakening an assertion**, and no finding was closed by editing its threshold.
+
+1. **CDP node-id removal** (run 01) — the 37.6 repair.
+2. **A stray `}` in the run-01 teardown SQL** raised `syntax error at or near "}"`, which skipped that
+   run's cleanup silently and left 2 accounts and 1 wedding behind. Cleaned explicitly and verified
+   `0|0|0`. A `finally` block is not a guarantee if its first statement throws.
+3. **`storage.protect_delete()` blocked the cleanup `DELETE`** — and the reason is a fact worth keeping on
+   its own terms. It is a **`BEFORE DELETE FOR EACH STATEMENT`** trigger on `storage.objects`, so it raises
+   `42501` **even when the DELETE matches zero rows**. Both forms were measured on this stack. The
+   documented escape hatch is `set local storage.allow_delete_query='true'` inside a transaction, and the
+   teardown now opens one explicitly. The product reading: the bucket's delete guard is louder than a
+   matched-row test, so it cannot be bypassed by a filter that happens to match nothing — which is why
+   journey A's `[A:remove]` assertion (guard satisfied *by the adapter's order*, not by a forced delete)
+   is the one that carries weight there.
+4. **`column reference "id" is ambiguous`** in run 02's leftover-object count — an unqualified `id` inside
+   a statement touching both `storage.objects` and `weddings`. It aborted `finally` before the three
+   cleanup checks printed, so a green-looking tail was actually an unmeasured tail. Qualified to
+   `w.id::text`.
+5. **The C travel allowlist was case-sensitive.** PostgREST/GoTrue emit both `authorization` and
+   `Authorization` depending on path, so a declared-field match on lowercase alone failed a request that
+   was fully authorised to go where it went. Fixed by matching declared fields case-insensitively —
+   the rule was right, the comparison was wrong.
+6. **The publishable key in `Authorization: Bearer …` was undeclared**, not absent. supabase-js puts the
+   publishable key there on pre-session calls to the local API, so the honest fix was to *declare*
+   `apikey` and `authorization` as expected fields for that origin — the prelude already proves the key is
+   public by design, since it ships inside `dist/`. Declaring it is a truth change; suppressing the check
+   would have been a weakening.
+7. **The referrer check read the renderer's proposal as the wire** — 37.4, with its own non-vacuity
+   assertion added so the wire view cannot be silently missing.
+8. **`Math.abs()` on a signed overhang.** The row-border check printed `-299 px left` as a violation,
+   because the label sitting comfortably *inside* the row is negative and the check wanted only the
+   *past-the-border* direction. Made one-sided (`≤ 3` on each of left and right), which is both stricter
+   and correct — a two-sided bound would also have passed a label overflowing inward over the text run.
+
+Run 01 and run 02 are retained as captures, and this section names the run it admits (03) rather than
+describing a tier as passing in the abstract.
+
+### 37.8 What this tier does not license
+
+* **The 60-second expiry is not measured.** `PREVIEW_TTL_SECONDS = 60` is what the adapter asks for; the
+  tier proves a token exists, is 287 characters, lands only in a media `src`, and is not persisted. No case
+  waited a token out. "Short-lived" in the panel copy is the product's promise, not this section's finding.
+* **Nothing about a guest.** §7 still rules guest-facing asset delivery out of the stage, the published
+  snapshot still asserts no `object_key` (Stage 3 battery B28), and journey B proves a *second host
+  account* cannot see a first host's files. An invitation showing a family photograph remains unbuilt, and
+  would need the threat model this document still does not have.
+* **Not driven here:** the `generated_output` kind (no uploader offers it; an unknown kind is answered by
+  the table's `CHECK`); the panel mounted for a non-owner (37.3); retries, interrupted `PUT`s, concurrent
+  uploads and the two §5.3 rollbacks under real failure — the unit tier pins those orderings against a
+  recording stand-in, and this tier did not simulate a broken network; `staged` rows orphaned by a crash
+  between register and upload; any browser other than this one Chromium on this OS; hosted Supabase in any
+  shape; and real family files at real sizes (the largest byte string this tier moved was 70).
+* **One Chromium, one OS, one viewport pair.** D's numbers are measurements of this build on this machine.
+
+### 37.9 Consequence for the stage's status
+
+The §18 blocked set is now closed, item by item, at the state that carries the code: the serial HTTP chain
+went green (**220 tests / 0 fail** across six files, `q6-logs/s6-api-run-04.log`, with the Stage 6 file now
+**34** cases rather than the 33 §18 quoted), both Stage 6 SQL batteries went green together with every
+historical suite at a schema that contains Stage 6 (**90 registry + 80 storage-policy**,
+`sql_chain_exit_code=0`, `q6-logs/s6-sql-chain-05.log`), the `UPL-07` rev-2 repair ran (§36), the unit tier
+is **473 tests / 32 files** green, and **the browser tier ran and passed** (this section). So: Stage 6 is
+**locally qualified**, at `5c8215c` plus the tier's own committed instruments, and the row in
+`docs/product/feature-readiness.md` moves from `FOUNDATION` to `IMPLEMENTED (local stack only)` — not
+further than that, because 37.8's list and §18's hosted half are unchanged.
+
+Two disclosures bind that sentence. First, run 03 measured the `5c8215c` bundle with
+`scripts/stage6-browser-assets.mjs` and the driver repair still uncommitted, so the instrument and the
+evidence were not in the same tree; the certification below puts them there. Second, the head that carries
+this section is one docs-only commit ahead of the head those numbers were taken at, and it also moves
+`src/` (the panel's stale "not yet qualified" header is corrected in the same commit set), so `dist/` has
+to be rebuilt and the fingerprint re-derived. It is certified the way §22.7 prescribes: the gate set
+re-taken at the pushed SHA into `q6-logs/`, **with the browser tier re-run at that head**, and no further
+audit section written to predict them.
+
+**37.10 One checker coverage gap, recorded rather than repaired.** While reconciling
+`docs/product/feature-readiness.md`'s adapter row this sitting checked whether
+`canonical-table-read-outside-the-adapter` covers the table Stage 6 added. It does not: the rule's
+alternation in `scripts/check-product-contract.mjs:226` names ten tables and `wedding_assets` is not among
+them, so a page could write `supabase.from('wedding_assets')` outside the adapter and `product:check` would
+pass. Measured against the current tree the gap is empty — all five `.from('wedding_assets')` calls in `src/`
+sit in `src/integrations/supabase/weddingAssets.ts:206,297,336,419,443` — and RLS plus the minting trigger
+refuse such a read anyway, so nothing is unsafe today; what is unguarded is the *convention*, and only the
+checker can hold it. The repair is one alternation term plus a self-test shape, and it was deliberately not
+made here, for the reason §12 already gave for the `storage`-schema gap: widening a named list changes what
+the historic gate certifies mid-closure, and the certification this section's head needs (§37.9) has to
+compare against a stable rule set. Recorded as a Stage 7 opening action with its file and line, which is
+what makes it a debt rather than an oversight.

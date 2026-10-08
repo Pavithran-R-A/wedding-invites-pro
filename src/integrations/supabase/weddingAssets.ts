@@ -35,16 +35,20 @@
 //     names a derivative the platform would produce rather than a file a host uploads, and any kind
 //     the table does not know is still answered by the CHECK rather than by that list.
 //
-// WHERE THIS FILE HAS BEEN MEASURED. Its client-side half is: `src/test/weddingAssetUploadRules.test.ts`
-// exercises every exported function here against a recording stand-in and asserts the refusals, the
-// payload shapes and the call order, and three mutations of this file (a widened MIME set,
-// a `>=` ceiling, an `upsert: true`) each break the case that should notice, so the suite is not
-// passing by ignoring the code. What still has not happened is a call from this module to a running
-// stack: the Stage 6 HTTP battery speaks REST and Storage directly rather than through these
-// functions, and the browser tier has not run at all. Every statement above about what the database
-// does was read off the migration, the Stage 6 SQL battery and the HTTP battery's `UPL-07` case —
-// the last of those is where the confirmation edge was put markup bytes behind an allowed
-// declaration and answered that the object was stored as declared.
+// WHERE THIS FILE HAS BEEN MEASURED. Two tiers call these functions. The unit tier is
+// `src/test/weddingAssetUploadRules.test.ts`: every exported function against a recording stand-in, the
+// refusals, the payload shapes and the call order, and three mutations of this file (a widened MIME set,
+// a `>=` ceiling, an `upsert: true`) each break the case that should notice, so the suite is not passing
+// by ignoring the code. The browser tier is `scripts/stage6-browser-assets.mjs`
+// (`q6-logs/s6-browser-run-03.log`: 138 checks, 0 findings), which drives this module from the production
+// bundle against the real local stack with real `File` objects — there each of the five refusals is
+// proved by the request count *not moving*, and the accepted path by the minted key, the `ready` edge and
+// the bytes behind a signed URL. Audit §37 records both. What has still not happened is a call from this
+// module against a *hosted* stack, and the Stage 6 HTTP battery speaks REST and Storage directly rather
+// than through these functions. Every statement above about what the database does was read off the
+// migration, the Stage 6 SQL battery and the HTTP battery's `UPL-07` case — the last of those is where
+// the confirmation edge was put markup bytes behind an allowed declaration and answered that the object
+// was stored as declared.
 
 import { supabase } from './client';
 import { describe, codeOf } from '@/lib/safeError';
