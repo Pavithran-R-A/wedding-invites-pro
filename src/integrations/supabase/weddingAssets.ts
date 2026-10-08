@@ -246,8 +246,6 @@ export async function uploadAsset(
   if (refusal !== null) return refused(refusal);
   const byteRefusal = await contentRefusal(draft, file);
   if (byteRefusal !== null) return refused(byteRefusal);
-  const bytesRefusal = await contentRefusal(draft, file);
-  if (bytesRefusal !== null) return refused(bytesRefusal);
 
   const registered = await registerAsset(weddingId, draft);
   if (registered.error !== null) return { data: null, error: registered.error };

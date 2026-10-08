@@ -211,6 +211,23 @@ const file = (size: number, type: string, head?: Uint8Array): File => {
   } as unknown as File;
 };
 
+/** The same stand-in, with the head read counted. `contentRefusal` is a pure function of
+ *  `draft.mimeType` and the file's first `SIGNATURE_BYTES`, so a second call with the same two
+ *  arguments cannot answer differently — it can only read the host's bytes again. This is what makes
+ *  a duplicated gate visible to the suite instead of merely invisible in review. */
+const headCountingFile = (type: string, reads: { count: number }): File => {
+  const bytes = HEAD_BY_TYPE[type] ?? PNG_HEAD;
+  return {
+    size: 1024,
+    type,
+    name: "upload",
+    slice: () => {
+      reads.count += 1;
+      return { arrayBuffer: () => Promise.resolve(bytes.slice().buffer) };
+    },
+  } as unknown as File;
+};
+
 const draft = (overrides: Partial<AssetDraft> = {}): AssetDraft => ({
   assetKind: "photo",
   label: "Hall entrance",
@@ -371,6 +388,18 @@ describe("the byte gate: a type claim that has to mean the file's own head", () 
     const relabelled = await uploadAsset(WEDDING, draft(), file(1024, "image/png", JPEG_HEAD));
     expect(relabelled.error).toMatch(/does not hold the bytes/);
     expect(fake.steps()).toEqual([]);
+  });
+
+  it("reaches for the file's head once per upload, so the gate is a check and not a re-read", async () => {
+    // A gate is a decision point; the same decision computed twice adds nothing to it and costs the
+    // host a second read of their own bytes. Stage 7 found `uploadAsset` awaiting `contentRefusal`
+    // twice with the same two arguments; the Stage 7 audit records the finding and its repair.
+    fake.planDb(okInsert, okRow(ROW, READ_BACK_KEY, "ready"));
+    fake.planStorage({ upload: noBytes() });
+    const reads = { count: 0 };
+    const out = await uploadAsset(WEDDING, draft(), headCountingFile("image/png", reads));
+    expect(out.error).toBe(null);
+    expect(reads.count).toBe(1);
   });
 });
 
