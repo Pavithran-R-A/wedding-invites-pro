@@ -1725,9 +1725,12 @@ rotate_invitation_token wrapper_is_invoker=true impl_is_definer=true anon_grants
   -- Stage 8 adds the third, and it is the same kind of thing rather than a new kind: a household
   -- guest is a bearer-secret caller with no account, so `api.resolve_guest_invitation()` reads its
   -- credential from the request and takes no argument, exactly as the other two doors do. The sixth
-  -- guest verb, `api.submit_guest_rsvp`, deliberately does *not* join this list — it has one
-  -- argument, the guest's own answer, and a door that accepts a body must not be a door that accepts
-  -- a token by signature. So this line grows only when a new kind of credential is given an entry,
+  -- guest verb, `api.submit_guest_rsvp`, does not join this list for a mechanical reason: it declares
+  -- one argument, the guest's own answer, so `pronargs` is 1 and this query cannot see it. That is
+  -- not a claim that it carries no credential — the same body reads the same `x-guest-token` header,
+  -- which is why the guest door's refusal behaviour belongs to Stage 8's own battery and not to a
+  -- census of signatures. What G4 really names is narrower: the exposed functions whose *only* input
+  -- channel is the request. This line therefore grows when a new credential is given an entry point,
   -- which is the event worth failing on.
   PERFORM pg_temp.st3p_eq('G4 the argument-free api functions are exactly the doors that read a credential from the request',
     (SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname COLLATE "C"), '(none)')
