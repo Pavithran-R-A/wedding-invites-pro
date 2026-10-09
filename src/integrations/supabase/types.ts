@@ -1,5 +1,5 @@
 // Database types for the canonical Stage 5 schema: the RLS-governed tables in `public`,
-// and the eight browser-callable RPCs in `api`.
+// and the thirteen browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -64,9 +64,34 @@
 // at draft -> reviewed and re-compares at reviewed -> approved — and `api
 // .preview_invitation_document`, the host's live document beside the server's own verdict on
 // it. What the file does NOT contain is the maintenance surface: the eleven
-// `internal_api.tradition_pack_*` functions are in no schema this file describes, because
-// `--schema` names only `public` and `api`, and a type that named a function no browser may
+// `internal_api` bodies the HTTP battery lists by name as `MAINTENANCE_ONLY`
+// (`supabase/tests/api/stage3_publication.test.mjs:1092-1104`) are in no schema this file
+// describes, because `--schema` names only `public` and `api`, and a type that named a
+// function no browser may
 // execute would advertise a door that is shut.
+//
+// Stage 7 added five RPCs and no columns: the tables the approval workflow writes into were
+// created with the scaffold and already appear above, which is why its regeneration is a diff
+// of `api.Functions` and nothing else. Three of the five are host verbs that take a wedding or
+// request id and act through the caller's JWT; `resolve_family_review` is the reviewer's door
+// and carries `Args: Record<PropertyKey, never>` for the same reason the guest door does — the
+// credential arrives in the `x-review-token` header, and a parameter would be a query string.
+// `submit_family_review` is the one Stage 7 name whose generated `Args` are a lie by omission:
+// PostgreSQL records no nullability for a function parameter, so the generator prints
+// `p_message: string` and `p_section_key: string` where the function in fact takes either as
+// NULL — an approval with no note is exactly that call, and A-01 records the row it produces.
+// A-05 is the other half of the same fact: *omitting* either key is a different call, refused
+// 404/PGRST202 by the router, so the null has to travel explicitly. The adapter passes the
+// nulls the database accepts and says so at the call site; the type is left as the generator
+// printed it, because this file's claim is that it can be re-derived, not that it was tidied.
+//
+// The Stage 7 regeneration is the second time the formatter note above has bitten: CLI 2.119.0
+// prints `Generated TypeScript is unformatted. Format it with: npx oxfmt <file>`. `oxfmt` is
+// not a project dependency either, was not run, and nothing was installed to obtain it. The
+// raw stdout was diffed against this file instead, and only the five function entries — in the
+// generator's own key order, optionality and `Record<PropertyKey, never>` spelling — were
+// applied. `npm run dbtypes:check` is what makes that verifiable: it compares every column of
+// every public table against the migrations that produce them.
 export type Json =
   | string
   | number
@@ -88,6 +113,10 @@ export type Database = {
         Args: { p_wedding_id: string }
         Returns: Json
       }
+      get_approval_requests: {
+        Args: { p_wedding_id: string }
+        Returns: Json
+      }
       get_invitation_publication_state: {
         Args: { p_wedding_id: string }
         Returns: Json
@@ -105,8 +134,25 @@ export type Database = {
         }
         Returns: Json
       }
+      request_family_review: {
+        Args: {
+          p_expires_at?: string
+          p_reviewer_display_name: string
+          p_version_id: string
+          p_wedding_id: string
+        }
+        Returns: Json
+      }
+      resolve_family_review: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
       resolve_public_invitation: {
         Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      revoke_family_review: {
+        Args: { p_request_id: string }
         Returns: Json
       }
       revoke_invitation_publication: {
@@ -114,6 +160,15 @@ export type Database = {
         Returns: Json
       }
       rotate_invitation_token: { Args: { p_wedding_id: string }; Returns: Json }
+      submit_family_review: {
+        Args: {
+          p_decision: string
+          p_message: string
+          p_reviewer_label: string
+          p_section_key: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

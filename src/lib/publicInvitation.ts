@@ -332,8 +332,18 @@ const parseList = <T>(value: unknown, parse: (entry: unknown) => T | null): T[] 
 export function parsePublicInvitation(payload: unknown): PublicInvitation | null {
   const envelope = asObject(payload);
   if (!envelope || envelope.available !== true) return null;
+  return parseInvitationObject(envelope.invitation);
+}
 
-  const raw = asObject(envelope.invitation);
+/**
+ * The document, read apart from whatever envelope carries it. Stage 7 needed this half
+ * named: `api.resolve_family_review` returns the same projection nested one level deeper
+ * (`{ available: true, review: { invitation: {...} } }`), and a reviewer must see exactly
+ * the document a guest would, not a second parser that could drift from the first. Same
+ * fields, same wholesale refusal, one implementation.
+ */
+export function parseInvitationObject(value: unknown): PublicInvitation | null {
+  const raw = asObject(value);
   if (!raw) return null;
 
   const language = parseLanguage(raw.language);

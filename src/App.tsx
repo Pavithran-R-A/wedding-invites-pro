@@ -7,10 +7,10 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 
-// Each route is its own chunk. A guest who opens one shared link gets this file, the
-// resolver and the renderer — not the editor, the dashboard, the sign-in forms or the
-// landing page, none of which they will ever see. The consequence is measured in
-// docs/audits/stage-3-public-invitation.md rather than asserted here.
+// Each route is its own chunk. A guest who opens one shared link, and a relative who opens a
+// review link, each get this file, their own resolver and the renderer — not the editor, the
+// dashboard, the sign-in forms or the landing page, none of which they will ever see. The
+// consequence is measured in docs/audits/stage-3-public-invitation.md rather than asserted here.
 const Index = lazy(() => import("./pages/Index"));
 const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
@@ -20,6 +20,7 @@ const CreateProject = lazy(() => import("./pages/CreateProject"));
 const ConfigureProject = lazy(() => import("./pages/ConfigureProject"));
 const EditProject = lazy(() => import("./pages/EditProject"));
 const PublicInvitation = lazy(() => import("./pages/PublicInvitation"));
+const FamilyReview = lazy(() => import("./pages/FamilyReview"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const TermsOfService = lazy(() => import("./pages/TermsOfService"));
 const CookiePolicy = lazy(() => import("./pages/CookiePolicy"));
@@ -43,7 +44,8 @@ const RouteFallback = () => (
  *  through it: they have no account, the invitation needs no session to read, and a page that
  *  asks for one is a page that touched a stranger's device for nothing.
  *
- *  `PublicInvitation` is a sibling of this component rather than a child of it — see `App`. */
+ *  `PublicInvitation` and `FamilyReview` are siblings of this component rather than children of
+ *  it — see `App`. */
 const AccountApplication = () => (
   <AuthProvider>
     <Suspense fallback={<RouteFallback />}>
@@ -80,6 +82,11 @@ const App = () => (
                 would turn every shared link into a login wall — which is the opposite of
                 the product. */}
             <Route path="/i/:token" element={<PublicInvitation />} />
+            {/* Stage 7's reviewer is a guest of the same kind: a relative holding a credential,
+                with no account and nothing to sign in to. Same reason, same placement — and the
+                chunk is separate, because a relative who came to approve an invitation has no
+                more use of the editor than a guest does. */}
+            <Route path="/r/:token" element={<FamilyReview />} />
             <Route path="/*" element={<AccountApplication />} />
           </Routes>
         </Suspense>
