@@ -1573,6 +1573,7 @@ DECLARE
   appr_version  uuid;
   appr_request  uuid;
   appr_feedback uuid;
+  pin_household uuid;
   payer         uuid;
   probe_owner   uuid;
   probe_project uuid;
@@ -2588,10 +2589,23 @@ BEGIN
   -- like every other frozen-history table. What that buys is stated precisely, because
   -- wedding_a carries several pins at once and Postgres does not promise which one it
   -- names first: the delete is refused, and nothing in it is destroyed either way.
+  --
+  -- From the Stage 8 head this mint needs a family of its own. Stage 8 adds
+  -- `one_live_guest_token_per_household`, the guest mirror of Stage 3's
+  -- `one_live_public_token_per_publication`, and `household_a` already holds the seeded live
+  -- credential at `:440-443` — so reusing that family here would make the fixture collide with a
+  -- rule this suite is not testing, and the collision would arrive as a `unique_violation` inside
+  -- an unrelated assertion. The new household is created and dropped inside this group: it is the
+  -- same claim, one family that has never had a link, and no later group sees an extra family on
+  -- wedding_a. Nothing about the credential under test changed — same kind, same wedding, same
+  -- publication, same live state.
+  pin_household := gen_random_uuid();
+  INSERT INTO public.guest_households (id, wedding_id, display_name, salutation, expected_party_size)
+    VALUES (pin_household, s.wedding_a, 'The Pin Family', 'Pin family', 2);
   INSERT INTO private.access_tokens (token_hash, token_kind, wedding_id, publication_id,
                                      household_id, expiry_policy, created_by_role)
     VALUES (repeat('cd', 32), 'guest_invitation', s.wedding_a, s.publication_a1,
-            s.household_a, 'no_expiry', 'postgres');
+            pin_household, 'no_expiry', 'postgres');
 
   v := pg_temp.st2_err(format(
     'DELETE FROM public.weddings WHERE id = %L::uuid', s.wedding_a::text));
@@ -2615,6 +2629,11 @@ BEGIN
     RAISE EXCEPTION 'FAIL 11e: the refused delete destroyed the seeded credential';
   END IF;
   passed := passed + 3;
+
+  -- Teardown, not a claim: the family this group minted goes with the credential that pinned it, so
+  -- no later group reads an extra household on wedding_a. The order matters and is the same rule —
+  -- deleting the family first would be refused by the NO ACTION this group exists to demonstrate.
+  DELETE FROM public.guest_households WHERE id = pin_household;
 
   -- ... and the reason this row could be tightened without changing any outcome: a
   -- token that pins nothing but its own wedding cannot be written. Every mint must name
