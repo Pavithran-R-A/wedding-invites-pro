@@ -124,10 +124,18 @@ CREATE UNIQUE INDEX one_live_guest_token_per_household
 -- purpose, since Stage 3 counts `length()` characters of one extracted string and this counts the
 -- octets of the whole encoded object. The per-key rule belongs to whichever later stage starts
 -- accepting answers, in the RPC that validates them.
+--
+-- The name is deliberately unchanged. Stage 2 wrote this CHECK inline and unnamed (`:87`), so Postgres
+-- generated `rsvp_responses_answers_check`, and `supabase/tests/stage2/20_attacks.sql:1495` pins that
+-- exact string in the refusal it expects from a non-object answer. Re-adding the wider bound under a
+-- fresh name would have made that historical probe report a different constraint, and the only way to
+-- tell "the rule moved" from "the rule vanished" would have been to edit the old test — which is the
+-- one move a qualification stage may not make to obtain a pass. Dropping and re-adding under the same
+-- name keeps the refusal self-describing at both heads.
 ALTER TABLE public.rsvp_responses
   DROP CONSTRAINT rsvp_responses_answers_check;
 ALTER TABLE public.rsvp_responses
-  ADD CONSTRAINT rsvp_responses_answers_bound CHECK (
+  ADD CONSTRAINT rsvp_responses_answers_check CHECK (
     jsonb_typeof(answers) = 'object'
     AND octet_length(answers::text) <= 2000
   );
@@ -1209,7 +1217,7 @@ COMMENT ON INDEX private.one_live_guest_token_per_household IS
 COMMENT ON CONSTRAINT access_tokens_kind_shape ON private.access_tokens IS
   'Per-kind row shape. Stage 8 added approval_version_id IS NULL to the guest_invitation and rsvp branches, so no household credential can point into a family''s approval version; the other three branches are Stage 3''s words unchanged.';
 
-COMMENT ON CONSTRAINT rsvp_responses_answers_bound ON public.rsvp_responses IS
+COMMENT ON CONSTRAINT rsvp_responses_answers_check ON public.rsvp_responses IS
   'Optional-question slot: an object, and at most 2000 octets of stored text. A CHECK cannot count keys or type values, so the per-key rule belongs to the RPC that accepts answers.';
 
 COMMENT ON FUNCTION internal_api.publish_invitation_version(uuid, uuid, timestamptz) IS
