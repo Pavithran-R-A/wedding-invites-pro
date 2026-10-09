@@ -1284,14 +1284,36 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the '
-    || CASE WHEN pg_temp.s5_at_least('stage7') THEN 'thirteen names' ELSE 'eight names' END
+    || CASE WHEN pg_temp.s5_at_least('stage8') THEN 'nineteen names'
+            WHEN pg_temp.s5_at_least('stage7') THEN 'thirteen names' ELSE 'eight names' END
     || ' it is meant to expose — Stage 4 shipped the seven pack-and-publication verbs, Stage 5 adds '
     || 'the document preview, and from Stage 7 the host''s three review verbs and the reviewer''s '
-    || 'open and answer doors add five more, all of them wrappers over `internal_api` bodies — '
+    || 'open and answer doors add five more'
+    -- The label has to add up to the array it names: at the Stage 7 head that was 7 + 1 + 5 =
+    -- thirteen, and Stage 8 appends six names rather than revising any of them. All six arrive as a
+    -- pair — an invoker wrapper over a definer body — so the twin-less maintenance half M1
+    -- enumerates stays at eleven and M5 stays empty. The clause is head-aware, and the sentence
+    -- above is left exactly as the Stage 7 head measured it.
+    || CASE WHEN pg_temp.s5_at_least('stage8') THEN
+              ', and from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
+              || 'read the link state — plus the two doors a guest walks through, to read its own '
+              || 'invitation and to answer it, add six more'
+            ELSE '' END
+    || ', all of them wrappers over `internal_api` bodies — '
     || 'which is the shape §B asked for: '
     || 'the privileged half of the new pair is reachable by nested call and by nothing else',
     v_bad,
-    CASE WHEN pg_temp.s5_at_least('stage7') THEN
+    CASE WHEN pg_temp.s5_at_least('stage8') THEN
+      ARRAY['create_invitation_version', 'get_approval_requests',
+            'get_guest_invitation_state', 'get_invitation_publication_state',
+            'issue_guest_invitations', 'preview_invitation', 'preview_invitation_document',
+            'publish_invitation_version', 'request_family_review', 'resolve_family_review',
+            'resolve_guest_invitation', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_guest_invitation',
+            'revoke_invitation_publication', 'rotate_guest_invitation',
+            'rotate_invitation_token', 'submit_family_review',
+            'submit_guest_rsvp']::text[]
+    WHEN pg_temp.s5_at_least('stage7') THEN
       ARRAY['create_invitation_version', 'get_approval_requests',
             'get_invitation_publication_state', 'preview_invitation',
             'preview_invitation_document', 'publish_invitation_version',
