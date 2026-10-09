@@ -492,12 +492,17 @@ GRANT EXECUTE ON FUNCTION internal_api.resolve_family_review() TO anon, authenti
 -- new row. `approval_feedback` has no UPDATE path and no `updated_at` (C36), so nothing in
 -- this design can rewrite what was said.
 --
--- 5.2 The immutability rule. The body touches `invitation_versions` in one place — a
--- `SELECT` of `version_number` — and the snapshot is read, never assigned. `private` holds
--- the only snapshot builder, and it is called by the freeze path, not by review. So
--- "reviewing cannot silently mutate the approved document" is not a promise this function
--- has to keep politely; it is a grant shape (`authenticated` has SELECT on
--- `invitation_versions` and nothing else) plus a BEFORE UPDATE trigger that answers 42501.
+-- 5.2 The immutability rule. The body touches `invitation_versions` in one place — the
+-- `p_section_key` test at `:598-606`, the one that answers 'that note does not name a
+-- section of this invitation'. It reads the pinned version's
+-- `snapshot -> 'sections' -> 'items'` and assigns nothing, so the snapshot is read, never
+-- written. `private` holds the only snapshot builder, and it is called by the freeze path,
+-- not by review. So "reviewing cannot silently mutate the approved document" is not a
+-- promise this function has to keep politely; it is a grant shape (`authenticated` has
+-- SELECT on `invitation_versions` and nothing else — the read-only list at
+-- `20260925120500_stage2_rls_and_grants.sql:27-44`, from which the table is absent on the
+-- write side) plus `versions_immutable_no_update`/`versions_immutable_no_delete` at
+-- `20260925120200_stage2_versions_and_publication.sql:50, 53`, which answer 42501.
 
 CREATE FUNCTION internal_api.submit_family_review(
   p_decision text,
@@ -914,7 +919,7 @@ COMMENT ON FUNCTION internal_api.resolve_family_review() IS
   'Anonymous review door. Reads the x-review-token request header, shape-checks it before hashing, and answers with the guest projection plus review metadata for a live credential on a pending request, or {"available": false} for every other case including a malformed, forged, revoked, expired, superseded or answered one. Stamps last_used_at.';
 
 COMMENT ON FUNCTION internal_api.submit_family_review(text, text, text, text) IS
-  'Anonymous review answer. Credential arrives in the x-review-token header, never as an argument. Writes one append-only approval_feedback row and moves the request out of pending; refuses a second answer, refuses a note pinned to a section the frozen snapshot does not contain, and never touches invitation_versions or its snapshot.';
+  'Anonymous review answer. Credential arrives in the x-review-token header, never as an argument. Writes one append-only approval_feedback row and moves the request out of pending; refuses a second answer, refuses a note pinned to a section the frozen snapshot does not contain, reads that snapshot''s section keys for the refusal and writes nothing to invitation_versions.';
 
 COMMENT ON FUNCTION api.resolve_family_review() IS
   'INVOKER single-statement wrapper over the anonymous review door. Zero arguments, so the credential cannot be addressed in a query string.';
