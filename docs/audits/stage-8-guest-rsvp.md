@@ -505,3 +505,77 @@ before `c8d6090` went out and the readings agree with it.
 Headroom when this section was committed, `df -k /c`: **606164 KiB, then 660096 KiB available** — a further fall, and
 still ~390 MiB below the 1048576 KiB floor. Every tier §6 names as owed remains unrun. Nothing in this section is a
 pass, and none of the commits above claims one.
+
+## 7. The volume filled up, and Docker's own log names the cause: the blocker, stated with its evidence
+
+This section exists because §S8-4 could not be run, and because "could not run" is only worth recording when the reader
+can see which instrument refused and why. Everything below is a measurement taken before this section was written; the
+captures are `q8-logs/s8-disk-diagnosis-08.log`, `-09.log`, `-10.log` and `-11.log`. No cluster, container, gate,
+battery or build was started in this session, and none of these numbers is a pass.
+
+### The readings
+
+`df -k` at the repository path, taken twice within two minutes of each other: **0 KiB available** on the first read and
+**370684 KiB available** on the second. WSL agrees on the same volume, and disagrees in the same way
+(`df -h /mnt/c`: **192M**, then **361M**). The two instruments were not reconciled by picking the friendlier number: on
+a volume that Windows is actively committing and reclaiming, a free-space reading of that size is a rounding error, and
+both readings are reported. Against this stage's own floor of 1048576 KiB per tier, the shortfall is **677892 KiB**
+(662 MiB) on the more generous reading and the **whole 1048576 KiB floor** on the other, where §6 recorded a shortfall
+of 442412 KiB — the fall continued while §6 was being committed.
+
+### What is holding the space, and what this pass is not
+
+Read-only `du -sh` and a `find … -iname '*.vhdx' -printf '%s'`, nothing deleted and nothing moved:
+
+| path | bytes | whose |
+|---|---|---|
+| `AppData/Local/Docker/wsl/disk/docker_data.vhdx` | 30,740,054,016 | Docker Desktop's shared data disk — every project's images, containers and volumes live inside this one file |
+| `AppData/Local/wsl/{a6e2ceaf-…}/ext4.vhdx` | 8,586,788,864 | a *different* project's WSL distro |
+| `C:/pagefile.sys` | 18,130,571,264 | Windows, host-managed |
+| `C:/hiberfil.sys` | 6,702,292,992 | Windows, host-managed |
+| `q8-logs/` (this stage's entire evidence trail) | ~1.9 MB total | this pass |
+
+The last row is the finding that matters for the question §S8-9 was asked to answer. This pass produces text: its whole
+evidence directory is under two megabytes, and it cannot account for a swing of several hundred megabytes, let alone
+the tens of gigabytes above. The consumers are Docker's shared disk, a second project's distro, and the OS paging
+files — none of which this stage may touch.
+
+### The engine failure is a consequence, not a separate fault
+
+`docker ps` returns `Error response from daemon: Docker Desktop is unable to start`, which reads like a broken install.
+`AppData/Local/Docker/log/host/com.docker.backend.exe.log` says otherwise, in the daemon's own words, timestamped
+2026-10-09T19:40:54Z to 19:43:13Z:
+
+- `engine linux/wsl shutdown requested (cancel cause: write …\log\vm\init.log: There is not enough space on the disk.)`
+- `unmounting data disk`, then `compacting data disk`, then `skipping data disk compaction`
+- `reporting error to user: write …\log\vm\init.log: There is not enough space on the disk.`
+- the user-facing record: `"title":"Docker Desktop - Disk full"`, `"message":"Docker Desktop cannot continue because
+  the disk is full.\n\nFree up space and then start Docker Desktop again."`, `"actions":["Quit"]`
+
+So the daemon stopped *because the volume was full*, and it could not even write its own log file. The corroboration is
+a clock cross-check rather than an assumption: the two `.vhdx` files carry host-local mtimes of 2026-10-10 01:13 and
+01:14, and the host runs IST (UTC+05:30) while these logs run UTC, so those stamps are 19:43Z — the unmount/compact
+pair above. The writes at the end of this session were Docker's shutdown and compaction, not growth from a battery.
+
+### What that leaves blocked, and what was deliberately not tried
+
+The SQL tier needs a throwaway `postgres:16-alpine`; the HTTP tier needs the existing `localvivaahvarnam` stack; the
+browser tier needs both plus a `dist/` build; the Node gates need headroom to install and build. All four are the same
+engine or the same volume, so §S8-4's batteries, §S8-5's HTTP battery, §S8-8 and §S8-9 are all blocked on one cause.
+
+Not attempted, each for a reason rather than by preference: `docker system prune` or any volume delete (the images and
+volumes inside `docker_data.vhdx` belong to other projects as well as this one, and the directive forbids deleting
+other projects' data or Docker volumes); deleting or shrinking that second project's `ext4.vhdx`; `wsl --shutdown`
+(it would take that distro down too); reconfiguring `pagefile.sys` or `hiberfil.sys` (a host setting, not this
+repository's to change); starting or restarting the shared engine (a human-only action in this environment, and the
+daemon has already refused for a documented reason); resetting the shared database to "establish a clean baseline".
+Nothing in this section deletes anything, and the inadequate `du` run against `AppData/Local/Packages` is kept in
+`-09.log` with its `du-exit=124` timeout rather than retried silently.
+
+### The one action that is a human's
+
+Free space on `C:` — the choice of what to remove is the operator's, not mine, for the reasons in the paragraph above —
+and then start Docker Desktop again. Once there is headroom, this pass resumes at §S8-4: author **and run**
+`supabase/tests/stage8/80_guest_invitation_links.sql`, `90_guest_rsvp.sql` and their runner, then the historical
+re-runs at this head. Until a tier has actually executed, Stage 8 stays where §6 left it: implemented on the branch,
+tripwires widened, and unqualified.
