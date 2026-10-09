@@ -579,3 +579,72 @@ and then start Docker Desktop again. Once there is headroom, this pass resumes a
 `supabase/tests/stage8/80_guest_invitation_links.sql`, `90_guest_rsvp.sql` and their runner, then the historical
 re-runs at this head. Until a tier has actually executed, Stage 8 stays where §6 left it: implemented on the branch,
 tripwires widened, and unqualified.
+
+## 8. Reading the rotate body against its own table found a refusal that was not a refusal
+
+§S8-4 could not run, so it began as a reading task: the migration's six bodies re-read one at a time against the DDL
+they write into, with the batteries' expected rows being collected as they went. `internal_api.rotate_guest_invitation`
+failed that reading, and it failed it quietly — nothing in the file looks wrong until the successor `INSERT` is compared
+with the constraint the same table already carries.
+
+### The defect
+
+Rotate selects the household's live credential at `:415-420` with `WHERE … revoked_at IS NULL`, which admits a row whose
+deadline has passed, then carries that deadline across at `:447` (`v_expires := CASE WHEN v_old.expiry_policy = 'fixed'
+THEN v_old.expires_at END`) and inserts the successor at `:453-464`. A new row's `created_at` defaults to `now()`, and
+`private.access_tokens` requires `CHECK (expires_at IS NULL OR expires_at > created_at)`
+(`20260925120400_stage2_assets_entitlements_secrets.sql:150`). For a link whose `expires_at` is in the past, the
+successor therefore violates that CHECK, and the call aborts with `23514` naming `access_tokens_expires_at_check` —
+after `FOR UPDATE` has already taken the dead row, so the whole transaction rolls back.
+
+The reachable case is ordinary: a host sets "until 1 December" for a family, December passes, the host's screen shows
+that family as `expired` (the word `get_guest_invitation_state` computes at `:512`), and the host clicks the button
+labelled *new link*. What they get is a database error text about a constraint, and no new link. Nothing about the
+product's own vocabulary predicts that outcome, which is what made it worth finding: §3.3 of this migration states the
+carry-across rule in one sentence, and that sentence is true for every deadline **except a spent one**.
+
+Two repairs were rejected before one was taken. Extending an expired link to `no_expiry` would fix the error by making
+the host's deadline silently vanish — the same objection §3.3 already raises against extending a revoked-by-time link.
+Adding an expiry parameter to rotate would widen the wrapper's signature, its grants, the `api` census and the client
+adapter for a case the product already answers with two verbs that exist. The taken repair refuses, actionably, in the
+register the sibling arm at `:425` already uses:
+
+```sql
+  IF v_old.expiry_policy = 'fixed' AND v_old.expires_at <= now() THEN
+    RAISE EXCEPTION 'this household''s link has already expired; withdraw it and send a new one'
+      USING ERRCODE = 'raise_exception';
+  END IF;
+```
+
+at `:442-445`, before the `UPDATE` that would have revoked the old row. Withdraw-then-send gives the family a working
+new credential and keeps the expired one as history; the host is told which two buttons to press, in a sentence that
+names their own wedding's state rather than a constraint. `P0001` is the same SQLSTATE as "this household has no live
+link to rotate", so the client has one branch for "nothing to rotate here" and one for "this one is spent", and both are
+facts about the caller's own wedding — which is why neither is folded into the `insufficient_privilege` refusals that
+must not distinguish those cases from a stranger's.
+
+The `COMMENT` on the body at `:1211-1212` and the design paragraph in `docs/architecture/guest-rsvp-security.md` §3 were
+rewritten in the same commit, because both previously stated the carry-across rule as though it were unconditional.
+
+### What was checked about the repair, and what was not
+
+The shape instrument ran against the pre-edit file (`q8-logs/s8-shape-stage8mig.rotatefix2.txt`, baseline
+`s8-stage8mig.pre-rotatefix.bak`): `RESULT=OK`, `delta CASE=0 END=1 perform=0`, `odd tags introduced=[none]` — the one
+new `IF`/`END IF` pair and nothing else, with every region still returning to depth zero. The two neighbouring
+behaviours were re-read rather than assumed: `issue_guest_invitations` refuses a past `p_expires_at` at `:209` before it
+mints, so it cannot produce the state this rotate arm now refuses; and the publication-retarget `UPDATE` in
+`publish_invitation_version` moves only `publication_id` and leaves `expires_at` and `created_at` together, so the same
+CHECK cannot fire there — the check compares an expiry with its own row's creation, not with the clock.
+
+Not checked, because nothing can be run: that `P0001` is what the probe helper will read back, that the refused call
+leaves the old row live and unrevoked, and that no earlier stage's battery counts the refused path. Those three are the
+first cases the Stage 8 battery will owe this arm, and §S8-4's `R` group will name them.
+
+### The smaller thing that nearly went out in the same commit
+
+The new comment cited `get_guest_invitation_state`'s expired arm as "(`:497-498`)". Those were the correct line numbers
+**before** this edit; the fifteen-line insertion moved that arm to `:512`, so the sentence shipped with a citation its
+own change had invalidated. It was caught by grepping the file for bare `` `:NNN` `` citations after the edit — the only
+self-citation among seven, the rest naming their file immediately — and replaced with a reference to §3.4, which survives
+any future edit to this file. Worth recording because the failure mode is invisible to every instrument this pass has:
+the shape checker, `git diff` and a careful reader all accept a wrong line number.
