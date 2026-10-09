@@ -131,6 +131,25 @@ CREATE FUNCTION pg_temp.s5_head() RETURNS text
 LANGUAGE sql STABLE AS $fn$
   SELECT coalesce(current_setting('app.stage_head', true), '(unset)') $fn$;
 
+-- "From stage <n> up", for the handful of assertions in this file that enumerate a schema rather
+-- than naming objects inside it. A whole-schema census is the only kind of check a later
+-- migration can trip without intending to, so it has to be able to say which head it measured —
+-- the same reason Stage 4's inventory group carries a ladder. The token is the runner's, not the
+-- catalogue's: a head derived from `pg_proc` would make the expectation follow the measurement.
+CREATE FUNCTION pg_temp.s5_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.s5_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 's5_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.s5_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.s5_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END;
+$fn$;
+
 -- The digest of a stored row, recomputed from the row's own material by the same function the
 -- trigger calls. This is the file's central instrument: it is what "stored == current" means,
 -- and it is deliberately *not* a second implementation — an independent re-derivation of the
@@ -1264,14 +1283,27 @@ BEGIN
   SELECT coalesce(array_agg(p.proname ORDER BY p.proname COLLATE "C"), '{}'::text[]) INTO v_bad
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
-  PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the eight names '
-    'Stage 4 shipped plus the one document preview Stage 5 adds, which is the shape §B asked for: '
-    'the privileged half of the new pair is reachable by nested call and by nothing else',
+  PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the '
+    || CASE WHEN pg_temp.s5_at_least('stage7') THEN 'thirteen names' ELSE 'eight names' END
+    || ' it is meant to expose — Stage 4 shipped the seven pack-and-publication verbs, Stage 5 adds '
+    || 'the document preview, and from Stage 7 the host''s three review verbs and the reviewer''s '
+    || 'open and answer doors add five more, all of them wrappers over `internal_api` bodies — '
+    || 'which is the shape §B asked for: '
+    || 'the privileged half of the new pair is reachable by nested call and by nothing else',
     v_bad,
-    ARRAY['create_invitation_version', 'get_invitation_publication_state',
-          'preview_invitation', 'preview_invitation_document',
-          'publish_invitation_version', 'resolve_public_invitation',
-          'revoke_invitation_publication', 'rotate_invitation_token']);
+    CASE WHEN pg_temp.s5_at_least('stage7') THEN
+      ARRAY['create_invitation_version', 'get_approval_requests',
+            'get_invitation_publication_state', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'request_family_review', 'resolve_family_review', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_invitation_publication',
+            'rotate_invitation_token', 'submit_family_review']::text[]
+    ELSE
+      ARRAY['create_invitation_version', 'get_invitation_publication_state',
+            'preview_invitation', 'preview_invitation_document',
+            'publish_invitation_version', 'resolve_public_invitation',
+            'revoke_invitation_publication', 'rotate_invitation_token']::text[]
+    END);
 
   -- ------------------------------------------------- the one grant this migration had to make
   SELECT coalesce(array_agg(p.proname ORDER BY p.proname COLLATE "C"), '{}'::text[]) INTO v_bad

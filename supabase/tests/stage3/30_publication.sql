@@ -1341,13 +1341,40 @@ BEGIN
   -- declare them — PostgREST routes GET/POST on `provolatile`, so a wrapper that
   -- dropped `STABLE` would change the HTTP surface while changing no behaviour.
   --
-  -- Two literals, picked by the declared head, because this census is of the *union* of two
+  -- Three literals, picked by the declared head, because this census is of the *union* of two
   -- schemas' history: Stage 5 added the eighth exposed wrapper, so the Stage 3 and Stage 4 heads
-  -- carry seven rows and every head from Stage 5 up carries eight. Both are exact censuses — the
-  -- branch changes which one is measured against, never how strictly. Nothing later than Stage 5
-  -- touches `api`, which is why one branch is enough for the chain.
+  -- carry seven rows and the Stage 5/6 heads carry eight; Stage 7 added five more, so its head
+  -- carries thirteen. Every branch is an exact census — the branch changes which literal is
+  -- measured against, never how strictly.
+  --
+  -- Each Stage 7 row was read off a throwaway cluster that had applied the whole published chain
+  -- plus the Stage 7 migration (`q7-logs/s7-census-readout-03.log`), then compared line by line
+  -- against what `20261008120000_stage7_family_approval_review.sql` §8/§9 declares, before being
+  -- written here. The three properties that matter in those five rows, restated because they are
+  -- the reason this census is worth its length:
+  --   * `vol=v` on `submit_family_review` — a reviewer's answer is a write, so PostgREST routes it
+  --     as POST, which is what keeps the credential out of any logged query string;
+  --   * `vol=s` on `get_approval_requests` and nowhere else among the new names — the host's queue
+  --     is a read, and a stale copy costs nothing, so it is cacheable and the other four are not;
+  --   * `anon=y` only on `resolve_family_review` and `submit_family_review`, the two a reviewer
+  --     reaches with no session, and `anon=n` on the three host verbs. `service_role=n` and
+  --     `public=n` on all thirteen: no server key reaches a browser boundary either.
   PERFORM pg_temp.st3p_eq('G1 the whole callable surface of api, function by function — invoker wrappers only', v_matrix,
-    CASE WHEN pg_temp.st3p_at_least('stage5') THEN
+    CASE WHEN pg_temp.st3p_at_least('stage7') THEN
+      $matrix7$create_invitation_version(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_approval_requests(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation_document(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+publish_invitation_version(p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+request_family_review(p_wedding_id uuid, p_version_id uuid, p_reviewer_display_name text, p_expires_at timestamp with time zone) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+resolve_family_review() -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+resolve_public_invitation() -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+revoke_family_review(p_request_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+revoke_invitation_publication(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+submit_family_review(p_decision text, p_reviewer_label text, p_message text, p_section_key text) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n$matrix7$
+    WHEN pg_temp.st3p_at_least('stage5') THEN
       $matrix5$create_invitation_version(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1375,6 +1402,12 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
   -- pack-maintenance bodies, each of them refused to every browser role (`anon=n authenticated=n
   -- service_role=n public=n`) — that they read as *ungranted* rather than *absent* is the point of
   -- census, and why this line is a full matrix instead of a count.
+  --
+  -- Twenty-four rows from Stage 7, which added five privileged bodies. The reading that matters is
+  -- the `definer=` column: all five say `y`, because a reviewer's answer and a host's request both
+  -- write rows the calling role has no table privilege on, and that is the only justification this
+  -- schema accepts for acting above its caller. `anon=y` appears on exactly the two a sessionless
+  -- reviewer needs. Every row keeps `search_path=""` and `service_role=n`.
   SELECT string_agg(
            p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') -> '
            || pg_get_function_result(p.oid)
@@ -1394,7 +1427,32 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
    WHERE n.nspname = 'internal_api';
 
   PERFORM pg_temp.st3p_eq('G1f the whole callable surface of internal_api — privileged bodies, none of it a table', v_impl,
-    CASE WHEN pg_temp.st3p_at_least('stage5') THEN
+    CASE WHEN pg_temp.st3p_at_least('stage7') THEN
+      $impl7$approve_tradition_pack_release(p_release_id uuid, p_expected_hash text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+create_invitation_version(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+create_tradition_pack(p_pack_key text, p_display_name text, p_scope_statement text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+create_tradition_pack_release(p_pack_key text, p_definition jsonb, p_definition_schema_version integer, p_languages text[], p_author_label text, p_machine_assisted boolean, p_machine_assistance_notes text, p_source_reference text, p_changelog text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+deprecate_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+get_approval_requests(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_tradition_pack_review_packet(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+inspect_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+preview_invitation(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation_document(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+publish_invitation_version(p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+request_family_review(p_wedding_id uuid, p_version_id uuid, p_reviewer_display_name text, p_expires_at timestamp with time zone) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+resolve_family_review() -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+resolve_public_invitation() -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+revoke_family_review(p_request_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+revoke_invitation_publication(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+submit_family_review(p_decision text, p_reviewer_label text, p_message text, p_section_key text) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+submit_tradition_pack_review(p_release_id uuid, p_decision text, p_review_label text, p_review_basis text, p_review_scope text, p_reviewed_languages text[], p_expected_hash text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+tradition_pack_catalog() -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+tradition_pack_retention_report() -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+update_draft_tradition_pack_release(p_release_id uuid, p_patch jsonb) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+validate_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n$impl7$
+    WHEN pg_temp.st3p_at_least('stage5') THEN
       $impl5$approve_tradition_pack_release(p_release_id uuid, p_expected_hash text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
 create_invitation_version(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 create_tradition_pack(p_pack_key text, p_display_name text, p_scope_statement text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
@@ -1432,6 +1490,10 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
   -- pack authoring, review and retention were deliberately given no PostgREST wrapper — the
   -- browser cannot call them at all, so there is nothing for them to pair with. Both branches are
   -- exact: an additional wrapper-less body, or any body-less wrapper, is a diff at either head.
+  -- Stage 7 needs no branch of its own, and that is a fact worth stating rather than a gap: it
+  -- added five privileged bodies and five wrappers, so the unpaired set is still exactly these
+  -- eleven maintenance names. A Stage 7 body written without a wrapper would appear here as a
+  -- twelfth, and a wrapper delegating to nothing would appear as an `unpaired-api`.
   PERFORM pg_temp.st3p_eq('G1g api and internal_api are one-for-one by signature: no wrapper without a body, no body without a wrapper',
     (SELECT coalesce(string_agg(t, ', ' ORDER BY t COLLATE "C"), '(none)')
        FROM (
@@ -1455,8 +1517,8 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
 
   -- The pair relationships, one line per name, every verdict expected true. Written as
   -- a literal for the same reason as G1: a mismatch prints all the lines, so the
-  -- failure says which function drifted and in which direction. Eight lines from the
-  -- Stage 5 head, seven before it, for the same reason G1 branches.
+  -- failure says which function drifted and in which direction. Thirteen lines from the
+  -- Stage 7 head, eight from Stage 5 or 6, seven before that, for the same reason G1 branches.
   SELECT string_agg(
            a.proname
            || ' wrapper_is_invoker=' || (NOT a.prosecdef)::text
@@ -1475,7 +1537,21 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
    WHERE an.nspname = 'api' AND inn.nspname = 'internal_api';
 
   PERFORM pg_temp.st3p_eq('G1h each wrapper delegates to a definer body with exactly the same browser grants', v_pairs,
-    CASE WHEN pg_temp.st3p_at_least('stage5') THEN
+    CASE WHEN pg_temp.st3p_at_least('stage7') THEN
+      $pairs7$create_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+get_approval_requests wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+get_invitation_publication_state wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+preview_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+preview_invitation_document wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+publish_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+request_family_review wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+resolve_family_review wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+resolve_public_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+revoke_family_review wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+revoke_invitation_publication wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+rotate_invitation_token wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+submit_family_review wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true$pairs7$
+    WHEN pg_temp.st3p_at_least('stage5') THEN
       $pairs5$create_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_invitation_publication_state wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 preview_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
@@ -1522,9 +1598,20 @@ rotate_invitation_token wrapper_is_invoker=true impl_is_definer=true anon_grants
   PERFORM pg_temp.st3p_eq('G3 the resolver takes no argument at all, which is the mechanism behind "no token in a query string"',
     (SELECT p.pronargs::integer FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'api' AND p.proname = 'resolve_public_invitation'), 0);
-  PERFORM pg_temp.st3p_eq('G4 no other api function is argument-free, so none reads a session value as a secret',
-    (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'api' AND p.pronargs = 0), 1::bigint);
+  -- Restated rather than loosened. Stage 3's rule read as a count — exactly one `api` function is
+  -- argument-free — and its force was that the one argument-free callable is the one that reads a
+  -- credential out of the request headers, so nothing else in the exposed schema can be reading a
+  -- session value that its signature does not admit. Stage 7 adds a second credential reader of the
+  -- same shape, so the count is now two and the *list* becomes the assertion: an argument-free
+  -- function that is not one of these two names would be reading something no caller can see, which
+  -- is precisely what this line exists to catch. The count form would have accepted that silently.
+  PERFORM pg_temp.st3p_eq('G4 the argument-free api functions are exactly the two that read a credential from the request',
+    (SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname COLLATE "C"), '(none)')
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'api' AND p.pronargs = 0),
+    CASE WHEN pg_temp.st3p_at_least('stage7')
+         THEN 'resolve_family_review, resolve_public_invitation'
+         ELSE 'resolve_public_invitation' END);
 
   -- Read the stored ACL directly rather than through `information_schema`: the latter
   -- filters its rows by the calling user, so under an impersonated session it silently

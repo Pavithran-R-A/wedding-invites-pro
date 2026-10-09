@@ -596,6 +596,17 @@ BEGIN
         -- wrapper beside it and by nothing else.
         || CASE WHEN pg_temp.st2_at_least('stage5')
                 THEN ARRAY['internal_api.preview_invitation_document']
+                ELSE ARRAY[]::text[] END
+        -- Stage 7: the family-review workflow's five bodies. Three are host verbs, two are the
+        -- anonymous review door. All five are definers because all five act on rows the caller
+        -- has no table privilege on (`approval_requests`, `approval_feedback`,
+        -- `private.access_tokens`), which is the same reason the publication bodies are.
+        || CASE WHEN pg_temp.st2_at_least('stage7')
+                THEN ARRAY['internal_api.get_approval_requests',
+                           'internal_api.request_family_review',
+                           'internal_api.resolve_family_review',
+                           'internal_api.revoke_family_review',
+                           'internal_api.submit_family_review']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -625,12 +636,15 @@ BEGIN
   -- A text check on purpose: it is proving the absence of logic, which no behavioural
   -- test can show, and it is the shape C63b's limitation makes worth watching.
   --
-  -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the
-  -- document preview. Every wrapper still has to be one line, whatever the number is.
+  -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the document
+  -- preview, and thirteen from Stage 7, which added the five family-review verbs. Every wrapper
+  -- still has to be one line, whatever the number is.
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage5') THEN 8 ELSE 7 END)
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage7') THEN 13
+                                       WHEN pg_temp.st2_at_least('stage5') THEN 8
+                                       ELSE 7 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc p
                       JOIN pg_namespace n ON n.oid = p.pronamespace
                      WHERE n.nspname = 'api'
@@ -675,6 +689,17 @@ BEGIN
                            'tradition_pack_retention_report',
                            'update_draft_tradition_pack_release',
                            'validate_tradition_pack_release']
+                ELSE ARRAY[]::text[] END
+        -- Stage 7 adds five, and each of the five is paired with a wrapper, so this census and
+        -- C26d/C26f move together. None of them is a maintenance-only body: a browser role reaches
+        -- every one through `api`, which is why C28a grows rather than this list quietly gaining
+        -- an unpaired name.
+        || CASE WHEN pg_temp.st2_at_least('stage7')
+                THEN ARRAY['get_approval_requests',
+                           'request_family_review',
+                           'resolve_family_review',
+                           'revoke_family_review',
+                           'submit_family_review']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -687,7 +712,9 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage5') THEN 8 ELSE 7 END)
+      = (CASE WHEN pg_temp.st2_at_least('stage7') THEN 13
+              WHEN pg_temp.st2_at_least('stage5') THEN 8
+              ELSE 7 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc impl
                       JOIN pg_namespace n ON n.oid = impl.pronamespace
                       JOIN pg_proc wrap ON wrap.proname = impl.proname
@@ -706,26 +733,41 @@ BEGIN
   -- Stage 2's C28 read "no SECURITY DEFINER function is executable by anon or
   -- authenticated", which was true only because nothing of ours was a definer at
   -- all. Replaced by two statements that carry the same weight and survive the
-  -- change: the anonymous callable surface is exactly one function, and the full
-  -- callable set of a signed-in role is named row by row.
+  -- change: the anonymous callable surface is named in full, and the full callable set of a
+  -- signed-in role is named row by row.
   --
   -- `auth` is excluded because the local shim defines auth.uid()/auth.role() with
   -- the implicit PUBLIC execute that no ALTER DEFAULT PRIVILEGES can remove
   -- (measured, Stage 2 file 1) — those two are not our surface and cannot be.
   -- `api` is included because it is where the callable surface lives, and
   -- `internal_api` because "not served by PostgREST" is a property of the gateway's
-  -- schema list, not of the database's privilege map: from inside SQL, the fourteen
-  -- names below are all one call apart, and this assertion is what keeps that set from
-  -- growing quietly. The HTTP-side half of the claim — that a request cannot name
+  -- schema list, not of the database's privilege map: from inside SQL, every name below is
+  -- one call apart from the wrapper beside it, and these assertions are what keep both sets
+  -- from growing quietly. The HTTP-side half of the claim — that a request cannot name
   -- `internal_api` at all — is measured by `supabase/tests/api/stage3_security.test.mjs`.
-  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is the resolver and its implementation',
+  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is the guest resolver and the reviewer verbs',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('anon', p.oid, 'EXECUTE')) s),
-    ARRAY['api.resolve_public_invitation',
-          'internal_api.resolve_public_invitation']);
+    -- Stage 3's claim was that the anonymous callable surface is exactly one function, and it was
+    -- true because a guest was the only roleless caller this product had. Stage 7 adds a second
+    -- roleless caller: a family reviewer, who has no account by design. A reviewer needs two verbs,
+    -- not one — `resolve_family_review` to open the invitation they were sent, and
+    -- `submit_family_review` to answer it — because an answer is not a read and cannot share a door.
+    -- So the honest form of the claim is these names, each measured through its wrapper and its
+    -- implementation, and nothing else on this head is anon-executable. That is what a forgotten
+    -- revoke trips on here, which is the reason C63b exists.
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
+        ARRAY['api.resolve_public_invitation',
+              'internal_api.resolve_public_invitation']
+        || CASE WHEN pg_temp.st2_at_least('stage7')
+                THEN ARRAY['api.resolve_family_review',
+                           'internal_api.resolve_family_review',
+                           'api.submit_family_review',
+                           'internal_api.submit_family_review']
+                ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the wrappers and their implementations, as one set named by signature',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
@@ -733,9 +775,10 @@ BEGIN
         WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
     -- Fourteen names when this was written, sixteen from Stage 5, which paired one more wrapper
-    -- with one more body. The pack-maintenance bodies are absent from both lists because they are
-    -- granted to nobody a browser can be — that is C26e's asymmetry, checked here from the other
-    -- side: an EXECUTE that appeared for one of them would show up as a diff in this set.
+    -- with one more body, and twenty-six from Stage 7, which paired five. The pack-maintenance
+    -- bodies are absent from every version of this list because they are granted to nobody a
+    -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
+    -- appeared for one of them would show up as a diff in this set.
     (SELECT array_agg(x ORDER BY x) FROM unnest(
         ARRAY['api.create_invitation_version',
               'api.get_invitation_publication_state',
@@ -754,6 +797,23 @@ BEGIN
         || CASE WHEN pg_temp.st2_at_least('stage5')
                 THEN ARRAY['api.preview_invitation_document',
                            'internal_api.preview_invitation_document']
+                ELSE ARRAY[]::text[] END
+        -- Stage 7's five host-side verbs. Two of them (`resolve_family_review`,
+        -- `submit_family_review`) also appear in C28a, because a reviewer reaches them without a
+        -- session; the host's three (`request_family_review`, `revoke_family_review`,
+        -- `get_approval_requests`) are signed-in only, and a signed-in reviewer is the same person
+        -- at the same door, so the grant is anon *and* authenticated rather than one or the other.
+        || CASE WHEN pg_temp.st2_at_least('stage7')
+                THEN ARRAY['api.get_approval_requests',
+                           'api.request_family_review',
+                           'api.resolve_family_review',
+                           'api.revoke_family_review',
+                           'api.submit_family_review',
+                           'internal_api.get_approval_requests',
+                           'internal_api.request_family_review',
+                           'internal_api.resolve_family_review',
+                           'internal_api.revoke_family_review',
+                           'internal_api.submit_family_review']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -766,10 +826,10 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'public'));
   -- ... and the counterpart, since C29 alone would also be satisfied by a schema that
-  -- grew no boundary at all. The list is exact: an eighth callable would have to be
-  -- named here before it could ship — and from the Stage 5 head it has been, so the
-  -- eighth name is declared with the head that introduced it rather than merged into
-  -- the base.
+  -- grew no boundary at all. The list is exact: another callable would have to be named
+  -- here before it could ship — and from Stage 5 the document preview has been, and from
+  -- Stage 7 the five family-review verbs have, so each is declared with the head that
+  -- introduced it rather than merged into the base.
   PERFORM pg_temp.st2_set('C29a the callable boundary is exactly the named RPCs this head declares',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT p.proname AS p FROM pg_proc p
@@ -785,18 +845,43 @@ BEGIN
               'rotate_invitation_token']
         || CASE WHEN pg_temp.st2_at_least('stage5')
                 THEN ARRAY['preview_invitation_document']
+                ELSE ARRAY[]::text[] END
+        || CASE WHEN pg_temp.st2_at_least('stage7')
+                THEN ARRAY['get_approval_requests',
+                           'request_family_review',
+                           'resolve_family_review',
+                           'revoke_family_review',
+                           'submit_family_review']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
   -- "the credential never appears in a query string": with no parameter to name, a
   -- request that puts `?p_token=` in a URL cannot be resolved to a function at all,
   -- which `supabase/tests/api/stage3_security.test.mjs` measures from the outside.
-  PERFORM pg_temp.st2_ok('C29b the anonymous resolver takes no arguments',
+  --
+  -- Stage 7 keeps the mechanism and widens its reach, so the assertion widened with it rather
+  -- than being left to describe one function of fourteen. Two rules now, both measured:
+  --   * every callable that *reads* a credential takes no arguments at all, so the credential
+  --     has nowhere to be put except a header — this is `api.resolve_public_invitation` and,
+  --     from Stage 7, `api.resolve_family_review`;
+  --   * no callable anywhere on the boundary takes an argument whose name is credential-shaped,
+  --     which is what makes `api.submit_family_review` (four content arguments, no token
+  --     argument) conform to the same rule as the argument-free ones instead of exempting itself.
+  PERFORM pg_temp.st2_ok('C29b no credential-reading callable takes arguments, and none takes a credential-shaped one',
     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'api' AND p.proname = 'resolve_public_invitation'
-        AND p.pronargs = 0) = 1);
-  -- The six host operations take exactly the arguments their signature declares and
-  -- no more: a caller supplies identifiers, never an owner id. `p_owner_user_id`
-  -- appearing anywhere in this schema would mean a request body could name a victim.
+      WHERE n.nspname = 'api' AND p.proname IN ('resolve_public_invitation', 'resolve_family_review')
+        AND p.pronargs = 0)
+      = (CASE WHEN pg_temp.st2_at_least('stage7') THEN 2 ELSE 1 END)
+    AND NOT EXISTS (SELECT 1 FROM pg_proc p
+                      JOIN pg_namespace n ON n.oid = p.pronamespace
+                      JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
+                     WHERE n.nspname IN ('api','internal_api')
+                       AND a.argname ~* 'token|secret|credential|digest|signature'));
+  -- The host operations take exactly the arguments their signatures declare and no more: a
+  -- caller supplies identifiers, never an owner id. `p_owner_user_id` appearing anywhere in this
+  -- schema would mean a request body could name a victim. Stage 7's reviewer-facing verbs are
+  -- covered by the same regex for the same reason — a reviewer names themselves with a display
+  -- string they were given, never with an account identity the schema could be steered into
+  -- trusting.
   PERFORM pg_temp.st2_ok('C29c no callable takes a user or role identity as an argument',
     NOT EXISTS (SELECT 1 FROM pg_proc p
                   JOIN pg_namespace n ON n.oid = p.pronamespace

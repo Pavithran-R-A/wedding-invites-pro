@@ -3862,11 +3862,22 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s4_eq('I1 the customer-facing surface is exactly the '
-    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'eight' ELSE 'seven' END
+    || CASE WHEN pg_temp.s4_at_least('stage7') THEN 'thirteen'
+            WHEN pg_temp.s4_at_least('stage5') THEN 'eight'
+            ELSE 'seven' END
     || ' entry points: Stage 4 added no wrapper to it, because a release selection is an ordinary UPDATE the row policy and the wedding trigger already govern (§5)'
-    || CASE WHEN pg_temp.s4_at_least('stage5') THEN ', and Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — which is the only new name a browser can reach' ELSE '' END,
+    || CASE WHEN pg_temp.s4_at_least('stage7') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — and Stage 7 added the five family-review verbs, which are the only later names a browser can reach'
+            WHEN pg_temp.s4_at_least('stage5') THEN ', and Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — which is the only new name a browser can reach'
+            ELSE '' END,
     v_api,
-    CASE WHEN pg_temp.s4_at_least('stage5') THEN
+    CASE WHEN pg_temp.s4_at_least('stage7') THEN
+      ARRAY['create_invitation_version', 'get_approval_requests',
+            'get_invitation_publication_state', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'request_family_review', 'resolve_family_review', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_invitation_publication',
+            'rotate_invitation_token', 'submit_family_review']::text[]
+    WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['create_invitation_version', 'get_invitation_publication_state',
             'preview_invitation', 'preview_invitation_document',
             'publish_invitation_version', 'resolve_public_invitation',
@@ -3887,12 +3898,33 @@ BEGIN
   -- enumerated form — the surface is these nineteen names, the eight with twins are exactly the
   -- customer-facing ones, and the eleven maintenance names are listed here by name. An
   -- accidental twelfth is a failing line, which is strictly more than the old equality said.
+  --
+  -- Twenty-four from Stage 7: five more privileged bodies, and unlike the maintenance functions all
+  -- five do have a public twin, so the "no privileged function without a public twin" property that
+  -- Stage 4 asserted as plain equality still holds for them — it is only the eleven pack-maintenance
+  -- names that remain twin-less, and they are still exactly eleven.
   PERFORM pg_temp.s4_eq('I2 and the privileged surface is '
-    || CASE WHEN pg_temp.s4_at_least('stage5')
+    || CASE WHEN pg_temp.s4_at_least('stage7')
+         THEN 'exactly these twenty-four names — the thirteen public twins plus the eleven maintenance functions, listed so an unlisted privilege is a failing assertion'
+         WHEN pg_temp.s4_at_least('stage5')
          THEN 'exactly these nineteen names — the eight public twins plus the eleven maintenance functions, listed so an unlisted privilege is a failing assertion'
          ELSE 'the same seven names, so there is no fourth way into a publication action and no privileged function without a public twin' END,
     v_names,
-    CASE WHEN pg_temp.s4_at_least('stage5') THEN
+    CASE WHEN pg_temp.s4_at_least('stage7') THEN
+      ARRAY['approve_tradition_pack_release', 'create_invitation_version',
+            'create_tradition_pack', 'create_tradition_pack_release',
+            'deprecate_tradition_pack_release', 'get_approval_requests',
+            'get_invitation_publication_state',
+            'get_tradition_pack_review_packet', 'inspect_tradition_pack_release',
+            'preview_invitation', 'preview_invitation_document',
+            'publish_invitation_version', 'request_family_review',
+            'resolve_family_review', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_invitation_publication',
+            'rotate_invitation_token', 'submit_family_review',
+            'submit_tradition_pack_review', 'tradition_pack_catalog',
+            'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
+            'validate_tradition_pack_release']::text[]
+    WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['approve_tradition_pack_release', 'create_invitation_version',
             'create_tradition_pack', 'create_tradition_pack_release',
             'deprecate_tradition_pack_release', 'get_invitation_publication_state',
@@ -3906,7 +3938,9 @@ BEGIN
     ELSE v_api END);
 
   PERFORM pg_temp.s4_jq('I3 the shape that makes that split mean something: every `api` function runs as the caller, every `internal_api` one has a pinned search path, and '
-    || CASE WHEN pg_temp.s4_at_least('stage5')
+    || CASE WHEN pg_temp.s4_at_least('stage7')
+         THEN 'exactly the thirteen with a public twin are DEFINER — the eleven maintenance bodies are INVOKER, so they add a workflow and no privilege, and Stage 7''s five definers join the twins rather than the unprivileged half'
+         WHEN pg_temp.s4_at_least('stage5')
          THEN 'exactly the eight with a public twin are DEFINER — the eleven maintenance bodies are INVOKER, so they add a workflow and no privilege'
          ELSE 'seven each side' END,
     (SELECT jsonb_build_object(
@@ -3923,7 +3957,10 @@ BEGIN
                                    JOIN pg_namespace n ON n.oid = p.pronamespace
                                   WHERE n.nspname = 'internal_api'
                                     AND p.proconfig @> ARRAY['search_path=""']))),
-      CASE WHEN pg_temp.s4_at_least('stage5')
+      CASE WHEN pg_temp.s4_at_least('stage7')
+             THEN jsonb_build_object('api_invoker', '13', 'api_pinned', '13',
+                                     'internal_definer', '13', 'internal_pinned', '24')
+             WHEN pg_temp.s4_at_least('stage5')
              THEN jsonb_build_object('api_invoker', '8', 'api_pinned', '8',
                                      'internal_definer', '8', 'internal_pinned', '19')
              ELSE jsonb_build_object('api_invoker', '7', 'api_pinned', '7',
@@ -3935,8 +3972,16 @@ BEGIN
   -- interesting half: `usage_anon`/`usage_auth` staying false is what makes the growth invisible to an
   -- account, and Stage 6's own battery (90_storage_policies.sql G6) holds those three functions to an
   -- owner-only ACL, which is the property this census was written to protect.
+  --
+  -- Stage 7 then does the opposite: it adds five names to each of the two RPC schemas (thirteen and
+  -- twenty-four in all) and nothing at all to `private`, so the machinery half of the inventory is
+  -- unchanged while the callable half grows by ten. That is why `private` staying at 30 and both
+  -- USAGE flags staying false is the load-bearing part of this line at the Stage 7 head: the new
+  -- surface is reachable precisely because it is a *callable* surface, and nothing on it was paid for
+  -- by opening the schema that holds the lifecycle guards.
   PERFORM pg_temp.s4_jq('I4 the whole privileged inventory is '
-    || CASE WHEN pg_temp.s4_at_least('stage6') THEN '57'
+    || CASE WHEN pg_temp.s4_at_least('stage7') THEN '67'
+             WHEN pg_temp.s4_at_least('stage6') THEN '57'
              WHEN pg_temp.s4_at_least('stage5') THEN '54'
              ELSE '32' END
     || ' functions across the three schemas, and none of the machinery is in a schema an account can even name',
@@ -3948,7 +3993,11 @@ BEGIN
               'usage_anon', (SELECT has_schema_privilege('anon', 'private', 'USAGE')::text),
               'usage_auth', (SELECT has_schema_privilege('authenticated', 'private', 'USAGE')::text),
               'usage_maint', (SELECT has_schema_privilege('service_role', 'private', 'USAGE')::text))),
-      CASE WHEN pg_temp.s4_at_least('stage6')
+      CASE WHEN pg_temp.s4_at_least('stage7')
+             THEN jsonb_build_object('api', '13', 'internal_api', '24', 'private', '30',
+                                     'public', '0', 'usage_anon', 'false',
+                                     'usage_auth', 'false', 'usage_maint', 'true')
+             WHEN pg_temp.s4_at_least('stage6')
              THEN jsonb_build_object('api', '8', 'internal_api', '19', 'private', '30',
                                      'public', '0', 'usage_anon', 'false',
                                      'usage_auth', 'false', 'usage_maint', 'true')
@@ -4058,12 +4107,15 @@ BEGIN
 
   -- --------------------------------------- "no wrapper merely for test setup", as a check
   -- The rule is only measurable as a property of bodies, because a wrapper written for a
-  -- test would arrive with a normal-looking name. Every one of the 32 functions is scanned
-  -- for the fixture marker this stage's own data carries, and the scan is then pointed at
-  -- this session's own temporary schema — the battery's helpers, which *do* carry the marker — so a zero in the
-  -- first half is known to be a clean schema rather than a pattern that matches nothing.
+  -- test would arrive with a normal-looking name. Every function in the three privileged
+  -- schemas is scanned for the fixture marker this stage's own data carries (the count in the
+  -- label is the head's own census, not a fixed number), and the scan is then pointed at
+  -- this session's own temporary schema — the battery's helpers, which *do* carry the marker —
+  -- so a zero in the first half is known to be a clean schema rather than a pattern that
+  -- matches nothing.
   PERFORM pg_temp.s4_jq('I8 no function in api, internal_api or private is test-shaped: the scan finds none of this stage''s fixture markers in any of the '
-    || CASE WHEN pg_temp.s4_at_least('stage6') THEN '57'
+    || CASE WHEN pg_temp.s4_at_least('stage7') THEN '67'
+             WHEN pg_temp.s4_at_least('stage6') THEN '57'
              WHEN pg_temp.s4_at_least('stage5') THEN '54'
              ELSE '32' END
     || ' real bodies, so no privileged wrapper exists to serve a test (§5)',
@@ -4078,7 +4130,8 @@ BEGIN
                                     OR p.prosrc ILIKE '%fixture%'
                                      OR p.proname ILIKE '%test%')))),
     jsonb_build_object('real_scanned',
-      CASE WHEN pg_temp.s4_at_least('stage6') THEN '57'
+      CASE WHEN pg_temp.s4_at_least('stage7') THEN '67'
+             WHEN pg_temp.s4_at_least('stage6') THEN '57'
              WHEN pg_temp.s4_at_least('stage5') THEN '54'
              ELSE '32' END,
       'real_dirty', '0'));
@@ -4111,17 +4164,28 @@ BEGIN
     || array_to_string(v_api, ', '), v_api, 'stage4_inventory_probe');
   PERFORM pg_temp.s4_eq('I9b and I1''s exact equality is what rejects it, so the assertion below is the same one a future migration would trip',
     cardinality(v_api)::bigint,
-    CASE WHEN pg_temp.s4_at_least('stage5') THEN 9::bigint ELSE 8::bigint END);
+    CASE WHEN pg_temp.s4_at_least('stage7') THEN 14::bigint
+         WHEN pg_temp.s4_at_least('stage5') THEN 9::bigint
+         ELSE 8::bigint END);
 
   EXECUTE 'DROP FUNCTION api.stage4_inventory_probe(p_wedding_id uuid)';
   SELECT coalesce(array_agg(p.proname ORDER BY p.proname COLLATE "C"), '{}'::text[]) INTO v_api
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s4_eq('I10 and with the probe removed the surface is the '
-    || CASE WHEN pg_temp.s4_at_least('stage5') THEN 'eight' ELSE 'seven' END
+    || CASE WHEN pg_temp.s4_at_least('stage7') THEN 'thirteen'
+            WHEN pg_temp.s4_at_least('stage5') THEN 'eight'
+            ELSE 'seven' END
     || ' again, which is the state the rest of the suite and the application both depend on',
     v_api,
-    CASE WHEN pg_temp.s4_at_least('stage5') THEN
+    CASE WHEN pg_temp.s4_at_least('stage7') THEN
+      ARRAY['create_invitation_version', 'get_approval_requests',
+            'get_invitation_publication_state', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'request_family_review', 'resolve_family_review', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_invitation_publication',
+            'rotate_invitation_token', 'submit_family_review']::text[]
+    WHEN pg_temp.s4_at_least('stage5') THEN
       ARRAY['create_invitation_version', 'get_invitation_publication_state',
             'preview_invitation', 'preview_invitation_document',
             'publish_invitation_version', 'resolve_public_invitation',
@@ -4135,7 +4199,8 @@ BEGIN
   SELECT count(*) INTO v_scanned FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname IN ('api', 'internal_api', 'private');
   PERFORM pg_temp.s4_eq('I10b and no residue of the probe is left anywhere in the inventory', v_scanned,
-    CASE WHEN pg_temp.s4_at_least('stage6') THEN 57::bigint
+    CASE WHEN pg_temp.s4_at_least('stage7') THEN 67::bigint
+         WHEN pg_temp.s4_at_least('stage6') THEN 57::bigint
          WHEN pg_temp.s4_at_least('stage5') THEN 54::bigint
          ELSE 32::bigint END);
 END $I$;
