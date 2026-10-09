@@ -1721,11 +1721,21 @@ rotate_invitation_token wrapper_is_invoker=true impl_is_definer=true anon_grants
   -- same shape, so the count is now two and the *list* becomes the assertion: an argument-free
   -- function that is not one of these two names would be reading something no caller can see, which
   -- is precisely what this line exists to catch. The count form would have accepted that silently.
-  PERFORM pg_temp.st3p_eq('G4 the argument-free api functions are exactly the two that read a credential from the request',
+  --
+  -- Stage 8 adds the third, and it is the same kind of thing rather than a new kind: a household
+  -- guest is a bearer-secret caller with no account, so `api.resolve_guest_invitation()` reads its
+  -- credential from the request and takes no argument, exactly as the other two doors do. The sixth
+  -- guest verb, `api.submit_guest_rsvp`, deliberately does *not* join this list — it has one
+  -- argument, the guest's own answer, and a door that accepts a body must not be a door that accepts
+  -- a token by signature. So this line grows only when a new kind of credential is given an entry,
+  -- which is the event worth failing on.
+  PERFORM pg_temp.st3p_eq('G4 the argument-free api functions are exactly the doors that read a credential from the request',
     (SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname COLLATE "C"), '(none)')
        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'api' AND p.pronargs = 0),
-    CASE WHEN pg_temp.st3p_at_least('stage7')
+    CASE WHEN pg_temp.st3p_at_least('stage8')
+         THEN 'resolve_family_review, resolve_guest_invitation, resolve_public_invitation'
+         WHEN pg_temp.st3p_at_least('stage7')
          THEN 'resolve_family_review, resolve_public_invitation'
          ELSE 'resolve_public_invitation' END);
 
