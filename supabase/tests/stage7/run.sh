@@ -193,6 +193,12 @@ build_chain() { # build_chain <review|clean|legacy>
   # exposed wrappers, twenty-four internal bodies, and the head the session declared. A chain that
   # applied Stage 7's migration but produced a different shape here has a problem this script cannot
   # name and the suites below will report as a mismatch.
+  #
+  # Those two numbers belong to this chain and to no other: the loop above stops at `stage7`, so this
+  # runner cannot print the Stage 8 head's nineteen and thirty even when the repository has moved past
+  # it, and it should not. Read them as "Stage 7 as Stage 7 shipped it"; the guest head's own census is
+  # `supabase/tests/stage8/run.sh`'s to print, and the historical suites assert their expectations by
+  # head rather than by whichever chain happened to be running.
   probe_sql \
     -c "select 'DECLARED_HEAD=' || coalesce(current_setting('app.stage_head', true), '(unset)')" \
     -c "select 'API_NAMES=' || count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'api'" \
