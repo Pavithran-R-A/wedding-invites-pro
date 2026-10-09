@@ -612,10 +612,11 @@ describe('§17 CATALOGUE', () => {
     const exposed = sqlRows(`select routine_name from information_schema.routines
                                where routine_schema = 'api' order by 1`).join(',');
     assert.deepEqual(exposed.split(','), [
-      'create_invitation_version', 'get_invitation_publication_state', 'preview_invitation',
-      'preview_invitation_document',
-      'publish_invitation_version', 'resolve_public_invitation', 'revoke_invitation_publication',
-      'rotate_invitation_token',
+      'create_invitation_version', 'get_approval_requests', 'get_invitation_publication_state',
+      'preview_invitation', 'preview_invitation_document',
+      'publish_invitation_version', 'request_family_review', 'resolve_family_review',
+      'resolve_public_invitation', 'revoke_family_review', 'revoke_invitation_publication',
+      'rotate_invitation_token', 'submit_family_review',
     ], 'the callable surface changed shape; the pack design has no RPC of its own, and adding one '
       + 'without a ruling is exactly what this list is for');
     // Stage 5 added the eighth name, and there is a ruling: `preview_invitation_document` is the
@@ -625,6 +626,17 @@ describe('§17 CATALOGUE', () => {
     // straddle a save. It carries no pack wording beyond what `preview_invitation` already
     // returned — the release block is one narrow summary object, asserted in
     // `supabase/tests/stage5/70_document_resolution.sql` group P, at `:1037` and `:1085`.
+    //
+    // Stage 7 added the remaining five, and the ruling is the stage's own design: three host verbs
+    // (`request_family_review`, `revoke_family_review`, `get_approval_requests`) that act on the
+    // caller's own wedding through its JWT, and two reviewer doors
+    // (`resolve_family_review`, `submit_family_review`) that carry no identity argument at all and
+    // read a credential from a header — which is why they are in `api` rather than in a host-only
+    // schema, and why `stage3_publication.test.mjs` puts only the first three in its anonymous-refusal
+    // matrix. None of the five takes a pack key, a release id or a selection reference: the fifth
+    // assertion below is the one that would notice if one ever did, and the SQL tier's own catalogue
+    // tripwire pins the same thirteen names (`supabase/tests/stage2/40_catalog.sql`). Their behaviour
+    // at the transport is qualified in `supabase/tests/api/stage7_family_approval.test.mjs`.
     const maintenanceSchema = sqlRows(`select coalesce(string_agg(distinct n.nspname, ',' order by n.nspname), '(none)')
                                          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                                         where p.proname like '%tradition_pack%'`);

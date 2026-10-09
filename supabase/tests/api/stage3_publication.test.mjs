@@ -11,10 +11,14 @@
 //   * `api` is the only callable surface, it is reachable, and `private` is not
 //     reachable as a profile at all — a grant the schema-cache cannot see is a grant
 //     nobody can use.
-//   * The anonymous door is one function, takes no argument, and reads its credential
-//     from a header. Every way of asking that could put the secret in a URL fails.
+//   * Every anonymous door — the guest resolver and, from Stage 7, the two reviewer
+//     verbs — takes no argument and reads its credential from a header. Every way of
+//     asking that could put the secret in a URL fails.
 //   * The host RPCs take identity from the JWT and nowhere else, so a request cannot
-//     name another owner's wedding and get an answer that says whether it exists.
+//     name another owner's wedding and get an answer that says whether it exists. From
+//     Stage 7 this list is nine names, and the three new ones are host-only in exactly
+//     the same way: a reviewer reaches an invitation through its token, never through a
+//     wedding id.
 //   * What a guest receives is a whitelist, and what a refusal looks like is one
 //     value, byte for byte, for every kind of bad credential.
 //
@@ -263,7 +267,31 @@ describe('§6.1 what is callable over HTTP', () => {
     ['rotate_invitation_token', { p_wedding_id: null }],
     ['preview_invitation', { p_wedding_id: null }],
     ['get_invitation_publication_state', { p_wedding_id: null }],
+    // Stage 7's three host-side verbs, listed here because the rule they are under is the same
+    // rule: a host acts on its own wedding through its JWT, and an anonymous key is refused at
+    // the function. The reviewer half of Stage 7 is deliberately *not* in this list — a reviewer
+    // has no account, so `resolve_family_review` and `submit_family_review` are granted to `anon`
+    // and are qualified as anonymous doors in `stage7_family_approval.test.mjs` instead.
+    //
+    // Every declared argument is spelled, including `p_expires_at`, which has a DEFAULT: the
+    // signature is how PostgREST resolves the call, and a short argument list would be refused
+    // with PGRST202 by the router before this grant is consulted, which is the wrong reason.
+    ['request_family_review', {
+      p_wedding_id: null, p_version_id: null, p_reviewer_display_name: null, p_expires_at: null,
+    }],
+    ['revoke_family_review', { p_request_id: null }],
+    ['get_approval_requests', { p_wedding_id: null }],
   ];
+
+  // PostgREST binds an RPC call by argument *name*, so a key the signature does not declare
+  // would give a request a second reason to fail — and these two tests are each about one
+  // reason. The wedding id is therefore substituted only where the verb takes one;
+  // `revoke_family_review` is keyed by the request id and gets exactly what it declares.
+  const withWedding = (args, weddingId) => {
+    const call = { ...args };
+    if ('p_wedding_id' in call) call.p_wedding_id = weddingId;
+    return call;
+  };
 
   test('API01 the api profile is reachable, and an object inside it that is not a function is not there', async () => {
     // `private` as a profile is refused by name, and the refusal lists what is
@@ -286,7 +314,7 @@ describe('§6.1 what is callable over HTTP', () => {
 
   test('API02 an anonymous key cannot call any host function, and is told so at the function, not the schema', async () => {
     for (const [name, args] of HOST_FUNCTIONS) {
-      const { data, error } = await anonApi().rpc(name, { ...args, p_wedding_id: hosts.hostA.wedding.id });
+      const { data, error } = await anonApi().rpc(name, withWedding(args, hosts.hostA.wedding.id));
       assert.equal(data, null, `anon called ${name}`);
       assert.equal(error?.code, '42501', `anon got something other than a privilege refusal from ${name}`);
       // "for function" rather than "for schema" is the proof that the refusal is this
@@ -297,7 +325,7 @@ describe('§6.1 what is callable over HTTP', () => {
     }
 
     // Positive control: the same anonymous client, the same profile, one function
-    // that is meant for it. Without this, six refusals could just mean "anon cannot
+    // that is meant for it. Without this, nine refusals could just mean "anon cannot
     // reach api at all".
     const ok = await anonApi().rpc('resolve_public_invitation');
     assert.equal(ok.error, null, `the control call was refused too: ${ok.error?.message}`);
@@ -324,7 +352,7 @@ describe('§6.1 what is callable over HTTP', () => {
     // the only honest discriminator, and a verb that answered with the grant sentence here
     // would mean the owner's grant had quietly gone missing.
     for (const [name, args] of HOST_FUNCTIONS) {
-      const { error } = await api('hostA').rpc(name, { ...args, p_wedding_id: hosts.hostB.wedding.id });
+      const { error } = await api('hostA').rpc(name, withWedding(args, hosts.hostB.wedding.id));
       assert.notEqual(error, null, `${name} answered another owner's wedding`);
       assert.doesNotMatch(error.message, /permission denied for (function|schema)/,
         `${name} refused an owner at the grant rather than in its own logic`);
@@ -332,7 +360,7 @@ describe('§6.1 what is callable over HTTP', () => {
         `${name} refused with something other than the ownership sentence: ${error.message}`);
     }
 
-    // Positive control beside six refusals: the same role and profile, this caller's own
+    // Positive control beside nine refusals: the same role and profile, this caller's own
     // wedding, answered with data. Without it the refusals could describe a surface that
     // refuses everyone.
     const { data, error } = await api('hostA').rpc('preview_invitation', {
@@ -1012,8 +1040,8 @@ describe('§6.5 taking a link down', () => {
 // `api`, which PostgREST serves and which now holds only one-line SECURITY INVOKER
 // wrappers, and `internal_api`, which it does not serve and which holds the privileged
 // SECURITY DEFINER bodies those wrappers name. Asserting them in one pass is what makes
-// the split a fact rather than a claim: the same seven names, in two postures, with the
-// same seven callers.
+// the split a fact rather than a claim: the same thirteen names, in two postures, with the
+// same thirteen caller sets.
 describe('§6.6 the callable catalogue is closed', () => {
   /** `grantees` lists the roles this build intends to reach the function. The owner is
    *  always allowed and is not a caller; nothing else may appear. */
@@ -1034,6 +1062,26 @@ describe('§6.6 the callable catalogue is closed', () => {
     // qualified over PostgREST in `stage5_pack_driven_http.test.mjs`, and at the SQL head in
     // `supabase/tests/stage5/70_document_resolution.sql`; what this map proves is posture.
     ['preview_invitation_document', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    // Stage 7's five family-review doors, and the reason they are five and not one: opening an
+    // invitation and answering it are different acts, so they cannot share a door, and a host
+    // asking who has been invited is a third caller class again. Signatures and grantees below
+    // are read from `q7-logs/s7-census-readout-03.log`, which is a census of the whole published
+    // chain applied through the Stage 7 head — not from the migration's intent. What this map
+    // proves over HTTP is that the same thirteen names sit in the same two postures behind the
+    // transport, with `service_role` on none of them.
+    ['get_approval_requests', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['request_family_review', {
+      args: 'p_wedding_id uuid, p_version_id uuid, p_reviewer_display_name text, p_expires_at timestamp with time zone',
+      grantees: ['authenticated'],
+    }],
+    ['revoke_family_review', { args: 'p_request_id uuid', grantees: ['authenticated'] }],
+    // Argument-free like the guest resolver, for the same reason: the credential is a header, and
+    // a function that took it as an argument would put a review token in a query string.
+    ['resolve_family_review', { args: '', grantees: ['anon', 'authenticated'] }],
+    ['submit_family_review', {
+      args: 'p_decision text, p_reviewer_label text, p_message text, p_section_key text',
+      grantees: ['anon', 'authenticated'],
+    }],
   ]);
 
   // The maintenance surface Stage 5 added, named here rather than left to be discovered: the
@@ -1111,7 +1159,7 @@ describe('§6.6 the callable catalogue is closed', () => {
     }
 
     // Paired by name, so a body without a wrapper and a wrapper without a body cannot
-    // both be present and cancel out into seven rows each.
+    // both be present and cancel out into equal row counts.
     for (const name of INTENDED.keys()) {
       for (const { schema, rows } of surfaces) {
         assert.ok(rows.some(r => r.name === name), `${name} is missing from ${schema}`);
@@ -1265,11 +1313,13 @@ describe('§6.6 the callable catalogue is closed', () => {
     // executable by a browser role. A leftover in `public` would be reachable through the
     // default profile without anybody changing a setting, and API05 only proves three
     // particular names are gone. `internal_api` is excluded from this scan on purpose:
-    // its seven bodies *are* browser-callable, by necessity — PostgreSQL checks a nested
-    // call as the invoking role, so a wrapper's caller must also hold EXECUTE on the body
-    // beside it. API33 is what keeps that necessary grant to exactly the seven paired
-    // names, and `stage3_security.test.mjs` is what measures that none of them is
-    // reachable as an HTTP profile.
+    // the thirteen bodies that have a wrapper beside them *are* browser-callable, by
+    // necessity — PostgreSQL checks a nested call as the invoking role, so a wrapper's
+    // caller must also hold EXECUTE on the body beside it. API33 is what keeps that
+    // necessary grant to exactly those thirteen paired names, API38 is what proves the
+    // eleven maintenance bodies behind them are granted to nobody but the owner, and
+    // `stage3_security.test.mjs` is what measures that none of it is reachable as an HTTP
+    // profile.
     const strays = sqlRows(`
       select ns.nspname || '.' || p.proname
       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace

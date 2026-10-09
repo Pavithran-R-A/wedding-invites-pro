@@ -793,16 +793,29 @@ describe('§23 BROWSER WRITE SECURITY', () => {
     // browser can hold, which is the half that decides whether the wrapper layer is doing any work:
     // if `authenticated` could call `internal_api` directly, every `api.` wrapper would be
     // decoration and every refusal above would be about a schema name rather than a privilege.
+    // Stage 7 put five more names on this mirror — `get_approval_requests`, `request_family_review`
+    // and `revoke_family_review` for the host, `resolve_family_review` and `submit_family_review`
+    // for the reviewer — and the reason they belong here is the same sentence as above: a nested
+    // call is checked as the invoking role, so a wrapper's caller must hold EXECUTE on the body
+    // beside it. Read as an inventory rather than a count because the failure this list exists for
+    // is a name appearing on one side only: a privileged body with no wrapper is a grant with no
+    // transport, and a wrapper with no body is a 500. Which of the thirteen anon may also reach
+    // (the three argument-free doors) is pinned per name in `stage3_publication.test.mjs` §6.6,
+    // so this case pins only the half that is common to all thirteen.
     const direct = sqlRows(`select n.nspname || '.' || p.proname from pg_proc p
                               join pg_namespace n on n.oid = p.pronamespace
                              where n.nspname = 'internal_api'
                                and has_function_privilege('authenticated', p.oid, 'EXECUTE')
                              order by 1`);
     assert.deepEqual(direct, ['internal_api.create_invitation_version',
+      'internal_api.get_approval_requests',
       'internal_api.get_invitation_publication_state',
       'internal_api.preview_invitation', 'internal_api.preview_invitation_document',
-      'internal_api.publish_invitation_version', 'internal_api.resolve_public_invitation',
-      'internal_api.revoke_invitation_publication', 'internal_api.rotate_invitation_token'],
+      'internal_api.publish_invitation_version', 'internal_api.request_family_review',
+      'internal_api.resolve_family_review', 'internal_api.resolve_public_invitation',
+      'internal_api.revoke_family_review',
+      'internal_api.revoke_invitation_publication', 'internal_api.rotate_invitation_token',
+      'internal_api.submit_family_review'],
       'the privileged inner layer stopped being a mirror of the wrapper list');
 
     // And the wrapper layer is not decoration: calling the inner name through the exposed profile is

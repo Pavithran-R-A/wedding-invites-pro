@@ -85,15 +85,27 @@ echo "==> Stack images"
 docker inspect -f '  {{.Name}}  {{.Config.Image}}' "$DB_CTR" "$KONG_CTR" "$REST_CTR" "$AUTH_CTR"
 psql_q "select '  db: ' || version()"
 
-BASE_WEDDINGS=$(psql_q "select count(*) from public.weddings")
-BASE_USERS=$(psql_q "select count(*) from auth.users")
-BASE_DRAFTS=$(psql_q "select count(*) from public.invitation_drafts")
-# Stage 6 added the two stores an HTTP run can leave behind *without* leaving a row in any of the
-# three above: a registry row and, one layer further out, the bytes that row points at. An object
-# whose registry row is gone is exactly the orphan class the stage's removal ordering exists to make
-# observable, so it is counted here rather than trusted to the suite's own teardown.
-BASE_ASSETS=$(psql_q "select count(*) from public.wedding_assets")
-BASE_OBJECTS=$(psql_q "select count(*) from storage.objects where bucket_id = 'wedding-assets'")
+# What an HTTP run can leave behind, stated as a list rather than as five shell variables: Stage 6
+# added the registry row and the bytes it points at, and Stage 7 added the four stores a review
+# workflow writes (`approval_requests`, `approval_feedback`, `private.access_tokens`,
+# `publications`) plus the version rows an ask is pinned to. A row in any of them under a wedding that
+# still exists moves no `weddings` count at all, so the pre-Stage-7 census could not see it, and an
+# over-broad teardown that cleared someone else's review rows would have looked like a pass.
+# Add a store by adding one `select` line; the comparison below reads whatever names come back.
+leak_census() {
+  psql_q "select 'weddings='||count(*) from public.weddings
+    union all select 'auth.users='||count(*) from auth.users
+    union all select 'invitation_drafts='||count(*) from public.invitation_drafts
+    union all select 'wedding_assets='||count(*) from public.wedding_assets
+    union all select 'storage.objects(wedding-assets)='||count(*) from storage.objects where bucket_id = 'wedding-assets'
+    union all select 'approval_requests='||count(*) from public.approval_requests
+    union all select 'approval_feedback='||count(*) from public.approval_feedback
+    union all select 'access_tokens='||count(*) from private.access_tokens
+    union all select 'publications='||count(*) from public.publications
+    union all select 'invitation_versions='||count(*) from public.invitation_versions"
+}
+BASE_CENSUS=$(leak_census)
+printf '%s\n' "$BASE_CENSUS" | sed 's/^/  ..  baseline /'
 
 # --- 3. preconditions that make the refusals mean something --------------------------
 # Several tests below assert that a table is *not reachable* over REST. That assertion
@@ -156,21 +168,24 @@ done
 # have to come back exactly. A drift here is a leak, and a leak in either direction
 # (rows added, or rows that were there before and are now gone) fails the run.
 echo "==> Post-run check: the local database is back where it started"
-NOW_WEDDINGS=$(psql_q "select count(*) from public.weddings")
-NOW_USERS=$(psql_q "select count(*) from auth.users")
-NOW_DRAFTS=$(psql_q "select count(*) from public.invitation_drafts")
-NOW_ASSETS=$(psql_q "select count(*) from public.wedding_assets")
-NOW_OBJECTS=$(psql_q "select count(*) from storage.objects where bucket_id = 'wedding-assets'")
+NOW_CENSUS=$(leak_census)
 LEAK=0
-for pair in "weddings:$BASE_WEDDINGS:$NOW_WEDDINGS" "auth.users:$BASE_USERS:$NOW_USERS" "invitation_drafts:$BASE_DRAFTS:$NOW_DRAFTS" "wedding_assets:$BASE_ASSETS:$NOW_ASSETS" "storage.objects(wedding-assets):$BASE_OBJECTS:$NOW_OBJECTS"; do
-  name=${pair%%:*}; rest=${pair#*:}; was=${rest%%:*}; now=${rest#*:}
+while IFS= read -r base_line; do
+  [[ -n "$base_line" ]] || continue
+  name=${base_line%%=*}; was=${base_line#*=}
+  # Read by name rather than by position: the two lists are produced by the same statement, but a
+  # silent reordering would otherwise compare one store's total against another's.
+  now=$(printf '%s\n' "$NOW_CENSUS" | awk -F'=' -v n="$name" '$1 == n { print $2 }')
+  if [[ -z "$now" ]]; then
+    echo "FATAL: $name was counted before the run and not after it." >&2; LEAK=1; continue
+  fi
   if [[ "$was" != "$now" ]]; then
     echo "FATAL: $name went from $was to $now rows — the run did not clean up." >&2
     LEAK=1
   else
     echo "  ok  $name back to $was rows"
   fi
-done
+done <<< "$BASE_CENSUS"
 ORPHANS=$(psql_q "select count(*) from public.invitation_drafts d where not exists (select 1 from public.weddings w where w.id = d.wedding_id)")
 if [[ "$ORPHANS" != "0" ]]; then
   echo "FATAL: $ORPHANS draft rows have no wedding — the Stage 3 invariant broke mid-run." >&2
