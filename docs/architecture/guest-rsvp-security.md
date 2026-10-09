@@ -64,7 +64,8 @@ Three separations are enforced by construction, and one is not:
 
 * **Pointer separation.** Each kind's row-shape CHECK names which scope columns may be set
   (`20260926130000...:199-212`), and each door's lookup pins `token_kind` in the predicate
-  (":1005-1009" for the guest-level door today; Stage 7 ":394-408" and ":567-580" for the review door). A
+  (`20260926130000_stage3_publication_resolution_boundary.sql:1005-1009` for the wedding-link door today;
+  Stage 7 `:394-408` and `:567-580` for the review door). A
   household's secret presented at the review door is not "rejected after thought" — it is a row that
   does not satisfy that door's join, and it answers with the same bytes as a forged one.
 * **Cross-wedding separation.** Every scope pointer is a *composite* FK whose first column is
@@ -116,6 +117,19 @@ The second arm is the load-bearing one. It exists because a raw credential is le
 (`20260926130000...:505-533`), and Stage 7 built the same one-shot property for review links
 (`20261008120000...:127-133`, "shown once" in the audit's terms). Re-running "send the links" must not be
 a way to see a secret a second time, and must not be a way to make a second live secret for one family.
+
+**Ruling 3.3 — no household link can exist before the wedding has an active publication, and the verb
+says so in those words.** The kind shape is not Stage 8's to loosen: the `guest_invitation` branch of
+`private.access_tokens`' shape CHECK reads `publication_id IS NOT NULL AND household_id IS NOT NULL AND
+approval_request_id IS NULL` (measured from the live `pg_constraint` row for `access_tokens_kind_shape`,
+as `20260926130000_stage3_publication_resolution_boundary.sql:203-205` writes it), because Stage 2 pinned
+a household credential to a *publication* rather than to a wedding. So "create the families, then send the
+links" is not a sequence this schema can express before the couple has published: the mint would have no
+`publication_id` to store. `api.issue_guest_invitations` and `api.rotate_guest_invitation` therefore check
+for the active publication and refuse without one — `publish the invitation before sending household links`
+— in the same shape Stage 3's rotate uses for the wedding link ("there is no published invitation to
+rotate", `20260926150000...:388-391`). The host screen states the prerequisite rather than discovering it
+through a greyed-out button, and the batteries count it as a named case rather than an empty array.
 
 **Uniqueness.** A partial unique index, matching the two that exist:
 `one_live_public_token_per_publication` (`20260926130000...:219-223`) and
@@ -272,11 +286,51 @@ build's documents stay readable by an earlier renderer.
 | field | source | justification |
 | --- | --- | --- |
 | `greeting` | `guest_households.salutation`, falling back to `display_name` when null (`20260925120300...:22-24`) | the "personalised greeting", from a column Stage 2 made free text precisely so no schema would encode an assumption about family structure |
-| `events[]` | live `household_event_scopes` **intersected** with the frozen snapshot's events, by event id (§6) | the household's own invitation list, and nothing else |
+| `events[]` | this household's live `household_event_scopes` rows joined to their enabled `wedding_events`, in the same order the document lists events (`display_order, starts_at_local, id`), each carrying the household's own current answer (§6) | the household's own invitation list, and nothing else |
 | `expected_party_size` | the household row | needed to explain a refusal, and to let the guest answer honestly about who is coming |
-| `answers[]` | this household's own `rsvp_responses` rows | so a returning guest sees what it already said rather than guessing |
-| `can_respond`, `responds_until` | derived: publication active ∧ credential live ∧ the household has at least one scoped event in the frozen document, plus `expires_at` | the page must not offer a form that will refuse; Stage 3's `link_state` correction is the precedent for deriving rather than assuming (`20260926150000...:477-487`) |
-| `responded_at` per answered event | `rsvp_responses.responded_at` | "when did we say" is the guest's own fact |
+| `can_respond`, `responds_until` | derived: publication active ∧ credential live ∧ the household has at least one scoped, enabled event, plus `expires_at` | the page must not offer a form that will refuse; Stage 3's `link_state` correction is the precedent for deriving rather than assuming (`20260926150000...:477-487`) |
+| `responded_at` per answered event | `rsvp_responses.responded_at`, folded into the event item it belongs to | "when did we say" is the guest's own fact |
+
+**Measured correction, 2026-10-09, taken before any code was written — the frozen document cannot carry
+the join this section first described.** The first draft of this table said the household's events were
+"live scopes *intersected* with the frozen snapshot's events, by event id", and §6 said "the answer *key*
+is the event id, which is a uuid the guest was given". Both rest on a premise that measurement refutes:
+**the frozen document contains no event id.** `private.build_invitation_snapshot` writes each event item
+as `event_key, display_name, starts_at_local, ends_at_local, timezone, venue`
+(`20260927120000_stage4_tradition_pack_releases.sql:1127-1142`) and the schema-v2 projection passes those
+names through unchanged (`:1366-1380`) — `invitation_versions.snapshot` never carries
+`wedding_events.id`. And `event_key` is not a per-event identity: the host editor writes the same constant
+into every event row, `HOST_DEFINED_KEY = 'host_defined'`
+(`src/integrations/supabase/weddingContent.ts:53-57, :371`), precisely because a key derived from what the
+host typed "would read as a claim about somebody's relative". So neither name in that sentence can be
+resolved, and a design that intersected by `event_key` would have paired one household's answer with
+*every* event of the wedding.
+
+Three ways out existed, and the third is the one taken:
+
+1. **Put `event_id` into the snapshot and the DTO.** Rejected: it edits the payload all three consumers
+   render (`§13`'s own warning that a payload change moves every door's battery), it makes a machine
+   identifier part of a frozen cultural document, and every version published before this stage would
+   still lack the key — so the household door would need a second, weaker matching rule for them anyway.
+2. **Match frozen items to live rows positionally.** Rejected: the snapshot's order is the live order at
+   freeze time, so any event added, removed or re-ordered after publication silently mis-pairs a guest's
+   answer with the wrong ceremony. That is a correctness bug in the privacy-critical direction, and it is
+   undiscoverable from the guest's side.
+3. **The overlay lists the household's live scoped events; the frozen document stays the document.**
+   Adopted. The invitation the guest reads is `private.public_invitation_dto` untouched, and the answer
+   panel underneath it is this household's own `household_event_scopes` rows joined to their enabled
+   `wedding_events` rows, with the live uuid issued by the server and accepted only on that household's
+   own credential. §6's one-sentence rule survives intact and is now expressible: the scope table was
+   always declared to be "the authority on *may this household answer*", and it is also the authority on
+   *what they may answer*.
+
+Consequences of the third, stated as plainly as the mechanism: an event scoped after publication **is**
+offered an answer control (its own live name and time are shown in that control, so the guest is never
+asked to answer an unlabelled question) even though the frozen document does not describe it — the host's
+move is to republish, and §6's table now says so; and an event whose `display_name` was edited after
+publication shows its live name in the answer panel while the document above shows the published one.
+That divergence is visible on one screen, which is the honest place for it: the couple's remedy is a
+republish, and nothing here silently rewrites either side.
 
 **What the overlay must never contain, stated as a rule with teeth:** another household's name,
 salutation, answer, or existence; the count of households or invitees; `guest_households.host_notes` (the
@@ -298,23 +352,30 @@ with no invitation behind it (`20260927120000_stage4_tradition_pack_releases.sql
 `WHEN OTHERS THEN RETURN NULL` posture — a different file from the one cited just above, and the only
 place that exception handler exists).
 
-## 6. Event scope, and the four places live and frozen disagree
+## 6. Event scope, and the five places live and frozen disagree
 
 `household_event_scopes` is live; the invitation the guest reads is frozen. The directive asks for
 "correct frozen-version, event-scope and publication behaviour", and the honest design has to say which
-side wins in each case where they differ. The ruling is one sentence, applied four times: **the guest
+side wins in each case where they differ. The ruling is one sentence, applied five times: **the guest
 sees the frozen document; the guest may answer only what is both frozen and scoped; the record is the
 live scope's.**
 
 | disagreement | behaviour | why |
 | --- | --- | --- |
-| an event is scoped after the version was published | it is not offered to the guest (not in the frozen document), and the host's screen shows the household as not-yet-replied for it | a guest cannot be asked to approve an event nobody published to them; the host's answer is to republish, which is a decision they own |
+| an event is scoped after the version was published | it **is** offered an answer control, labelled with that event's live name and time (§5's correction), while the frozen document above it still does not describe it; the host's screen shows the household as not-yet-replied for it | the scope row is the host's act of inviting that family to that event, and refusing the answer would strand a family the host has already included; the host's answer to the document not describing it is to republish, which is a decision they own |
 | an event in the frozen document is removed from the household's scope | it still *appears* in the invitation (the document is frozen) but carries no answer control; a reply row that already exists stays, because deleting it would be a silent rewrite of what the household said | the scope table is the authority on "may this household answer", not on "what does the document say" |
 | an event row is deleted | the scope FK is `NO ACTION` (`20260925120300...:57`), so the deletion is refused while a reply row references it; the host screen must surface that as "replies exist for this event" | a host losing a family's answer by deleting a card is data loss through a UI click |
 | a household has zero scoped events | the door still reads (the invitation is public to that household) but `can_respond` is `false`, and the host's panel flags the zero-event scope as a data error to fix | Stage 2's own comment: a zero-event scope "is treated by later stages as a data error to surface, not a silent 'invited to nothing'", and a CHECK cannot express "at least one row exists" (`:43-45`) |
+| an event is disabled (`enabled = false`) after publication | it is not offered and not answerable — the write door answers the same `unavailable` it answers for an unscoped event — while the frozen document still describes it, and any answer already given stays on the record | `enabled` is the host taking a card out of the running; a reply for an event the host has disabled is kept because deleting it would rewrite what the family said, exactly as the removed-scope row above is treated |
 
-`responds_until` and the event list come from the intersection above; the answer *key* is the event id,
-which is a uuid the guest was given, so a submitted answer cannot name an event by a guess. The FK from
+`responds_until` is the credential's own `expires_at` [MEASURED CORRECTION, 2026-10-09: this paragraph
+first said the event list and the answer key "come from the intersection above" and that "the answer *key*
+is the event id, which is a uuid the guest was given". There is no such intersection to take them from —
+see §5's correction — and no uuid was ever in the document. The sentence below is the repaired version],
+and the event list is this household's live scope. The answer *key* is the `wedding_events.id` uuid the
+door put in front of the guest, so a submitted answer cannot name an event by a guess: an id that was not
+issued to this household either is not a scope row (refused with the generic `unavailable`) or does not
+exist (refused with the same bytes). The FK from
 `rsvp_responses` onto `household_event_scopes` (`:93-94`) is then the last line of defence: even a bug in
 the body cannot write an out-of-scope answer, because the row's own key would not exist to point at.
 Stage 2 called this "enforced by making a response key itself an existing scope row, instead of a
@@ -365,15 +426,47 @@ it as written.
   ("meal, transport, accommodation", `:84-87`). This stage asks no such question, and will not let a
   guest write arbitrary prose into a host's database: the body accepts `attending` and `party_size`
   only, and writes `answers` as the empty object. A forward CHECK then bounds the column that will carry
-  those later answers — object-typed (already `:87`), at most eight keys, each value a string of at most
-  200 characters, matching the idiom Stage 3 used for prose that must not become a megabyte
-  (`invitation_drafts_section_length_bound`, `20260926130000...:158-169`).
+  those later answers — object-typed (already `:87`) and bounded in total stored size.
+  [MEASURED CORRECTION, 2026-10-09: this first promised "at most eight keys, each value a string of at
+  most 200 characters", which no CHECK can say. A table CHECK may not contain a subquery and
+  `jsonb_object_keys` is a set-returning function, so neither a key count nor a per-value type test is
+  expressible in a constraint — the same limitation Stage 2 cites for "at least one row exists"
+  (`:43-45`). The implementable form is a ceiling on the column's stored text,
+  `octet_length(answers::text) <= 2000`, which stops the object becoming a megabyte the way
+  `invitation_drafts_section_length_bound` (`20260926130000...:158-169`) stops prose doing so, at the cost
+  of being a total bound rather than a per-key one. The per-key rule belongs to the body: this stage's
+  body accepts no answers and writes `'{}'`, and whichever later stage starts accepting them owns the
+  key-by-key discipline in the RPC that validates them.]
 * **Deletion of a household is not a way to delete its answers silently.** `household_event_scopes`
   cascades from the household (`:55-56`), but `rsvp_responses` references it with `NO ACTION`
   (`:93-94`), so removing a family that has replied is refused until the replies are removed. The screen
   shows the count first. (Ruling: no schema change. Making the delete cascade would turn one click into
   an irreversible loss of a family's answer, which is the opposite of what a "manage replies" screen is
   for.)
+* **And a household that has ever been sent a link cannot be deleted at all, by the rule this schema
+  already states.** `private.access_tokens` pins a household with
+  `FOREIGN KEY (wedding_id, household_id) REFERENCES public.guest_households(wedding_id, id)` and no
+  `ON DELETE` clause (`20260925120400_stage2_assets_entitlements_secrets.sql:169`), which is `NO ACTION`,
+  and the rows it writes are evidence rather than working data: Stage 2 chose that action for exactly this
+  reason at the wedding level — "a minted credential is evidence of who was let in, so it does not vanish
+  as a side effect of a wedding removal" (`:129-131`), with the refusal "verified rather than assumed" as
+  an accepted consequence (`:132-134`) — and `20_attacks.sql` group 11e asserts it as *refused, and
+  destroys nothing* (`docs/architecture/stage-2-migration-plan.md:188`). Before Stage 8 no household row
+  could be on the receiving end of that rule, because nothing minted the kind; from this stage one sent
+  link freezes one family's row. Ruling: no schema change and no seventh verb. A verb that deleted
+  credential rows would be a browser-reachable way to erase the record that a link was issued, which is
+  the thing group 11e exists to keep, and it would be the only erase path in this product that takes a
+  secret's history with it.
+* **What the host can still do, and what the screen must therefore say.** `revoke` the link — the family's
+  address stops resolving immediately, which is the outcome "remove this family" is usually asked for —
+  rename them, change their salutation, scope and un-scope their events, and delete their replies, all
+  through the policies at `20260925120500...:222-299`. What is not available is removal of the row, and a
+  control that promised it would be a button that fails. So the household panel offers **withdraw link**
+  and offers **delete family** only where `link_state` is `never_issued` — a UI rule with its battery case
+  in §14 item 6, and the same honesty rule that stopped Stage 7 from labelling a bearer token an identity.
+  The refusal is a `23503` naming a table the browser can see, so the battery asserts its cleanliness and
+  not only its code: household row, scope rows and replies all still present afterwards, the way group
+  11e proves it for the wedding.
 
 ## 8. Where the new verbs go, and the surface rule that decides it
 
@@ -392,8 +485,9 @@ one of them either mints/reads a credential or serves an anonymous door:
 | `submit_guest_rsvp(jsonb)` | `anon, authenticated` | writes `rsvp_responses` with `response_source = 'guest'`, which no client may do |
 
 Household CRUD, event-scope editing, manual RSVP recording, and the host's reply list are **not** new
-functions. They are the three tables under the four policies that already exist, reached from one new
-adapter module (`src/integrations/supabase/`), which is what `canonical-table-read-outside-the-adapter`
+functions. They are the three tables under the twelve owner policies that already exist — four each,
+`20260925120500...:222-244` for households, `:246-268` for scopes, `:270-299` for replies — reached from
+one new adapter module (`src/integrations/supabase/`), which is what `canonical-table-read-outside-the-adapter`
 (`scripts/check-product-contract.mjs:238-244`) is built to keep in one place. The thirtieth reason for
 the split is the one Stage 7 recorded about its own minting surface: the smaller the set of paths that
 can write a credential table, the shorter the list a reader must trust
@@ -520,6 +614,14 @@ habit:
   ("0 weddings, 0 asks, 0 feedback, 0 credentials, 0 accounts"). Stage 8's line adds households, scopes
   and replies. If a tier is interrupted mid-run — as the shared engine's death interrupted one Stage 7
   run — the residue is reported, not silently deleted, and never removed by resetting the shared stack.
+  Teardown order is a consequence of §7 rather than a convenience: because a credential pins its household
+  and its publication with `NO ACTION`, and `private.access_tokens` refuses client deletes by trigger
+  (`20260925120400...:183-186`), no fixture family that received a link can be cleared through the UI at
+  all. So every tier's removal runs in Stage 2's stated erasure order — credentials first, by the trusted
+  role; then replies and households; then the wedding — and the tier asserts the order by reporting a
+  non-zero residue when a step is skipped, rather than discovering it as a `23503` mid-cleanup. The same
+  sentence is why the census in the HTTP bullet can promise before equals after: it is only true of a suite
+  that deletes in that order.
 * **Containers**: this stage creates only containers named for this stage, on the engine a human started;
   it removes them by the name it printed, and proves absence with a presence count taken *after* the
   removal, because `docker rm -f` against an absent name prints nothing and exits 0 on this engine
@@ -572,11 +674,14 @@ re-run at every Stage 8 head that can affect them, on both migration chains.
    either secret at the review door — all refused with identical bytes, all with zero writes.
 4. **Cross-tenant**: household B, credential B, event of wedding A, another host's wedding — every
    combination refuses, and no probe distinguishes "not yours" from "does not exist".
-5. **Scope**: an answer for an unscoped event cannot be written (the key does not exist); the four
+5. **Scope**: an answer for an unscoped event cannot be written (the key does not exist); the five
    live/frozen disagreements in §6 each behave as ruled.
 6. **Semantics**: revision overwrites and keeps one row; a guest upsert over a `host_manual` row takes the
    source; a client cannot write or edit a `'guest'` row; party size above `expected_party_size` refuses
-   actionably, and the host's manual entry is not capped (7).
+   actionably, and the host's manual entry is not capped (7); and the deletion freeze §7 rules holds —
+   `DELETE` of a household that has ever been issued a credential refuses, and destroys nothing (the
+   household row, its scope rows and its replies all still present afterwards), the way Stage 2's group
+   11e proves the same for a credential-bearing wedding.
 7. **Privacy**: P1–P10 each have a named case, including the `host_notes` marker and the household-count
    probe; no response of the guest door names a token column.
 8. **Publication behaviour**: publish re-pins live household credentials; takedown revokes both kinds;
