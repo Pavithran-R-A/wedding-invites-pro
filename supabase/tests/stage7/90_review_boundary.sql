@@ -50,7 +50,8 @@
 --    the bucket the same way, for the same reason, and the standing-in is stated rather than
 --    hidden.
 -- 2. `invitation_drafts` is written directly too, and that one is not a stand-in: measured at
---    this head, `api` exposes no draft-writing verb at all (G1 lists the thirteen names),
+--    this head, no name in the group G census writes a draft (G1 enumerates the exposed names, and
+--    a draft-writing verb would have to appear in that list to exist),
 --    because the host edits the draft through row-level security on the table. A direct UPDATE
 --    here is the product's own path, not a substitute for one.
 -- =============================================================================
@@ -89,6 +90,32 @@ CREATE FUNCTION pg_temp.s7b_sorted(want text[]) RETURNS text[]
 LANGUAGE sql STABLE AS $fn$
   SELECT coalesce(array_agg(k ORDER BY k COLLATE "C"), '{}'::text[])
     FROM unnest(coalesce(want, '{}'::text[])) u(k) $fn$;
+
+-- Which schema head this run is qualifying. The group G census below counts the exposed surface of
+-- the *whole* cluster, not just this workflow's, so it is the part of Stage 7's battery that a later
+-- stage cannot leave alone: Stage 8 adds six verbs, and an assertion pinned at thirteen would fail
+-- for a change that has nothing to do with family review. Unset means this file's own head, so
+-- `supabase/tests/stage7/run.sh` still measures exactly what it was written against.
+CREATE FUNCTION pg_temp.s7b_head() RETURNS text
+LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(current_setting('app.stage_head', true), 'stage7') $fn$;
+
+-- Ordinal, not equality, for the reason every runner since Stage 5 records: heads are cumulative, so
+-- a census keyed on `= 'stage8'` would hand a later chain the older expectations. A malformed head
+-- raises rather than choosing a branch, so a typo in PGOPTIONS reports itself instead of passing.
+CREATE FUNCTION pg_temp.s7b_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.s7b_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 's7b_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.s7b_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.s7b_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$fn$;
 
 CREATE FUNCTION pg_temp.s7b_top_keys(v jsonb) RETURNS text[]
 LANGUAGE sql STABLE AS $fn$
@@ -1021,31 +1048,45 @@ BEGIN
   internal_names := (SELECT array_agg(p.proname ORDER BY p.proname COLLATE "C") FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'internal_api');
 
-  PERFORM pg_temp.s7b_eq('G1 `api` is exactly the thirteen host and door verbs it was measured to '
-    'be at this head, with Stage 7''s three added names and no fourteenth — a checker that only '
-    'counts would not notice a swapped-out name',
+  PERFORM pg_temp.s7b_eq('G1 `api` is exactly the host and door verbs it was measured to be at this '
+    'head — thirteen at Stage 7, with Stage 7''s three added names and no fourteenth; nineteen from '
+    'Stage 8, which adds the six household-invitation verbs. Named rather than counted, because a '
+    'checker that only counts would not notice a swapped-out name',
     api_names,
-    pg_temp.s7b_sorted(ARRAY['create_invitation_version', 'get_approval_requests',
-      'get_invitation_publication_state', 'preview_invitation', 'preview_invitation_document',
-      'publish_invitation_version', 'request_family_review', 'resolve_family_review',
-      'resolve_public_invitation', 'revoke_family_review', 'revoke_invitation_publication',
-      'rotate_invitation_token', 'submit_family_review']));
+    CASE WHEN pg_temp.s7b_at_least('stage8')
+         THEN pg_temp.s7b_sorted(ARRAY['create_invitation_version', 'get_approval_requests',
+           'get_guest_invitation_state', 'get_invitation_publication_state',
+           'issue_guest_invitations', 'preview_invitation', 'preview_invitation_document',
+           'publish_invitation_version', 'request_family_review', 'resolve_family_review',
+           'resolve_guest_invitation', 'resolve_public_invitation', 'revoke_family_review',
+           'revoke_guest_invitation', 'revoke_invitation_publication', 'rotate_guest_invitation',
+           'rotate_invitation_token', 'submit_family_review', 'submit_guest_rsvp'])
+         ELSE pg_temp.s7b_sorted(ARRAY['create_invitation_version', 'get_approval_requests',
+           'get_invitation_publication_state', 'preview_invitation', 'preview_invitation_document',
+           'publish_invitation_version', 'request_family_review', 'resolve_family_review',
+           'resolve_public_invitation', 'revoke_family_review', 'revoke_invitation_publication',
+           'rotate_invitation_token', 'submit_family_review'])
+    END);
 
-  PERFORM pg_temp.s7b_eq('G2 and `internal_api` holds twenty-four bodies, thirteen mirrored from '
-    '`api` plus the eleven cultural-authority names §7 keeps on this side',
-    cardinality(internal_names)::bigint, 24::bigint);
+  PERFORM pg_temp.s7b_eq('G2 and `internal_api` holds the bodies behind them: twenty-four at Stage 7, '
+    'thirteen mirrored from `api` plus the eleven cultural-authority names §7 keeps on this side; '
+    'thirty from Stage 8, whose six new bodies are all mirrors, so the eleven stay eleven',
+    cardinality(internal_names)::bigint,
+    CASE WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
 
-  PERFORM pg_temp.s7b_eq('G3 `authenticated` holds EXECUTE on thirteen of the twenty-four internal '
-    'bodies — precisely the ones the wrappers mirror — and on thirteen `api` names, so the eleven '
-    'cultural-authority bodies are refused to a host by the absence of a grant, not by the size of '
-    'the schema §7',
+  PERFORM pg_temp.s7b_eq('G3 `authenticated` holds EXECUTE on the mirrored internal bodies and on the '
+    'same number of `api` names — thirteen and thirteen at Stage 7, nineteen and nineteen from Stage '
+    '8 — so the eleven cultural-authority bodies are refused to a host by the absence of a grant, '
+    'not by the size of the schema §7. The two halves must agree: a host granted an internal body '
+    'with no wrapper would be a second, unadvertised door',
     ARRAY[(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'internal_api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text,
           (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text]::text[],
-    ARRAY['13', '13']::text[]);
+    CASE WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
+         ELSE ARRAY['13', '13']::text[] END);
 
   -- The sentence G3 cannot say, said here instead. Both schemas are visible to both client roles: an
   -- earlier draft of this assertion called USAGE the difference between them, and the measured ACLs
@@ -1073,18 +1114,28 @@ BEGIN
     ARRAY['{postgres=UC/postgres,anon=U/postgres,authenticated=U/postgres}',
           '{postgres=UC/postgres,anon=U/postgres,authenticated=U/postgres}']::text[]);
 
-  PERFORM pg_temp.s7b_eq('G3d an account-free caller sees three internal bodies and they are the '
-    'mirrors of the three doors G4 names — `internal_api` being reachable by `anon` is therefore not '
-    'a wider surface than the published one, it is the same three verbs',
+  PERFORM pg_temp.s7b_eq('G3d an account-free caller sees only the mirrors of the door verbs G4 '
+    'names — three at Stage 7, five from Stage 8, when the household guest adds its own open and '
+    'answer — so `internal_api` being reachable by `anon` is not a wider surface than the published '
+    'one, it is the same verbs again',
     (SELECT array_agg(p.proname::text ORDER BY p.proname COLLATE "C") FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'internal_api' AND has_function_privilege('anon', p.oid, 'execute')),
-    ARRAY['resolve_family_review', 'resolve_public_invitation', 'submit_family_review']::text[]);
+    CASE WHEN pg_temp.s7b_at_least('stage8')
+         THEN ARRAY['resolve_family_review', 'resolve_guest_invitation',
+                    'resolve_public_invitation', 'submit_family_review',
+                    'submit_guest_rsvp']::text[]
+         ELSE ARRAY['resolve_family_review', 'resolve_public_invitation',
+                    'submit_family_review']::text[]
+    END);
 
   -- G2 says twenty-four = thirteen + eleven and G3 says thirteen. Both are counts. Named below so
   -- neither can be satisfied by a swapped-out body that happens to leave the arithmetic intact.
-  PERFORM pg_temp.s7b_eq('G3e the thirteen that `authenticated` may call are not merely counted: '
-    'taken by name they are exactly the thirteen published `api` wrappers'' own names, one mirror '
+  -- The want-list here is `api_names`, the array G1 was just checked against, so this assertion
+  -- follows the head automatically: thirteen against thirteen at Stage 7, nineteen against nineteen
+  -- from Stage 8, and in both cases by name rather than by count.
+  PERFORM pg_temp.s7b_eq('G3e the internal bodies that `authenticated` may call are not merely '
+    'counted: taken by name they are exactly the published `api` wrappers'' own names, one mirror '
     'per verb and no extra body opened to a host beyond the surface it is served',
     pg_temp.s7b_sorted(ARRAY(SELECT p.proname::text FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -1107,17 +1158,30 @@ BEGIN
       'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
       'validate_tradition_pack_release']));
 
-  PERFORM pg_temp.s7b_eq('G4 an account-free caller reaches exactly three verbs, and they are the '
-    'two doors and the one answer — nothing about the family''s queue, the wedding, or a version '
-    'is readable without a credential that names it §3',
+  -- The set equality below is what carries Stage 7's claim, and it is worth saying why widening it
+  -- for Stage 8 does not weaken anything: because the want-list is exact, the three host-side family
+  -- verbs (`get_approval_requests`, `request_family_review`, `revoke_family_review`) are refused to
+  -- `anon` by their *absence* from it. Adding the household guest's two doors makes the list longer,
+  -- not the permission looser — a fourth name could only ever arrive here by being written into this
+  -- file first.
+  PERFORM pg_temp.s7b_eq('G4 an account-free caller reaches exactly the doors and answers and nothing '
+    'else — three verbs at Stage 7, five from Stage 8 — so nothing about the family''s queue, the '
+    'wedding, or a version is readable without a credential that names it §3',
     (SELECT array_agg(p.proname::text ORDER BY p.proname COLLATE "C") FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'api' AND has_function_privilege('anon', p.oid, 'execute')),
-    ARRAY['resolve_family_review', 'resolve_public_invitation', 'submit_family_review']::text[]);
+    CASE WHEN pg_temp.s7b_at_least('stage8')
+         THEN ARRAY['resolve_family_review', 'resolve_guest_invitation',
+                    'resolve_public_invitation', 'submit_family_review',
+                    'submit_guest_rsvp']::text[]
+         ELSE ARRAY['resolve_family_review', 'resolve_public_invitation',
+                    'submit_family_review']::text[]
+    END);
 
   PERFORM pg_temp.s7b_eq('G5 and `service_role` — the key a server integration would hold — has no '
-    'path through either schema: zero EXECUTE grants across all thirty-seven names, so the review '
-    'workflow cannot be driven by a trusted key bypassing the caller checks §9',
+    'path through either schema: zero EXECUTE grants across every name in both of them (thirty-seven '
+    'at the Stage 7 head, forty-nine from Stage 8), so neither the review workflow nor the guest one '
+    'can be driven by a trusted key bypassing the caller checks §9',
     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname IN ('api','internal_api')
         AND has_function_privilege('service_role', p.oid, 'execute')), 0::bigint);
