@@ -1219,3 +1219,70 @@ exhausted, the scripted reviewer is not a relative, the review link is shown onc
 possession of a link is not verified human identity, and expiry is crossed by setting a window rather than by
 waiting. The re-runs move three tiers from *bounded* to *measured at the published tree*; they do not add a
 tier, a platform, or a production claim.
+
+### 21.1 Corrections to §21, each one measured before it was written down
+
+§21 is committed and pushed, so its text is published and is not rewritten here. Every row below quotes the
+published line, prints what the captures actually show, and gives the reading a reader should carry instead.
+None of them moves a result: every case count, label and verdict in §21 stands. The four that change something
+are an exit code quoted against the wrong file, an invented cause, two cells in one table, and a time window;
+the fifth is a word for a number.
+
+1. **The build gate's exit code was quoted from a capture that carries none.** Published:
+   "* Build, exit 0: 2219 modules, 38.04 s." Measured: `q7-logs/s7-qual-build-01.log` contains `2219 modules
+   transformed`, and its last line is the vite success line `✓ built in 38.04s` — `grep -n "exit=\|code="` over
+   that file returns nothing, so the file cannot carry the words "exit 0". The exit-coded measurements of the
+   same command are the gate sweeps: `s7-final-gates-05.log:138` and `s7-final-gates-06.log:138`, each printing
+   `exit=0  (production build)` on the line after its own success line (37.12 s and 36.71 s). Read it as: the
+   19:06 build reported success in its own words, the same command was measured with an exit code at this head
+   and the next, and the four `dist/` aggregates §21 quotes were taken from the files themselves and are
+   identical across all three runs — which is the part that makes the browser tier's bytes the node gates' bytes.
+2. **The cause named for the 1/1/1 baseline is withdrawn, not repaired.** Published: "an earlier browser-driver
+   run of this stage that the engine's death interrupted mid-teardown." Measured: those rows carry `created_at`
+   2026-10-08 14:49–14:50 UTC, which is 20:19–20:20 IST on 2026-10-08, while §18 dates the engine's death to
+   2026-10-09 — a day later, so the outage cannot have interrupted this run. The run's own tag
+   `s7ui-muznkpmg-ybk7g` appears in no retained capture: the earliest per-run browser capture in `q7-logs/` is
+   `s7-browser-s7ui-muznr9p1-l78nw.log` (20:25, a later run), which names no other tag and tore down to
+   `0 weddings, 0 asks, 0 feedback, 0 credentials, 0 accounts`. Read it as: an earlier Stage 7 browser-driver
+   run left the three rows and its teardown did not complete, and **the reason is not knowable from the evidence
+   this session kept**. It does not bear on the leak check either way: §21's point there was that the census
+   compares before against after, and both sides read 1/1/1 in the capture.
+3. **Two HTTP labels sat in the wrong row of the boundary table.** Published: the "credential kinds do not cross
+   doors" row names `D-04, D-05, C-04, T-01, T-03`. Measured, from the capture's own printed lines
+   (`s7-qual-http-01.log:455,457,487,488,527`): `D-04` "a guest credential at the review door is refused exactly
+   as junk is, and still opens its own door", `D-05` "the other direction: a review credential cannot reach the
+   guest door or its RSVP", and `C-04` "no guest verb can name a review request, and no review verb can name a
+   publication" are the kind-crossing cases. `T-01` is "a Stage 7 call is reachable through the api profile and
+   through nothing else" — the who-may-call invariant, already correctly listed in that row — and `T-03` is "a
+   credential addressed in a query string is echoed by the router — the reason there is no parameter", a fact
+   about transport, not about kinds. Read it as: that cell is `D-04, D-05, C-04`; and the row "a credential never
+   leaves this machine, or a log", whose HTTP cell §21 left as "—", does have a measured case for it, which is
+   `T-03` — the echo that makes the parameter-less door (`T-02`) a security assertion rather than a preference.
+4. **"digest `523c8f75…`" is a name.** Published in the cleanup paragraph. Measured:
+   `q7-logs/s7-qual-cleanup-02.log` records it as `volume_name=523c8f759d9522e49dab1bcf53607eb2…`, the Docker
+   volume's own 64-hex name, the form Docker gives anonymous volume storage; nothing was digested to produce
+   it. Read it as: the kept orphan storage is *named* `523c8f75…`. The rest of that paragraph is unaffected —
+   the volume exists, is unlabelled apart from `com.docker.volume.anonymous`, shares the removed container's
+   creation second, and was deliberately not deleted.
+5. **The window the three tiers ran in was understated by two minutes.** Published: "between 19:01 and 19:09 IST
+   on 2026-10-09." Measured from the captures' own timestamps: SQL 18:59:33 → 19:01:25, HTTP 19:02:08 →
+   19:05:32, the rebuild's `dist/index.html` 19:06:59, browser 19:07:22 → 19:09:39. Read it as: 18:59:33 →
+   19:09:39 IST, serially, in that order.
+
+**A correction I queued and then had to drop, because the check disproved it.** Reading §21's table row claiming
+the family/cultural-authority separation "is carried by the SQL battery alone", I judged it too strong on the
+strength of one fact: `src/test/culturalSafetyDecisionLogic.test.tsx` exists. Reading that file's own prelude
+and cases showed it asserts something else — that the *pack decision* is invariant across three profiles'
+names, language columns and addresses, and that a reviewer is never credited with the couple's names. It never
+touches the family-review surface. So I measured the rest of the non-SQL tiers instead: `grep -rin
+"cultural|authority"` over `supabase/tests/api/*.mjs` names cultural authority only inside the Stage 4 and
+Stage 5 batteries, the single `tradition_pack` occurrence in the Stage 7 HTTP file
+(`supabase/tests/api/stage7_family_approval.test.mjs:153`) is an element of a section-key list rather than an
+assertion, and `src/test/familyReview*.{ts,tsx}` and `scripts/stage7-browser-review.mjs` contain zero references
+to the pack surface. **§21's line stands exactly as published**, and this paragraph is in the record because a
+reader auditing the audit should be able to see that the claim was tested rather than merely re-asserted.
+
+**How this block is certified.** It is a docs-only edit inside `docs/audits/` — the one tracked path the I10
+scan's pathspec excludes — and it is certified by re-taking the full gate sweep and the 43-octet classifier
+scan at the SHA it lands on, into `q7-logs/`. Per §20's precedent that re-take *is* the certification; writing
+another numbered section about it would make the audit unfinishable, so none is written.
