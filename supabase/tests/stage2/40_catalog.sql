@@ -607,6 +607,22 @@ BEGIN
                            'internal_api.resolve_family_review',
                            'internal_api.revoke_family_review',
                            'internal_api.submit_family_review']
+                ELSE ARRAY[]::text[] END
+        -- Stage 8: the guest workflow's six bodies. Four are host verbs (mint, revoke, rotate,
+        -- state) and two are the anonymous door (resolve, answer). All six are definers for the
+        -- standing reason: each writes or reads `private.access_tokens` / `public.rsvp_responses`
+        -- rows the calling role holds no table privilege on, and the guest who answers has no
+        -- role at all. `internal_api.publish_invitation_version` and
+        -- `internal_api.revoke_invitation_publication` are re-declared by Stage 8 §6 and appear
+        -- above already — re-declaring a body changes no name, so this census does not move for
+        -- them and C26e's count is the tripwire that would notice if it should have.
+        || CASE WHEN pg_temp.st2_at_least('stage8')
+                THEN ARRAY['internal_api.get_guest_invitation_state',
+                           'internal_api.issue_guest_invitations',
+                           'internal_api.resolve_guest_invitation',
+                           'internal_api.revoke_guest_invitation',
+                           'internal_api.rotate_guest_invitation',
+                           'internal_api.submit_guest_rsvp']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -637,12 +653,14 @@ BEGIN
   -- test can show, and it is the shape C63b's limitation makes worth watching.
   --
   -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the document
-  -- preview, and thirteen from Stage 7, which added the five family-review verbs. Every wrapper
-  -- still has to be one line, whatever the number is.
+  -- preview, thirteen from Stage 7, which added the five family-review verbs, and nineteen from
+  -- Stage 8, which added the six household-invitation verbs. Every wrapper still has to be one
+  -- line, whatever the number is.
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage7') THEN 13
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage8') THEN 19
+                                       WHEN pg_temp.st2_at_least('stage7') THEN 13
                                        WHEN pg_temp.st2_at_least('stage5') THEN 8
                                        ELSE 7 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -700,6 +718,22 @@ BEGIN
                            'resolve_family_review',
                            'revoke_family_review',
                            'submit_family_review']
+                ELSE ARRAY[]::text[] END
+        -- Stage 8 adds six, and — the reason this is spelled out rather than counted — all six are
+        -- paired, so this census, C26d's nineteen and C26f's nineteen are one nineteen-name set seen
+        -- three ways. An unpaired guest body is the failure this catches: it would appear here and
+        -- not in C26d/C26f, which is the asymmetry Stage 5 took on purpose for the eleven
+        -- maintenance bodies and no reason exists to allow for a guest verb. `internal_api` is not
+        -- exposed to the Data API, so an unpaired `submit_guest_rsvp` would be a write to
+        -- `public.rsvp_responses` that no request can reach — dead code that reads as a hole to the
+        -- next reader, which is worse than the refusal this line asks for.
+        || CASE WHEN pg_temp.st2_at_least('stage8')
+                THEN ARRAY['get_guest_invitation_state',
+                           'issue_guest_invitations',
+                           'resolve_guest_invitation',
+                           'revoke_guest_invitation',
+                           'rotate_guest_invitation',
+                           'submit_guest_rsvp']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -712,7 +746,8 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage7') THEN 13
+      = (CASE WHEN pg_temp.st2_at_least('stage8') THEN 19
+              WHEN pg_temp.st2_at_least('stage7') THEN 13
               WHEN pg_temp.st2_at_least('stage5') THEN 8
               ELSE 7 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc impl
@@ -745,7 +780,7 @@ BEGIN
   -- one call apart from the wrapper beside it, and these assertions are what keep both sets
   -- from growing quietly. The HTTP-side half of the claim — that a request cannot name
   -- `internal_api` at all — is measured by `supabase/tests/api/stage3_security.test.mjs`.
-  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is the guest resolver and the reviewer verbs',
+  PERFORM pg_temp.st2_set('C28a the anonymous callable surface is the two guest doors and the reviewer verbs',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -756,9 +791,19 @@ BEGIN
     -- roleless caller: a family reviewer, who has no account by design. A reviewer needs two verbs,
     -- not one — `resolve_family_review` to open the invitation they were sent, and
     -- `submit_family_review` to answer it — because an answer is not a read and cannot share a door.
-    -- So the honest form of the claim is these names, each measured through its wrapper and its
+    -- Stage 8 adds a household guest, and it needs the same two, for the same reason:
+    -- `resolve_guest_invitation` opens the household's own invitation and `submit_guest_rsvp` answers
+    -- it. So the honest form of the claim is these names, each measured through its wrapper and its
     -- implementation, and nothing else on this head is anon-executable. That is what a forgotten
     -- revoke trips on here, which is the reason C63b exists.
+    --
+    -- The set is exactly four doors x two schemas = eight names from Stage 8, and the load-bearing
+    -- half of that is what is *not* here: the host's four guest verbs
+    -- (`issue_guest_invitations`, `revoke_guest_invitation`, `rotate_guest_invitation`,
+    -- `get_guest_invitation_state`) take a `wedding_id` or `household_id` and are anon-refused, so an
+    -- unauthenticated caller cannot mint a link for somebody else's family, withdraw one, or learn
+    -- which households a wedding has invited. A guest that arrives with `anon` and a stolen token can
+    -- read and answer; it cannot open the door for anyone else.
     (SELECT array_agg(x ORDER BY x) FROM unnest(
         ARRAY['api.resolve_public_invitation',
               'internal_api.resolve_public_invitation']
@@ -767,6 +812,12 @@ BEGIN
                            'internal_api.resolve_family_review',
                            'api.submit_family_review',
                            'internal_api.submit_family_review']
+                ELSE ARRAY[]::text[] END
+        || CASE WHEN pg_temp.st2_at_least('stage8')
+                THEN ARRAY['api.resolve_guest_invitation',
+                           'internal_api.resolve_guest_invitation',
+                           'api.submit_guest_rsvp',
+                           'internal_api.submit_guest_rsvp']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_set('C28b a signed-in caller reaches exactly the wrappers and their implementations, as one set named by signature',
     (SELECT array_agg(p ORDER BY p) FROM (
@@ -775,7 +826,8 @@ BEGIN
         WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
     -- Fourteen names when this was written, sixteen from Stage 5, which paired one more wrapper
-    -- with one more body, and twenty-six from Stage 7, which paired five. The pack-maintenance
+    -- with one more body, twenty-six from Stage 7, which paired five, and thirty-eight from Stage 8,
+    -- which paired six. The pack-maintenance
     -- bodies are absent from every version of this list because they are granted to nobody a
     -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
     -- appeared for one of them would show up as a diff in this set.
@@ -814,6 +866,27 @@ BEGIN
                            'internal_api.resolve_family_review',
                            'internal_api.revoke_family_review',
                            'internal_api.submit_family_review']
+                ELSE ARRAY[]::text[] END
+        -- Stage 8's six host guest verbs, each counted twice, wrapper and body. Two of the twelve
+        -- (`api.resolve_guest_invitation`, `api.submit_guest_rsvp` and their bodies) also appear in
+        -- C28a, for the same reason the reviewer's two do: the caller at that door has no session,
+        -- and a signed-in host clicking the same link is the same person at the same door, so the
+        -- grant is anon *and* authenticated rather than one or the other. The other eight are the
+        -- host's own: a link may be minted, withdrawn, rotated and read only by somebody with a
+        -- session that owns the wedding.
+        || CASE WHEN pg_temp.st2_at_least('stage8')
+                THEN ARRAY['api.get_guest_invitation_state',
+                           'api.issue_guest_invitations',
+                           'api.resolve_guest_invitation',
+                           'api.revoke_guest_invitation',
+                           'api.rotate_guest_invitation',
+                           'api.submit_guest_rsvp',
+                           'internal_api.get_guest_invitation_state',
+                           'internal_api.issue_guest_invitations',
+                           'internal_api.resolve_guest_invitation',
+                           'internal_api.revoke_guest_invitation',
+                           'internal_api.rotate_guest_invitation',
+                           'internal_api.submit_guest_rsvp']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -827,9 +900,10 @@ BEGIN
                  WHERE n.nspname = 'public'));
   -- ... and the counterpart, since C29 alone would also be satisfied by a schema that
   -- grew no boundary at all. The list is exact: another callable would have to be named
-  -- here before it could ship — and from Stage 5 the document preview has been, and from
-  -- Stage 7 the five family-review verbs have, so each is declared with the head that
-  -- introduced it rather than merged into the base.
+  -- here before it could ship — and from Stage 5 the document preview has been, from
+  -- Stage 7 the five family-review verbs have, and from Stage 8 the six household-invitation
+  -- verbs have, so each is declared with the head that introduced it rather than merged into
+  -- the base.
   PERFORM pg_temp.st2_set('C29a the callable boundary is exactly the named RPCs this head declares',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT p.proname AS p FROM pg_proc p
@@ -852,6 +926,17 @@ BEGIN
                            'resolve_family_review',
                            'revoke_family_review',
                            'submit_family_review']
+                ELSE ARRAY[]::text[] END
+        -- Stage 8's six. Named here, one at a time, because this list is the boundary: a seventh
+        -- guest verb would have to be added before it could ship, and the alternative — a count —
+        -- would pass for any six names whatsoever.
+        || CASE WHEN pg_temp.st2_at_least('stage8')
+                THEN ARRAY['get_guest_invitation_state',
+                           'issue_guest_invitations',
+                           'resolve_guest_invitation',
+                           'revoke_guest_invitation',
+                           'rotate_guest_invitation',
+                           'submit_guest_rsvp']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
   -- "the credential never appears in a query string": with no parameter to name, a
@@ -866,11 +951,22 @@ BEGIN
   --   * no callable anywhere on the boundary takes an argument whose name is credential-shaped,
   --     which is what makes `api.submit_family_review` (four content arguments, no token
   --     argument) conform to the same rule as the argument-free ones instead of exempting itself.
+  --
+  -- Stage 8 makes the first rule three names, because a household guest is a third kind of
+  -- credential and the same mechanism has to hold for it: `api.resolve_guest_invitation` reads the
+  -- bearer secret from the request's own GUC context and takes nothing. `api.submit_guest_rsvp`
+  -- lands on the second rule rather than the first — it has one argument, `p_answers`, the guest's
+  -- own reply and not a credential — so the answer door is held to the same test the review answer
+  -- door already was. The count is of *no-argument readers*, so it moves only when a new kind of
+  -- credential is given a door, which is the event worth failing on.
   PERFORM pg_temp.st2_ok('C29b no credential-reading callable takes arguments, and none takes a credential-shaped one',
     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'api' AND p.proname IN ('resolve_public_invitation', 'resolve_family_review')
+      WHERE n.nspname = 'api' AND p.proname IN ('resolve_public_invitation', 'resolve_family_review',
+                                                'resolve_guest_invitation')
         AND p.pronargs = 0)
-      = (CASE WHEN pg_temp.st2_at_least('stage7') THEN 2 ELSE 1 END)
+      = (CASE WHEN pg_temp.st2_at_least('stage8') THEN 3
+              WHEN pg_temp.st2_at_least('stage7') THEN 2
+              ELSE 1 END)
     AND NOT EXISTS (SELECT 1 FROM pg_proc p
                       JOIN pg_namespace n ON n.oid = p.pronamespace
                       JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
