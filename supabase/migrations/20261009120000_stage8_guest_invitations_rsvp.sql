@@ -429,6 +429,21 @@ BEGIN
   -- The expiry a host set for a family is carried across the replacement. What is being rotated is
   -- the secret, not the deadline; silently extending a revoked-by-time link would be the host's
   -- decision made by a button labelled "new link".
+  --
+  -- A deadline that has already passed is the one case that cannot be carried, and it is refused
+  -- here rather than discovered by the table. The row this verb writes has `created_at = now()`, and
+  -- `access_tokens` requires `expires_at > created_at` (`20260925120400...:150`), so copying an
+  -- expired instant onto the successor would abort the whole call with a `23514` from a constraint
+  -- the host has never seen — and would abort it *after* `v_old` had been selected `FOR UPDATE`, so
+  -- the transaction rolls back and the dead link stays dead while the button reports a database
+  -- error. The actionable answer already exists as a pair of verbs: withdraw the expired link, then
+  -- send the family a new one. `get_guest_invitation_state`'s own CASE (§3.4) reports this state as
+  -- `expired`, so the host screen and the refusal use one word.
+  IF v_old.expiry_policy = 'fixed' AND v_old.expires_at <= now() THEN
+    RAISE EXCEPTION 'this household''s link has already expired; withdraw it and send a new one'
+      USING ERRCODE = 'raise_exception';
+  END IF;
+
   v_expires := CASE WHEN v_old.expiry_policy = 'fixed' THEN v_old.expires_at END;
 
   UPDATE private.access_tokens SET revoked_at = v_revoked_at WHERE id = v_old.id;
@@ -1194,7 +1209,7 @@ COMMENT ON FUNCTION internal_api.revoke_guest_invitation(uuid) IS
   'Host verb. Revokes that household''s live guest_invitation credential and reports whether there was one. Leaves the household row, its event scope and its answers alone.';
 
 COMMENT ON FUNCTION internal_api.rotate_guest_invitation(uuid) IS
-  'Host verb. Revokes the live credential, then mints its replacement, in that order and in one transaction, carrying the host''s expiry across. Returns the new raw token once and the instant the old one died.';
+  'Host verb. Revokes the live credential, then mints its replacement, in that order and in one transaction, carrying the host''s expiry across when that deadline has not already passed. Returns the new raw token once and the instant the old one died; refuses a link whose deadline is gone, because withdraw-then-send is the pair that gives that family a working new link.';
 
 COMMENT ON FUNCTION internal_api.get_guest_invitation_state(uuid) IS
   'Host read. One row per household of the caller''s own wedding: name, salutation, expected party size, link state (never_issued / live / revoked / expired), expiry, last-opened time, scoped-event count and reply counts. Returns no token material of any kind.';

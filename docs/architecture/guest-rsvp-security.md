@@ -187,6 +187,16 @@ is the one-shot replacement: revoke first, then mint, in that order and in one t
 already works at the wedding door (same file `:407-410`) — so a failed mint can never leave two live
 secrets, and a successful one never leaves the old link resolving.
 
+What rotate carries across is the household's deadline, not a fresh one — with one case it cannot
+carry. A successor row is written with `created_at = now()`, and `access_tokens` requires
+`expires_at > created_at` (`20260925120400_stage2_assets_entitlements_secrets.sql:150`), so copying an
+already-expired instant onto it would abort the call with a `23514` from a constraint no host has ever
+seen, after the transaction had already taken the old row `FOR UPDATE`. Rotate therefore refuses a link
+whose deadline has passed, in the same actionable register as its "no live link to rotate" arm, and the
+host's answer is the pair of verbs that already exists: `api.revoke_guest_invitation`, then
+`api.issue_guest_invitations`. Silently turning an expired link into an un-expiring one would be the
+host's decision made by a button labelled "new link", so the code does neither.
+
 **Host-side state read.** `api.get_guest_invitation_state(p_wedding_id uuid)` returns, per household:
 `display_name`, `salutation`, the `link_state` vocabulary Stage 7 already published for its queue
 (`never_issued` / `live` / `revoked` / `expired`, computed at `20261008120000...:264-267` and spelled out
