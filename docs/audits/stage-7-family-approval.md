@@ -1106,3 +1106,116 @@ is an artefact of comparing Vite's formatted size column, and it is why `-02` ex
 Taken together these five items bound the three gaps §18's table records; they do not close them, and none of
 them is offered as a substitute for the SQL/HTTP/browser re-runs that a restarted Docker engine would make
 possible.
+
+## 21. The engine returned, the three tiers ran at this head, and §20's bounds became re-runs
+
+§18 closed on a block and §20 closed by declining to pass its arguments off as a substitute for lifting it. The
+engine came back — started from the Desktop UI by the human rather than from this seat, because the same daemon
+hosts another project's twelve containers and starting it is a shared-state action — and the three tiers were
+then run at `48568ce485a913a07f4da1c49e118fe64ffbe49d`, the head this file describes, between 19:01 and 19:09
+IST on 2026-10-09. Each was invoked with the command its own runner documents rather than an improvised one:
+`bash supabase/tests/stage7/run.sh both`, `bash supabase/tests/api/run.sh`, then `npm run build` followed by
+`node scripts/stage7-browser-review.mjs` against the preview on 4173.
+
+**Freshness is now measured rather than argued.** Every input of every tier is older than the capture that
+quotes it, so the two disclosed gaps in §18's table and the two bounded gaps in §20 are gone:
+
+| tier | capture window | newest input of that tier, measured | gap |
+| --- | --- | --- | --- |
+| SQL, both chains | `s7-qual-sql-both-01.log` 18:59:33 → 19:01:25 | `20261008120000_stage7_family_approval_review.sql` 2026-10-09 13:02:23; `supabase/tests/stage7/run.sh` 2026-10-08 19:50:08 | none — §18's row and §20 A both named these files and both are now antecedent |
+| HTTP, seven files | `s7-qual-http-01.log` 19:02:08 → 19:05:32 | `supabase/tests/api/stage7_family_approval.test.mjs` 2026-10-09 12:40:38; `supabase/tests/api/run.sh` 2026-10-08 18:18:17 | none — §20 B's eighteen-hour gap is replaced by a run that postdates the file |
+| production build | `s7-qual-build-01.log` | newest `src/` file 2026-10-09 13:05:58; `dist/index.html` written 19:06:59 | none |
+| Browser, four journeys | `s7-qual-browser-01.log` 19:07:22 → 19:09:39 | that `dist/`, plus `scripts/stage7-browser-review.mjs` 2026-10-08 21:07:23 | none |
+| Unit and node gates | `s7-final-gates-05.log` 18:42 → 18:45 | the whole `src/` tree, newest 13:05:58 | none, by construction |
+
+**The numbers, each from the capture named above.**
+
+* SQL, `runsh_exit=0`: three chains reach the Stage 7 head and each prints
+  `DECLARED_HEAD=stage7 / API_NAMES=13 / INTERNAL_NAMES=24`; Stage 7's own batteries are
+  `80_family_review: PASSED (255)` and `90_review_boundary: PASSED (116)`; on both historic chains the twelve
+  older suites re-measure at Stage 2 42 (clean) / 76 (legacy), draft 46 / 49, publication 284, RLS attacks 464,
+  catalog 103, Stage 4 428 and 57, Stage 5 122 / 50 / 124, Stage 6 90 / 80. The capture carries zero raw
+  43-character runs and zero `[REDACTED-43]` markers — a green run gives the runner's mask nothing to redact,
+  which is the property §17 claims of it rather than an absence of instrumentation.
+* HTTP, `runsh_exit=0`: 38 / 56 / 28 / 36 / 28 / 34 / 61 = **281** tests across the seven files, `fail 0`
+  reported in every block, `==> RESULT: PASS`, and the post-run check restoring all ten counted tables
+  (`weddings`, `auth.users`, `invitation_drafts` back to the baseline 1 each; the other seven at 0).
+* Build, exit 0: 2219 modules, 38.04 s. Measured directly out of `dist/` rather than from the gate's tail-cut
+  log: `35` files / `1,052,473` bytes, of which `33` JS/CSS/HTML files / `1,031,926` bytes. Those four numbers
+  are identical to the same measurement taken at 18:45 in `s7-final-gates-05.log`, so the bytes the browser tier
+  drove are the bytes the node gates measured; the tier's own prelude independently scanned 1007 KB of
+  JS/CSS/HTML against them.
+* Browser, `tier_exit=0` on the line after the verdict: four journeys A–D, `checks 104, measurements 18,
+  findings 0`, `STAGE 7 BROWSER TIER: PASS`, run tag `s7ui-mv10fb9z-4yhnl`, teardown reporting
+  `0 weddings, 0 asks, 0 feedback, 0 credentials, 0 accounts` and
+  `6 credential(s) registered, 5 appeared in what this run tried to print, 5 write(s) were rewritten,
+  0 escaped`.
+
+**§20's items, restated for what they now are.** A and B were bounds on gaps that the re-runs closed, and the
+argument-work in them is no longer load-bearing: the migration the §20 A edit touched is now the migration the
+capture ran, and the battery file §20 B could only bound by label identity is now the file that printed those
+labels. C and D are about artefacts and stand exactly as written. E's bundle-only half was simply re-taken
+inside a complete tier, so the subset comparison against the 10-08 build — the one §20 called "the bundle is
+unchanged, which is not what it proves" — carries no part of the browser evidence any more.
+
+**Where each boundary the qualification asks about is answered, by case, at this head.** The SQL column names
+labels read out of the two battery files; the runner prints suite totals, not per-case lines, so that column
+says which assertions the 255 and 116 cover rather than quoting them. The HTTP and browser columns are labels
+and assertion texts printed by the two captures above.
+
+| boundary | SQL battery | HTTP battery | browser tier |
+| --- | --- | --- | --- |
+| a review credential is stored one-way, and never raw | A8, A8b, A8c, A8d, A8e, Z4 | K-01, C-01, C-02, C-06, D-08, Q-05 | "the row's credential is one-way (digest equals SHA-256 of the link, not the link) — 64 chars, matches sha256(link)=true"; "no raw review credential is stored in any column of the three review tables — 0 of 1 credential(s) found in 1584 chars of stored text" |
+| one account cannot reach another's review | B-group, F3, G8d, K11, K12 | G-03, G-05, G-06, Q-06, D-10 | a stranger's dashboard "lists none of the host's invitation"; "a signed-in stranger on the host's project URL reads no review queue at all" |
+| credential kinds do not cross doors | N1, N3, N4, N5, N6, N7, N8 | D-04, D-05, C-04, T-01, T-03 | "every credential-carrying request is one of the two review RPCs, over the one header" |
+| expiry | E1, E2, E4, E5, E7, E8, E8c, E14 | K-02, K-06, D-07 | not exercised — a tier cannot wait out fourteen days; the window is crossed by setting it, so the refusal is measured at both doors rather than on a clock |
+| replay, and one answer per ask | N7, S17, S18, X9, X13, I11 | A-03, A-11, D-06, K-10 | "the same link, reopened after the answer, refuses with the one sentence"; "and exactly one feedback row exists for it — 1" |
+| the frozen snapshot does not move when a reviewer answers | I18, I19, N5, N6, P0–P4 | A-09, A-12, X-03 | "the recorded answer left the frozen snapshot byte-identical to what the reviewer read — digest before eae1334a6960…, after eae1334a6960…"; "and no second version was written by the review — 1" |
+| forged, malformed and withdrawn credentials | K2b, K3, K5, K7, K8, E10, I13 | D-01, D-03, A-10, K-09, K-10 | "a well-formed credential that was never issued refuses with the same sentence"; "a malformed credential is refused locally, without a round trip — resolve calls: 0" |
+| who may call, and where the wrappers are not exposed | G1–G8, G3a–G3f | G-01 (×3 verbs), G-02, T-01, T-02, Q-01–Q-05 | "the five Stage 7 verbs are on the stack this run will exercise"; "the reviewer page offers no account affordance at all — none" |
+| family review stays separate from cultural-authority review | C1, C2, C3, C4, C5, C6 | — no Stage 7 HTTP case names this invariant; the separation is carried by the SQL battery alone | — the `product:check` rule `ceremonial-authority-claim` guards copy that *claims* a cultural review happened, which is a different assertion from this one |
+| a credential never leaves this machine, or a log | — | — | "no credential of this pass reaches a host outside this machine — nothing crossed the loopback edge"; "no Referer that leaves this machine names it or carries a credential-shaped string" |
+| masking on the way out | the runner's `mask()` at `run.sh:65`, exercised on a failing path only | every refusal shape above | the 5-of-5 rewrite line quoted above, and the five `raw [journey]` lines that read `http://127.0.0.1:4173/r/‹credential masked›` in the capture |
+
+**What the re-runs surfaced, and what was checked rather than assumed.** The HTTP runner's baseline census
+reads 1/1/1 (`s7-qual-http-01.log:13-15`) where Stage 6's runs read 0/0/0, which looks like residue from the
+suite that just ran and is not: `q7-logs/s7-qual-http-baseline-identity-02.log` selects the three rows and they
+carry `created_at` 2026-10-08 14:49–14:50 UTC and an auth email holding the run tag `s7ui-muznkpmg-ybk7g`, an
+earlier browser-driver run of this stage that the engine's death interrupted mid-teardown. Today's tier tore
+down to `0/0/0/0/0` in its own capture, and the runner compares before against after, so both sides of that
+census read 1/1/1 and the leak check still had teeth. Those three fixture rows were deliberately left in the
+local database: removing them is DML on a shared stack this directive forbade resetting, and the census is
+built to tolerate a stable baseline.
+
+Two defects found in this segment were in my own instruments, not the product, and both are recorded in the
+captures that show them. `q7-logs/s7-qual-cleanup-01.log` labels one count `absent_probe_1461_before` while its
+expression counts `s7hist-844`, and its `docker_rm_exit=0` line measures a repeat invocation rather than the
+removal, because the removal had already happened in the command before it.
+`q7-logs/s7-qual-http-baseline-identity-01.log` queried `public.access_tokens`, which does not exist — the table
+is `private.access_tokens`, named correctly at `supabase/tests/api/run.sh:103` — and took its `code=` values
+from the masking `sed` instead of the engine. The `-02` capture for each fixes the form and keeps the inadequate
+file. The
+measured reason the first defect matters: on this engine (29.8.1) `docker rm -f` against an absent container
+name prints nothing and exits 0, so an exit code is not proof that a container was removed; the proof is the
+name the real invocation echoes and the presence count taken after it.
+
+**§19's cleanup is now executed, and its one open item is closed.** `vivaahvarnam-s7probe-1461` — measured
+before removal as `Exited (255)`, image `postgres:16-alpine`, created 2026-10-08 07:57:39 UTC, one anonymous
+volume mounted at its data directory — was removed by name and is absent from `docker ps -a` afterwards.
+`vivaahvarnam-s7hist-844` was absent at every measurement taken this session, so §19's "if it survives"
+conditional resolves to *it did not*, and this section does not claim a removal for it. No
+`vivaahvarnam-stage7-*` container survived either, which is what the runner's `EXIT` trap at `run.sh:74-75` is
+for. The six `supabase_*_localvivaahvarnam` containers are `Up` and healthy and were not stopped, restarted or
+reset; the twelve `_dueweave` containers and `p3c-rest-v16` were not touched. The probe's anonymous volume is
+**kept**, because the instruction preserves volumes and `docker rm` was run without `-v`; it is now unlabelled
+orphan storage (`com.docker.volume.anonymous`, created at the container's own instant, digest `523c8f75…`) and
+removing it is a human decision, not a step this stage takes. The preview server this segment started was
+identified by reading pid 20016's command line before stopping it, and `4173` now has no listener while `54400`
+still does. `q7-logs/s7-qual-cleanup-02.log` carries all of that as measured lines.
+
+**What this still does not establish.** §18's list of non-claims is unchanged by a re-run at the same head: this
+is a local stack, no hosted project was linked or pushed to, no CI backed any of it because the Actions quota is
+exhausted, the scripted reviewer is not a relative, the review link is shown once and delivered nowhere,
+possession of a link is not verified human identity, and expiry is crossed by setting a window rather than by
+waiting. The re-runs move three tiers from *bounded* to *measured at the published tree*; they do not add a
+tier, a platform, or a production claim.
