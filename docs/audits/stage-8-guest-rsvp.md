@@ -334,3 +334,174 @@ bracketed by its own capture recording the headroom figure at the moment of the 
 
 So the state of Stage 8, stated without inflation: **design committed, migration authored and self-reviewed, nothing
 applied, nothing run.** §4's list of unrun gates is unchanged and every one of them is still unrun.
+
+## 6. The tripwire sweep finished: the gap the sweep's own vocabulary caused, a constraint that must not be renamed, and one Stage 2 fixture that the new rule legitimately made illegal
+
+Same block as §5: the migration is authored and the historical suites are being widened for the guest head. Nothing
+here was executed against a cluster — see the closing subsection, which states the headroom readings rather than
+resting on §5's. Every claim below is either a text measurement, with the command that took it, or an argument that is
+labelled as an argument and handed to §S8-4 as a case to measure.
+
+### The missed tripwire was a defect in the sweep, not in the suite: stage3 `G4`
+
+The §5 widening list was assembled by grepping for the quantities Stage 8 moves — the api/internal wrapper counts, the
+name arrays, the pair tables. That scan reached stage2 `C26f`/`C28a`/`C29b`, stage3 `G1`/`G1f`/`G1h`, stage4 `I1`-`I10`,
+stage5 `M5b`, stage6 and stage7 `G3d`/`G4`/`G5`, and it **missed `supabase/tests/stage3/30_publication.sql:1732`**,
+which is a tripwire of the same family wearing different clothes:
+
+```
+$ grep -n "pronargs = 0" supabase/tests/stage3/30_publication.sql
+→ 1736:  … WHERE n.nspname = 'api' AND p.pronargs = 0),
+```
+
+`G4` does not count the customer surface. It asserts that *the functions taking no arguments at all* are exactly the
+doors that read a credential out of the request rather than out of a signature, and it names them. Stage 8's
+`api.resolve_guest_invitation()` (migration `:1130`) is argument-free for precisely that reason, so at the guest head
+this line prints three names against an expectation of two and fails the **Stage 3** battery — a suite that is right
+about a rule Stage 8 keeps — while every count-based tripwire in the file stayed green. The sixth guest verb,
+`api.submit_guest_rsvp(p_answers jsonb)` (`:1138`), deliberately does not join it: a door that accepts a body must not
+also accept a token by signature, and the comment added with the arm says so.
+
+Fixed by prepending a `stage8` arm and leaving the `stage7` and base arms byte-identical, in the idiom §5 describes.
+Instrument over the edited file (`q8-logs/s8-shape-30_publication.G4.txt`): `RESULT=OK`, every region at depth 0,
+`delta CASE=0 END=0 perform=0`, `stage8_arms=4`.
+
+The lesson is recorded as a rule for the next stage's sweep, because it generalises badly if it is not written down: a
+search for *numbers a DDL change moves* cannot find an assertion that pins a *set*, and these batteries prefer sets.
+The scan to run is "every catalog query whose result is compared to a literal", which includes `string_agg`,
+`array_agg`, `= ANY`, `pronargs`, `relkind`, `contype` and `attnum`, not only `count(*)`.
+
+### A constraint rename that would have looked like a retargeted historical test
+
+The migration as authored in §5 renamed Stage 2's answers CHECK to `rsvp_responses_answers_bound` when it widened it.
+That rename is reverted, and the reason is worth the paragraph.
+
+Measured with `grep -rn "rsvp_responses_answers" --include=*.sql --include=*.mjs --include=*.md --include=*.ts .` over
+the tracked tree: the old name occurs in exactly two places — the migration's own `DROP CONSTRAINT`, and
+`supabase/tests/stage2/20_attacks.sql:1495`, which pins the refusal sentence
+`violates check constraint "rsvp_responses_answers_check"` for the probe at `:1189-1193` (that probe writes
+`'[]'::jsonb` into `answers`). The name is not a declaration anyone wrote: Stage 2 declares the CHECK inline and
+unnamed on the column (`20260925120300_stage2_rsvp_and_approval.sql:87`), and Postgres generates
+`<table>_<column>_check`.
+
+So renaming it would have made a Stage 2 probe report a *different* constraint, and the only way to tell "the rule
+moved" from "the rule vanished" would have been to edit that probe — under a directive that says in terms "do not
+weaken historical tests to obtain a pass". Even a change made for the right reason reads, in the diff, exactly like the
+wrong thing. The widened bound is therefore re-added under the unchanged name at `:135-141`, the
+`COMMENT ON CONSTRAINT` at `:1220` follows it, and `grep -rn answers_bound` over the tree now returns nothing. The
+rule itself is unchanged in kind and strictly tighter in degree: the probe still refuses, and refuses for the
+object-typing half of the CHECK, which is what it was written to test.
+
+### The new household rule made one Stage 2 fixture illegal, and that fixture is the only one
+
+`one_live_guest_token_per_household` (migration `:103-107`) is the guest mirror of Stage 3's
+`one_live_public_token_per_publication`. Mirroring it means mirroring what it already does to fixtures: the Stage 2
+suite seeds exactly one live guest credential, for `household_a`, at `20_attacks.sql:440-443`.
+
+Every mint of that kind anywhere in the tree, taken with
+`grep -rn "'guest_invitation'" supabase/tests/ | grep -v 40_catalog`:
+
+| site | what it does | effect of the new index |
+|---|---|---|
+| `stage2/20_attacks.sql:440-443` | the fixture itself | defines the one live row per household |
+| `:601-606` | guest credential over a stranger's household | refused by the composite FK first — `household_b` belongs to `wedding_b` |
+| `:1355-1360` | two credentials sharing one digest | refused by `access_tokens_token_hash_key`; `probe_msgs:1519` names that key and still will |
+| `:2591-2594` | group 11e's pin credential | **was the collision** — it inserts successfully today and the block needs it to exist |
+| `:2637-2643` | a token pinning nothing but its wedding | refused by the shape CHECK (`23514`) |
+| `stage3/30_publication.sql:1146-1209` | four probes | each refused before any index is probed |
+| `stage3/30_publication.sql:1263-1279` | `E6`, `E7` legal-shape mints | `DELETE` runs between them (`:1263`, `:1272`), so no household holds two live guest rows at once |
+| `stage7/80_family_review.sql:1189,1210`, `stage7/90_review_boundary.sql:1007` | credential mints | `approval_review`; the index predicate names `guest_invitation` and cannot reach them |
+
+`:2591-2594` is repaired by giving group 11e a family of its own: `pin_household` is declared at `:1576`, minted at
+`:2602-2604`, carries the same credential as before — same kind, same wedding, same publication, same live state — and
+is dropped at `:2636` after the credential retires, in that order, because the `NO ACTION` the group exists to
+demonstrate is the reason the family cannot go first. Nothing about the claim changed: the same three assertions,
+`passed := passed + 3` exactly as Stage 2 wrote it, and the same expectations. The suite no longer depends on a
+double-mint that this stage decided must be impossible.
+
+Two census forms were checked because a new index is the kind of change that moves them silently, and both are provably
+unmoved: `40_catalog.sql:1273-1278` (`C45c`) aggregates only `contype IN ('p','u')`, and a `CREATE UNIQUE INDEX` adds
+no `pg_constraint` row — that is why Stage 3's equivalent passes as an index and appears in no key census; and
+`40_catalog.sql:1320` (`C48`) compares the accepted-twelve *unindexed foreign key* set, which a one-column index on
+`household_id` does not shrink, because the key under test is the composite `(wedding_id, household_id)` and its
+leading column is not indexed.
+
+### The reported-constraint question: answered by argument, still owed the measurement
+
+Stage 8 `DROP`s and re-`ADD`s `access_tokens_kind_shape`, which gives that constraint a new, higher OID. Eight
+historical lines name it in an expectation: `stage2/20_attacks.sql:1383`, `:1408`, `:1411`, `:1505` and
+`stage3/30_publication.sql:1165`, `:1171`, `:1176`, `:1184`, plus `:1290-1292`, which resolves the name from the
+constraint's *definition text* through `pg_temp.st3p_check_name` — a helper that raises rather than guesses when its
+pattern matches anything other than exactly one check.
+
+The argument that none of them can move: Postgres builds a table's per-row CHECK list sorted by the column the check is
+attached to, table-level checks first, and breaks ties by OID ascending; it then reports the **first** violated
+constraint. On `private.access_tokens`, `grep -n "ALTER TABLE private.access_tokens" supabase/migrations/*.sql` returns
+exactly six lines — Stage 2's `ENABLE ROW LEVEL SECURITY` (`20260925120400…:194`), Stage 3's two `ADD CONSTRAINT`s
+(`20260926130000…:182,193`) and Stage 8's `DROP`/`ADD` pair (`:66,68`). No stage between them adds a table-level check,
+so `kind_shape` already held the largest OID among the table-level checks at the Stage 7 head, and re-adding it keeps
+it the largest. The direction of every tie-break it is involved in is therefore unchanged, and the competing violations
+in those eight probes — the `token_hash` digest shape, the `expires_at > created_at` rule — are checks that are not
+table-level on the same row, which sort after every table-level check whatever their OID.
+
+**This is an argument about a sort order, not a measurement, and it is the kind of argument a green run exists to
+check.** §S8-4 must, on a real cluster, print the check list for `private.access_tokens` from `pg_constraint` in
+catalog order at both heads and print the eight refusal messages verbatim; if any name differs from the table above,
+the question to answer is the one this paragraph is written to preempt — which rule stopped being evaluated, not which
+test is wrong. The two claims in the fixture table above that rest on the same ordering (the `:1355` and `:2637` rows
+being refused *before* the new index is consulted) are folded into the same cases.
+
+### What this section makes Stage 8's honest state, and what was not run
+
+Five files carry this pass: the migration (constraint name kept, comment re-pointed), `stage5/50_review_binding.sql`
+(`M5b`'s nineteen-name arm), `stage3/30_publication.sql` (`G4`'s three-door arm), `stage2/20_attacks.sql` (group 11e's
+own family), and `stage7/run.sh` — the last one text only. `stage7/run.sh:186` builds a chain that stops at `stage7`
+and prints `API_NAMES`/`INTERNAL_NAMES` at `:196-200`, so its "thirteen wrappers, twenty-four bodies" census is a
+statement about the Stage 7 head and can never print 19/30; a comment now says so at the probe, because a reader who
+took those numbers as the repository's current shape would be misled by them, and the guest head's own census belongs
+to `supabase/tests/stage8/run.sh`, which does not exist yet. That file passes `bash -n` (`exit=0`); the two SQL files
+pass the shape instrument with `RESULT=OK` and `delta CASE=0 END=0 perform=0`
+(`q8-logs/s8-shape-20_attacks.txt`, `q8-logs/s8-shape-stage8mig.txt`), and the instrument's own limits — it is a shape
+check, not a parser, and cannot tell a wrong row inside a correct-looking literal — are recorded in
+`q8-logs/s8-instrument-repair-02.log`.
+
+Headroom taken in this section's own session, `df -k /c`: **932224 KiB, then 789792 KiB, then 697436 KiB available**
+against the 1048576 KiB floor this stage set for itself — falling by ~230 MiB while this pass was being written, and
+below the floor at all three readings. No cluster was started, no chain applied, no battery, no HTTP tier, no browser
+tier, no Node gate, no build. The stage8 literals in the widened suites remain **derived expectations** — read out of
+the migration text and cross-checked three ways, as §5 describes, and reconciled against a real catalog only when
+§S8-4 runs. Nothing in this section should be quoted as a pass.
+
+### What §6 then committed, and the one claim about the guest door that had to be corrected before it was published
+
+The five files went out as five narrow commits on `stage8/guest-rsvp`, each pushed with an explicit refspec and read
+back: `7e0fd8c` the migration's constraint name, `c8d6090` group 11e's own family, `d6ca99f` + `a31566c` `G4`'s arm and
+its correction, `874c9a5` `M5b`'s nineteen names, `65bed4c` the `stage7/run.sh` census note, and this section as the
+docs commit that follows. `git ls-remote origin refs/heads/stage8/guest-rsvp` and
+`gh api repos/Pavithran-R-A/wedding-invites-pro/git/ref/heads/stage8/guest-rsvp` agreed at the first push
+(`7e0fd8ca7b7a7c0bb27fe16fd32c9e76ee618029`); the `ls-remote` read-back is taken after every push and the final head is
+read back by both instruments again at the end of the pass.
+
+`a31566c` exists because the first version of `G4`'s comment was wrong about code this very pass widened. It said
+`api.submit_guest_rsvp` stays out of the argument-free list because "a door that accepts a body must not be a door that
+accepts a token by signature" — and that body reads `x-guest-token` at migration `:814`, exactly as
+`internal_api.resolve_guest_invitation` does at `:568`. The real reason is narrower and less flattering to the prose:
+`G4` aggregates names where `pronargs = 0`, and `submit_guest_rsvp` declares one argument, so the census cannot see it.
+That is a fact about the query, not a ruling about the design. Whether a guest door that takes both a body and a header
+refuses an answer that arrives in the wrong channel is a Stage 8 battery question, and the corrected comment says what
+the line does and does not decide instead of implying the door carries no credential. The false sentence was caught
+between `d6ca99f` and its push, so no published head has ever carried it; the expected name list, the head arms and every
+assertion were untouched by the correction (`RESULT=OK`, `delta CASE=0 END=0 perform=0` against the committed baseline,
+`q8-logs/s8-shape-30_publication.G4fix.txt`).
+
+Two further claims were checked against the migration before committing rather than left as reasoning: that only
+`api.resolve_guest_invitation()` among the six new wrappers is argument-free (`api.issue_guest_invitations` declares
+three parameters, one of them defaulted, at `:1094-1098`), and that all six bodies are
+`LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''` (`:159`, `:317`, `:375`, `:470`, `:549`, `:709`) — which is
+what makes the comment's arithmetic (thirteen→nineteen exposed, twenty-four→thirty internal, eleven twin-less
+maintenance bodies unchanged) true rather than merely plausible. The guest-mint table above was re-read row by row
+before `c8d6090` went out and the readings agree with it.
+
+Headroom when this section was committed, `df -k /c`: **606164 KiB, then 660096 KiB available** — a further fall, and
+still ~390 MiB below the 1048576 KiB floor. Every tier §6 names as owed remains unrun. Nothing in this section is a
+pass, and none of the commits above claims one.
