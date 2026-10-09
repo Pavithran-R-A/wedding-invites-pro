@@ -90,7 +90,12 @@ still no customer-visible pack content:
   and computes nothing
 - **220 HTTP tests** across six files with real JWTs, including that none of `internal_api`'s nineteen
   functions is reachable from a browser at all (the requested name never resolves in the exposed
-  profile, so the answer is `404` rather than a permission error that would confirm existence)
+  profile, so the answer is `404` rather than a permission error that would confirm existence). That is
+  the six-file census this section was written against, and it is kept as written; at the Stage 7 head
+  the same six files plus `stage7_family_approval.test.mjs` measure **281** (`38 + 56 + 28 + 36 + 28 + 34
+  + 61`, each file's own total printed apart, `q7-logs/s7-http-runsh-03.log`), and `internal_api` carries
+  **24** bodies with the same not-reachable property — the Stage 7 runner prints
+  `DECLARED_HEAD=stage7 / API_NAMES=13 / INTERNAL_NAMES=24` in its own captures
 - A maintenance CLI, `node scripts/tradition-pack-admin.mjs`: eleven verbs, deliberately not a web
   panel, no `delete` verb, and it refuses `--linked`, `--project-ref`, a hosted URL and any mutating
   command that has not been given `--yes`. The only identity that can reach the surface it drives is
@@ -186,8 +191,10 @@ below are re-takes at head, each with the capture it came from. What is measured
   chain: **56 pass / 0 fail** for that file inside `s6-api-run-04.log` above, with the repaired case —
   "a child row cannot be attached to another account's wedding via `wedding_assets`" — named in the
   passing list rather than inferred from a total
-- **31 unit tests over the adapter itself** (`src/test/weddingAssetUploadRules.test.ts`, no engine
-  needed, inside a 473-test / 32-file suite): every refusal the tab reaches for on its own is asserted
+- **32 unit tests over the adapter itself** (`src/test/weddingAssetUploadRules.test.ts`, no engine
+  needed, inside a 566-test / 36-file suite at this head; Stage 6 measured 31 inside 473 / 32, and the
+  one added test is `65fb4f0`'s repair, which asserts the file's head is read once per upload): every
+  refusal the tab reaches for on its own is asserted
   *together with* "nothing was asked of the stack", the register payload is shown to carry no
   `object_key` in any shape, the write is shown to ask for `upsert: false`, and the §5.3 orderings —
   register/upload/confirm, and tombstone/collect/delete — are pinned including both rollbacks. Four
@@ -222,6 +229,78 @@ the Stage 3 battery). Stage 6 is committed and pushed to `stage6/storage-assets`
 back after every push; the tiers above ran at `5c8215c`, and the head carrying this prose is certified by
 its own re-take of the gate set — logged in the audit's evidence captures, never asserted here from a
 parent's green run.
+
+## Verified in Stage 7: a relative reads the invitation and answers, on a phone, with no account
+
+Stage 7 built the family approval and review workflow the product's own priority list has ranked second
+since Stage 1 ("a parent must be able to read and approve it"), and every tier that can measure one has now
+run against the local stack — SQL, HTTP, unit and browser. The evidence is
+[`docs/audits/stage-7-family-approval.md`](docs/audits/stage-7-family-approval.md) and the boundary it
+implements is stated in
+[`docs/architecture/family-approval-review-security.md`](docs/architecture/family-approval-review-security.md).
+What is measured, and where:
+
+- **One forward migration, no new table and no new column**
+  (`20261008120000_stage7_family_approval_review.sql`, 931 lines in eleven sections). It adds five
+  `internal_api` bodies and five thin `SECURITY INVOKER` `api` wrappers, and redefines
+  `create_invitation_version` so that invariant I-12 — a successor version closes the predecessor's open
+  asks — is enforced at the one place a successor becomes true. The host queue, the reviewer's projection,
+  the answer and the withdrawal all read tables that already existed
+- **Nothing a browser role can reach is a table.** Re-read on the live stack at this head, not assumed:
+  **45** `public` policies over **19** tables, unchanged; **13** `api` functions and **24** `internal_api`;
+  no new table privilege for `anon` or `authenticated`. The whole Stage 7 surface is RPCs, and the
+  reviewer's door is **zero-argument** — `api.resolve_family_review()` reads its credential from
+  `request.headers` — so there is no query string, at no layer, for a token to be put in
+- **Two SQL batteries, 255 and 116 assertions**, on a throwaway `postgres:16-alpine`, on a runner built for
+  them because `80_family_review.sql`'s closing census counts cluster-wide. The twelve historical suites were
+  re-measured at `DECLARED_HEAD=stage7` on both chains and moved nowhere: 42/76 outcome, 46/49 draft
+  invariant, 284 publication boundary, 464 privilege/RLS attacks, 103 catalogue, 428 pack documents, 57
+  fixture tooling, 122 review binding, 50 authoring vocabulary, 124 document resolution, 90 asset registry,
+  80 storage policies
+- **61 HTTP tests in Stage 7's own file, 281 across the seven**, `0 failed, 0 skipped`, against the real
+  local stack, bracketed by a ten-table census at 0 rows before and after — including `approval_requests`,
+  `approval_feedback`, `access_tokens` and `storage.objects(wedding-assets)`. Expired, revoked, forged,
+  malformed, wrong-kind, cross-version, answered-twice and cross-wedding credentials are each refused, and
+  every closed refusal is the same shape on the wire (`{"available": false}`, HTTP 200) so an invalid link
+  cannot be distinguished from an unknown one
+- **The two defects the batteries found, in the migration rather than in a probe**: a JSON `null` decision
+  walked past a `IF NOT p_decision IN (…)` guard because `NOT NULL` is `NULL`, so an anonymous caller got a
+  constraint code instead of the product's sentence (D-S7-01); and the host queue joined every credential
+  row, so a withdrawn-and-reissued ask printed twice (D-S7-02)
+- **91 unit tests across four files**, including the transport module that transcribes the six submission
+  refusal sentences from what the HTTP tier actually measured rather than from the migration, and folds any
+  message this build has not read into one generic sentence
+- **A browser tier: checks 104, measurements 18, findings 0, exit 0** (tag `s7ui-muzpa0r1-kvklf`,
+  six driver runs to get there, five of them with a stdout capture, and §13 names what each failure was and
+  which run left only an evidence log). A host signs up and asks through the panel;
+  the link is shown once and is not handed back on reload; a phone-sized context **with no session** opens
+  `/r/:token`, answers, gets a receipt naming the version it is pinned to, and is refused on revisit; the
+  host reads the note back exactly as typed; the frozen snapshot is measured **byte-identical** across the
+  whole exchange (`eae1334a6960…` before and after). A stranger holding a live link is still let in — the
+  link *is* the credential, and that is stated as a limit, not a feature
+- **A raw review token appears in no record, log, committed file or capture.** Only a SHA-256 digest is
+  stored; the runner pipes every byte a SQL suite prints through a masking filter, and the masking sweep at
+  the end of the browser tier reports `6 credential(s) registered, 5 appeared in what this run tried to
+  print, 5 write(s) were rewritten, 0 escaped` — the sixth is journey B's deliberately forged string, which
+  this tier never prints, and the gap is disclosed rather than smoothed
+- **Cultural-authority review stayed where it was**, by name, by mirror and by row count (group C). The aunt
+  at `/r/:token` is not a Tamil reviewer, and Stage 7 declined that promotion on purpose
+
+Four things this section must not be read as granting. **Local stack only** — no hosted Supabase project was
+contacted, nothing is deployed, and Stage 7 is not merged. **No verified identity** — `reviewer_display_name`
+is the host's words about a person and `author_label` is that person's words about themselves; the product
+records a trace and refuses to claim more, and there is no reviewer login because the credential, not an
+account, is the authority. **No link delivery** — there is no email, SMS or push; the host copies an address
+and the product cannot see the hop, which is also why the credential survives in the reviewer's browser
+history and in any hosting access log, a residue no meta tag reaches. **And no photographs at the reviewer's
+door** — the projection is the guest's own DTO, which never carried an `object_key` (K, K13), so Stage 6's
+private-asset boundary is intact rather than re-litigated; a guest *replying* is still Stage 8, and retention
+is still Stage 13.
+
+One inherited gap closed while here, because this stage is the one that had to read the boundary honestly:
+`canonical-table-read-outside-the-adapter` now names `wedding_assets` (commit `0571191`, with a self-test
+fixture) and both approval tables, so the sentence above about "nine of the ten tables" and the Stage 6
+section's §37.10 record are both closed at this head — see the Stage 7 audit §16.
 
 ## Implemented foundations requiring a configured backend
 
@@ -331,15 +410,19 @@ database and row-level security. Database-provided template SVG passes through t
 sanitisation boundary before DOM insertion; there is no SVG upload feature.
 
 ```text
-src/App.tsx                     routes (protected project screens behind ProtectedRoute)
-src/pages/                      landing, auth, dashboard, create / configure / design-preview
+src/App.tsx                     routes (protected project screens behind ProtectedRoute; the guest's
+                                `/i/:token` and the reviewer's `/r/:token` in a second tree outside it)
+src/pages/                      landing, auth, dashboard, create / configure / design-preview, review
 src/components/landing/         landing sections
 src/components/brand/           single brand lockup used by every header, footer and auth screen
 src/components/auth/            auth provider + route guard
 src/components/ui/              shadcn-style primitives
 src/config/product.ts           the only place product name / descriptor / tagline / status live
-src/lib/                        i18n language order, SVG sanitisation boundary
-src/integrations/supabase/      client + generated database types + the private-asset adapter
+src/lib/                        i18n language order, SVG sanitisation boundary, the public DTO and the
+                                review document's shape
+src/integrations/supabase/      client + generated database types + eight adapters (wedding, content,
+                                publication, guest, pack releases, private assets, host review queue,
+                                reviewer door) — the only modules that may name a table
 supabase/migrations/            schema and RLS history
 supabase/tests/rls/             executable RLS assertions
 scripts/check-product-contract.mjs  scope-aware brand/claims checker
@@ -387,6 +470,11 @@ privileged shapes it keys on (`SUPABASE_LOCAL_SECRET_KEY`, `SUPABASE_LOCAL_SERVI
 - [`docs/content-review/tamil-english-foundation-v1.md`](docs/content-review/tamil-english-foundation-v1.md) — the one drafted pack definition, reviewed by nobody, and what a reviewer would need to answer
 - [`docs/architecture/decisions/0007-versioned-reviewed-tradition-pack-releases.md`](docs/architecture/decisions/0007-versioned-reviewed-tradition-pack-releases.md) — why a pack is a concept and a release is the document
 - [`docs/audits/stage-5-pack-driven-authoring-review.md`](docs/audits/stage-5-pack-driven-authoring-review.md) — the review digest that binds an approval to exact bytes, the maintenance-only boundary around it, the browser journeys, and the React Router decision §24
+- [`docs/audits/stage-6-storage-assets.md`](docs/audits/stage-6-storage-assets.md) — the private bucket, the database-minted key, the Storage policies, and the engine outage §§36–37 closed
+- [`docs/audits/stage-7-family-approval.md`](docs/audits/stage-7-family-approval.md) — the family review workflow as eleven migration sections, two SQL batteries, 61 HTTP cases, 91 unit tests and a four-journey browser tier
+- [`docs/architecture/public-invitation-security.md`](docs/architecture/public-invitation-security.md) — the guest door: what a credential-holding reader is and is not
+- [`docs/architecture/family-approval-review-security.md`](docs/architecture/family-approval-review-security.md) — the reviewer door, and §11's eight limits, including the ones this build refuses to claim
+- [`docs/architecture/domain-model.md`](docs/architecture/domain-model.md) — the canonical domain as the migrations actually hold it, including the sensitivity table in §9
 - [`docs/product/commercial-model.md`](docs/product/commercial-model.md) — target pricing, pilot-validated, not live prices
 - [`docs/product/brand-clearance.md`](docs/product/brand-clearance.md) — brand status and remaining clearance work
 - [`docs/product/design-principles.md`](docs/product/design-principles.md) — visual and editorial rules
@@ -514,6 +602,34 @@ printed apart and the two Stage 6 counts never added to another stage's. That re
 `s6-stage6chain-04.log` (2026-10-06) still describes the same `supabase/` files, and §34.4 records how that
 was checked rather than assumed.
 
+`bash supabase/tests/stage7/run.sh` runs Stage 7's two batteries: **255** assertions on the family
+review lifecycle (`80_family_review.sql`) and **116** on the boundary it must not cross
+(`90_review_boundary.sql`). The runner is new because this workflow made the Stage 6 shape wrong: `80`'s
+closing census counts rows cluster-wide ("no approval request exists that does not belong to one of this
+battery's three weddings") and Stage 2's attack suite commits seed weddings and asks into the same
+database, so Stage 7 split *databases* rather than assertions — a `review` chain carrying its own two
+batteries and nothing else, and a `historic` chain that re-measures the twelve older suites, on both the
+clean and the legacy-seed migration path, against a schema that now contains Stage 7. `80` must run before
+`90` in one database, because `90` builds no family of its own: it reads the wedding, the seven asks and
+the nine credentials `80` committed and asserts against them by name and count. Running `90` alone is not
+a weaker test but a different one, and it does not pass, which is why the runner refuses a single-suite
+argument. Every byte a suite prints is piped through `sed -E 's/[A-Za-z0-9_-]{43}/[REDACTED-43]/g'` on its
+way to the evidence directory, because the boundary battery's comparison helper prints the value it was
+given when an assertion fails and one of the values routinely compared *is* a live review credential — the
+"no raw token in a log" rule enforced at the last place it can be enforced for every suite at once. The
+privilege
+shape the paragraph below relies on is measured here rather than asserted: `G3b` reads
+`has_schema_privilege(…,'USAGE')` for all three roles across both schemas — `anon` and `authenticated`
+`true` on `api` *and* `internal_api`, `service_role` `false` on both — and `G3c` prints the raw `nspacl` of
+both namespaces, `{postgres=UC/postgres,anon=U/postgres,authenticated=U/postgres}`, so what withholds a
+privileged body from a browser or from a service key is `EXECUTE`, enforced by the engine in plain SQL
+rather than by a gateway setting. Captures on **2026-10-08**: `s7-stage7-runner-review-03.log` (255 and
+116, each total printed apart and never added to another stage's) with `exit=0` recorded beside each suite
+in `s7-stage7-sql-pair-01.log`, and `s7-stage7-runner-historic-clean-01.log` for the twelve, both chains,
+at `DECLARED_HEAD=stage7`, `API_NAMES=13`, `INTERNAL_NAMES=24`. Same boundary the other SQL tiers state:
+plain Postgres plus a role/auth shim plus a storage-schema fixture, with PostgREST, Supabase Auth and the
+Storage API not executing, so no REST-level or browser-level claim is carried by these numbers.
+
 `node scripts/tradition-pack-admin.mjs` is the maintenance operator's tool for authoring and approving
 a release: eleven verbs, no `delete` verb, no web panel, and it refuses to run without an explicit
 local target (`--linked`, `--project-ref`, a wrong container name and a hosted `*.supabase.co` URL are
@@ -583,6 +699,17 @@ chain together: **220 tests, 0 failed, 0 skipped** (capture `q6-logs/s6-api-run-
 drafts, asset rows and bucket objects — at the zero it started from. `UPL-07`'s finding is a Stage 6
 defect that was repaired in the adapter rather than in the database; §36 of
 `docs/audits/stage-6-storage-assets.md` records what the tier does and does not now guarantee.
+There is now a **seventh** at the Stage 7 tree: `stage7_family_approval.test.mjs`, **61 tests** — the ask's
+ownership edge, the reviewer's door on a `x-review-token` header, the eight payload refusals in the
+product's own sentences, the replay refusal, and `G-05`/`G-06`, which measure that the two approval tables
+stay off the client in the owner's own session (a direct `PATCH` is 403/`42501`, another account's `GET` is
+`[]`, and `private.access_tokens` is not in the catalogue at all — 404/`PGRST205`). All seven ran the joint
+serial chain at this head: **281 tests, 0 failed, 0 skipped** (capture `q7-logs/s7-http-runsh-03.log`),
+bracketed by a ten-table census at 0 rows before and after, including `approval_requests`,
+`approval_feedback`, `access_tokens` and `storage.objects(wedding-assets)`. Stage 7's SQL batteries run on
+their own runner, `bash supabase/tests/stage7/run.sh`, which splits databases rather than assertions because
+`80_family_review.sql`'s closing census counts cluster-wide: `review` (255 + 116) and `historic` (the twelve
+older suites on both chains).
 `--local` is always explicit: `supabase link`, `db push`, `db pull` and
 `db reset --linked` are not part of this project's workflow and are never run.
 
