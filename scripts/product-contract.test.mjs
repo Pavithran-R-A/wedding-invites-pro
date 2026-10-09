@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   MUST_NOT_MATCH,
   RULES,
+  SHIPPED_REVIEWER_COPY,
   isScannedPath,
   scanContent,
   scanRepository,
@@ -33,6 +35,10 @@ describe("product contract checker", () => {
         `supabase.from('projects').select('*')`,
         `// the projects table holds one row per customer`,
         `const { data } = await client.schema('api').rpc('resolve_public_invitation', { raw_token });`,
+        // `reviewer-door-called-with-arguments` — the same mistake on the reviewer's door, which
+        // is Stage 7's addition to this list. The two doors are one rule each because a checker
+        // only covers the wording it was written with.
+        `const { data } = await client.schema('api').rpc('resolve_family_review', { raw_review_token });`,
         `const supabase = createClient(url, anonKey);`,
         `const { data } = await supabase.from('weddings').select('*');`,
         `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
@@ -220,6 +226,23 @@ describe("product contract checker", () => {
   it("never treats a payment-provider or commerce planning word as banned", () => {
     for (const phrase of MUST_NOT_MATCH) {
       expect(scanContent("docs/example.md", phrase)).toEqual([]);
+    }
+  });
+
+  it("pins the reviewer copy guard to the copy the reviewer page actually prints", () => {
+    // The guard above says these sentences must stay acceptable; this test says they are the
+    // sentences. Stage 7 first shipped three of them as plausible rewordings that appear nowhere
+    // in `src/`, which vouched for copy the product does not print and left the copy it does print
+    // unpinned — a pattern list cannot notice that about itself, so the shipped source is read.
+    const shippedReviewerSource = [
+      "src/pages/FamilyReview.tsx",
+      "src/integrations/supabase/publicReview.ts",
+    ]
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
+    for (const sentence of SHIPPED_REVIEWER_COPY) {
+      expect(shippedReviewerSource, sentence).toContain(sentence);
+      expect(MUST_NOT_MATCH, sentence).toContain(sentence);
     }
   });
 

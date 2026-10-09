@@ -211,19 +211,32 @@ export const RULES = [
     scope: ["src/"],
   },
   {
+    id: "reviewer-door-called-with-arguments",
+    // Stage 7's second public door is the same shape question, and a relative's link is the same
+    // kind of secret as a guest's: `api.resolve_family_review` is argument-free so the review
+    // credential can only arrive in a header. An argument list here means a query string on a GET
+    // — an address that outlives the wedding in an access log, a browser history and a `Referer`.
+    // No `exclude`, for the same reason the guest rule has none: the module that must not write
+    // this shape is the one that would be broken by it.
+    pattern: /\.rpc\(\s*['"]resolve_family_review['"]\s*,/g,
+    message: "passes arguments to the reviewer resolver, which would put a review credential in a URL",
+    fix: "call `rpc('resolve_family_review')` with no arguments and send the credential in the x-review-token header",
+    scope: ["src/"],
+  },
+  {
     id: "ad-hoc-supabase-client",
     // The guest page must hold no session and write nothing to storage; the signed-in app
     // must hold exactly one. A client constructed in a component is a third kind of
     // caller, and its auth/storage defaults are nobody's audited choice.
     pattern: /createClient\s*[(<]/g,
     message: "constructs a Supabase client outside the integration layer",
-    fix: "read through src/integrations/supabase/ — publicInvitation.ts is the only anonymous client in the app",
+    fix: "read through src/integrations/supabase/ — publicInvitation.ts and publicReview.ts are the app's only two anonymous clients, one per public door",
     scope: ["src/"],
     exclude: ["src/integrations/supabase/", "src/test/"],
   },
   {
     id: "canonical-table-read-outside-the-adapter",
-    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|wedding_assets|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases)['"]\s*\)/g,
+    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|wedding_assets|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases|approval_requests|approval_feedback)['"]\s*\)/g,
     message: "queries a canonical wedding table outside the adapter",
     fix: "add the read to src/integrations/supabase/ so its columns, errors and refusals stay in one place",
     scope: ["src/"],
@@ -420,6 +433,20 @@ export const RULES = [
   },
 ];
 
+/** Copy the reviewer's door prints today, quoted verbatim from `src/pages/FamilyReview.tsx` and
+ *  `src/integrations/supabase/publicReview.ts`. It is a named list rather than prose because "this
+ *  sentence must stay allowed" is only a fact about a sentence the app prints, and a fixture written
+ *  as a plausible rewording of the copy pins nothing: three of the four copy entries Stage 7 first
+ *  shipped here were paraphrases of sentences that appear nowhere in `src/`. The test file reads the
+ *  shipped reviewer source and fails if one of these strings stops appearing in it. */
+export const SHIPPED_REVIEWER_COPY = [
+  "This review link is not available.",
+  "No account is needed to review a wedding invitation.",
+  "There is no sign-in on this page and nothing here checks who you are.",
+  "Your answer is recorded against version",
+  "changed nothing on that version — only the family's own editor does that",
+];
+
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
 export const MUST_NOT_MATCH = [
   "Razorpay",
@@ -469,6 +496,14 @@ export const MUST_NOT_MATCH = [
   // are real lines in this repository, so the guard's narrowness is a checked fact, not a claim.
   "const html = container.innerHTML.toLowerCase();",
   "dangerouslySetInnerHTML). Every DB-provided SVG must pass through",
+  // Stage 7's own near-misses. A reviewer page is written in the same vocabulary as a guest page,
+  // so the copy it must be allowed to print is pinned here — as the app's own sentences, held in
+  // `SHIPPED_REVIEWER_COPY` and read back out of the shipped source by the test file, rather than
+  // as rewordings of it. The argument-free reviewer call is the shape the rule above exists to
+  // permit, and the identity sentences are the product's honest claim: possession of a link is not
+  // a verified person, and saying so must not become a finding.
+  `const { data } = await client.schema('api').rpc('resolve_family_review');`,
+  ...SHIPPED_REVIEWER_COPY,
 ];
 
 export function isScannedPath(relativePath) {
@@ -558,10 +593,13 @@ export function selfTest() {
     "legacy-table-in-client-code": `supabase.from('projects').select('*')`,
     "legacy-table-as-current-terminology": `// each row of the projects table is a customer`,
     "guest-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_public_invitation', { raw_token: token });`,
+    "reviewer-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_family_review', { p_token: token });`,
     "ad-hoc-supabase-client": `const supabase = createClient(url, anonKey);`,
     "canonical-table-read-outside-the-adapter": [
       `const { data } = await supabase.from('weddings').select('*');`,
       `const { data } = await supabase.from('wedding_assets').select('*');`,
+      `const { data } = await supabase.from('approval_requests').select('status');`,
+      `const { data } = await supabase.from('approval_feedback').select('message');`,
     ],
     "service-role-key-in-browser-code": `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
     "tradition-pack-identity-branch": `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
@@ -643,7 +681,7 @@ export function selfTest() {
 
   // A `scope` plus `exclude` rule is only worth having if the exempt path really is the
   // module it names, and the identical text elsewhere is still a finding. Both halves
-  // below are the same four lines, read at two paths.
+  // below are the same three lines, read at two paths.
   const boundaryShapes = [
     `const { data } = await client.schema('api').rpc('resolve_public_invitation');`,
     `const client = createClient<Database>(url, key, { auth: { persistSession: false } });`,
@@ -659,6 +697,48 @@ export function selfTest() {
   const unsanctionedRules = unsanctioned.map((v) => v.rule).sort();
   if (unsanctionedRules.join(",") !== "ad-hoc-supabase-client,canonical-table-read-outside-the-adapter") {
     failures.push(`a page writing the same shapes produced ${unsanctionedRules.join(", ") || "nothing"}`);
+  }
+
+  // Stage 7 puts a second anonymous door in front of the same domain, so the same two questions
+  // are asked of it rather than assumed: the sanctioned module stays clean at its own path, and a
+  // page writing the identical shapes is still a finding. The third block asks the question the
+  // guest rule's shape implies but cannot ask of one file — the argument form has to be a finding
+  // *including* in the module that owns the call, because that module is precisely where somebody
+  // would be tempted to write it, and the rule there carries no `exclude` for a reason.
+  const reviewerShapes = [
+    `const { data } = await client.schema('api').rpc('resolve_family_review');`,
+    `const client = createClient<Database>(url, key, { auth: { persistSession: false } });`,
+    `const { data } = await supabase.from('approval_requests').select('status');`,
+  ].join("\n");
+  const sanctionedReview = scanContent("src/integrations/supabase/publicReview.ts", reviewerShapes);
+  if (sanctionedReview.length > 0) {
+    failures.push(
+      `the reviewer adapter's own file was flagged: ${sanctionedReview.map((v) => v.rule).join(", ")}`,
+    );
+  }
+  const unsanctionedReview = scanContent("src/pages/FamilyReview.tsx", reviewerShapes);
+  const unsanctionedReviewRules = unsanctionedReview.map((v) => v.rule).sort();
+  if (unsanctionedReviewRules.join(",") !== "ad-hoc-supabase-client,canonical-table-read-outside-the-adapter") {
+    failures.push(`a reviewer page writing the same shapes produced ${unsanctionedReviewRules.join(", ") || "nothing"}`);
+  }
+  const reviewerArgumentForm = `const { data } = await client.schema('api').rpc('resolve_family_review', { p_token: token });`;
+  for (const path of ["src/integrations/supabase/publicReview.ts", "src/pages/FamilyReview.tsx", "src/lib/familyReview.ts"]) {
+    if (!scanContent(path, reviewerArgumentForm).some((v) => v.rule === "reviewer-door-called-with-arguments")) {
+      failures.push(`the reviewer argument form was not a finding at ${path}`);
+    }
+  }
+
+  // …and the approval pair is only genuinely adapter-bound if reading them through `.from()` is a
+  // finding at a page while the words themselves stay writable in the adapter and in a comment.
+  const approvalVocabulary = [
+    `// approval_requests is the row this token was minted against.`,
+    `const status = row.approval_requests?.status;`,
+  ].join("\n");
+  const approvalHits = scanContent("src/lib/familyReview.ts", approvalVocabulary);
+  if (approvalHits.length > 0) {
+    failures.push(
+      `prose about the approval tables produced ${approvalHits.length} violation(s): ${approvalHits.map((v) => v.rule).join(", ")}`,
+    );
   }
 
   const benign = [
