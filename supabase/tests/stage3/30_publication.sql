@@ -1361,14 +1361,22 @@ BEGIN
   --     `public=n` on all thirteen: no server key reaches a browser boundary either.
   --
   -- Provenance of the six Stage 8 rows, stated separately because it is not yet the same as the
-  -- Stage 7 rows' provenance: they were *derived*, not read. `q8-logs/s8-derive-census.cjs` parses
-  -- each name's signature, `LANGUAGE` clause and `GRANT`/`REVOKE` lines out of
-  -- `20261009120000_stage8_guest_invitations_rsvp.sql` §4-§6, sorts by `proname COLLATE "C"`, and
-  -- refuses to print unless the three literals come out at 19/30/19 with no duplicate name. That is
-  -- a mechanical restatement of what the migration declares, so it can agree with the declaration
-  -- and still disagree with the catalog — which is why `q8-logs/s8-census-literals-01.txt` must be
-  -- diffed line-for-line against a throwaway-cluster readout of the applied chain before either
-  -- head's battery is called anything. The three properties the Stage 8 rows assert:
+  -- Stage 7 rows' provenance: they were *derived*, not read. `q8-logs/s8-derive-census.cjs` does not
+  -- open the Stage 8 migration: its only file input is this one, from whose matrix7, impl7 and pairs7
+  -- blocks it takes the thirteen committed Stage 7 rows, and the six Stage 8 rows come
+  -- from a signature / `anon` / volatility table transcribed by hand into the script after reading
+  -- `20261009120000_stage8_guest_invitations_rsvp.sql` §4-§6. It sorts by `proname COLLATE "C"` and
+  -- refuses to print unless the three literals come out at 19/30/19 with no duplicate name, which
+  -- guards against a row silently going missing and does not guard against a transcription that has
+  -- stopped matching the declaration. So the transcription was re-checked against the current file by
+  -- hand (`docs/audits/stage-8-guest-rsvp.md` §11): six signatures that agree with
+  -- `pg_get_function_identity_arguments`, which is what these rows are built from and which drops the
+  -- `DEFAULT NULL` the migration writes at `:1123`, four `TO authenticated` plus two
+  -- `TO anon, authenticated` grants at `:1191`-`:1211`, and exactly one `LANGUAGE sql STABLE` wrapper
+  -- at `:1150`. Even a faithful mechanical restatement of a declaration can disagree with the catalog,
+  -- which is why `q8-logs/s8-census-literals-01.txt` must be diffed line-for-line against a
+  -- throwaway-cluster readout of the applied chain before either head's battery is called anything.
+  -- The three properties the Stage 8 rows assert:
   --   * `anon=y` on exactly `resolve_guest_invitation` and `submit_guest_rsvp` — the guest door, and
   --     nothing else in the six. A guest has no session, so those two must be reachable without one;
   --     a host's four verbs must not be, because an anonymous `issue_guest_invitations` would mint

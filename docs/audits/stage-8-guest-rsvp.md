@@ -221,7 +221,7 @@ file's first four sections, `edc15f3` carries the doc's deletion-freeze ruling a
 migration, and the section you are reading is the third commit after them. Each was pushed at the moment it was made and
 read back with `git ls-remote`, so the ordering is checkable from `git log` rather than from this paragraph's assertion.
 
-`supabase/migrations/20261009120000_stage8_guest_invitations_rsvp.sql` now exists — 1219 lines, measured with `wc -l`
+`supabase/migrations/20261009120000_stage8_guest_invitations_rsvp.sql` now exists — 1219 lines then, 1253 lines as §10 re-measures it, both with `wc -l`
 and recorded in `q8-logs/s8-selfreview-01.log` §2 (cited by section, not by line number, because that file grew by two
 edits after the citation was first taken and a line cite into a scratch capture is the kind of cite that goes stale
 silently). **It has been applied to nothing.** No throwaway database, no local
@@ -229,9 +229,9 @@ stack, no chain. §4's first "not written" item is therefore closed and its "not
 git history the correction lives here rather than as an edit to §4.
 
 What the file is, counted from the file itself rather than from the design doc's intention:
-**14 function definitions** — 6 new `internal_api` bodies (`:145`, `:307`, `:365`, `:460`, `:539`, `:699`), 6 new
-`api` wrappers for the same six names (`:1086`-`:1138`), and 2 re-declared `internal_api` publication verbs
-(`:923`, `:1026`). That is 12 new function names and 2 replaced bodies, which is the surface S8-3 has to pin.
+**14 function definitions** — 6 new `internal_api` bodies (`:153`, `:315`, `:373`, `:483`, `:562`, `:722`), 6 new
+`api` wrappers for the same six names (`:1120`-`:1164`), and 2 re-declared `internal_api` publication verbs
+(`:957`, `:1060`). That is 12 new function names and 2 replaced bodies, which is the surface S8-3 has to pin.
 Plus 1 partial unique index, 2 `DROP CONSTRAINT` and 3 `ADD CONSTRAINT`.
 
 ### Why the review was done by reading the substrate
@@ -249,7 +249,7 @@ found six live defects, all in the new file, and fixed all six before this secti
 | duplicate household ids refused | contradicted the verb's own `already_live` tolerance, and the message named the wrong cause | the membership test is `h.id = ANY (p_household_ids)`, which a duplicate cannot break; predicate now refuses only NULL elements and a set that doesn't match this wedding |
 | undeclared `v_i`, unused `v_items` | `column "v_i" does not exist` on the first guest answer ever submitted | re-read of the DECLARE block against every `v_` reference |
 | unguarded `(v_item ->> 'party_size')::int` | `22P02`, whose message **echoes the offending client text** — the leak the adjacent uuid regex guard exists to close | read of the guard block; a `^-?[0-9]+$` gate now precedes the cast, raising in the body-shape family so the access-refusal bytes are untouched |
-| `api.get_guest_invitation_state` missing `STABLE` | a read door that diverges from the one precedent that exists for it | `20261008120000_stage7_family_approval_review.sql` has **one** STABLE wrapper — `api.get_approval_requests` at `:827`, `LANGUAGE sql STABLE SECURITY INVOKER` at `:829` — and four write wrappers with no STABILITY clause at all (`:813`, `:821`, `:837`, `:850`). After the fix, `grep -n "LANGUAGE sql"` over this stage's file shows exactly one STABLE line, `:1116`, on the read wrapper, and none on the five write wrappers. |
+| `api.get_guest_invitation_state` missing `STABLE` | a read door that diverges from the one precedent that exists for it | `20261008120000_stage7_family_approval_review.sql` has **one** STABLE wrapper — `api.get_approval_requests` at `:827`, `LANGUAGE sql STABLE SECURITY INVOKER` at `:829` — and four write wrappers with no STABILITY clause at all (`:813`, `:821`, `:837`, `:850`). After the fix, `grep -n "LANGUAGE sql"` over this stage's file shows exactly one STABLE line, `:1150`, on the read wrapper, and none on the five write wrappers. |
 | three false citations inside the new file | a reviewer landing on unrelated code | `q8-logs/s8-selfreview-01.log` §5 — including `invitation_drafts_section_length_bound`, which this stage's comment attributed to Stage 2 with a 2000-character ceiling and which is actually Stage 3's `:162-170` with four `<= 4000` terms on `length()`. Stage 8's bound is `octet_length(…) <= 2000`: a different unit and half the magnitude, deliberately, and the comment now says both. |
 
 None of the six loosens a refusal. Four of them are exactly the class the S8-4 battery is scoped to catch, and the
@@ -356,10 +356,10 @@ $ grep -n "pronargs = 0" supabase/tests/stage3/30_publication.sql
 
 `G4` does not count the customer surface. It asserts that *the functions taking no arguments at all* are exactly the
 doors that read a credential out of the request rather than out of a signature, and it names them. Stage 8's
-`api.resolve_guest_invitation()` (migration `:1130`) is argument-free for precisely that reason, so at the guest head
+`api.resolve_guest_invitation()` (migration `:1156`) is argument-free for precisely that reason, so at the guest head
 this line prints three names against an expectation of two and fails the **Stage 3** battery — a suite that is right
 about a rule Stage 8 keeps — while every count-based tripwire in the file stayed green. The sixth guest verb,
-`api.submit_guest_rsvp(p_answers jsonb)` (`:1138`), deliberately does not join it: a door that accepts a body must not
+`api.submit_guest_rsvp(p_answers jsonb)` (`:1164`), deliberately does not join it: a door that accepts a body must not
 also accept a token by signature, and the comment added with the arm says so.
 
 Fixed by prepending a `stage8` arm and leaving the `stage7` and base arms byte-identical, in the idiom §5 describes.
@@ -484,8 +484,8 @@ read back by both instruments again at the end of the pass.
 
 `a31566c` exists because the first version of `G4`'s comment was wrong about code this very pass widened. It said
 `api.submit_guest_rsvp` stays out of the argument-free list because "a door that accepts a body must not be a door that
-accepts a token by signature" — and that body reads `x-guest-token` at migration `:814`, exactly as
-`internal_api.resolve_guest_invitation` does at `:568`. The real reason is narrower and less flattering to the prose:
+accepts a token by signature" — and that body reads `x-guest-token` at migration `:840`, exactly as
+`internal_api.resolve_guest_invitation` does at `:583`. The real reason is narrower and less flattering to the prose:
 `G4` aggregates names where `pronargs = 0`, and `submit_guest_rsvp` declares one argument, so the census cannot see it.
 That is a fact about the query, not a ruling about the design. Whether a guest door that takes both a body and a header
 refuses an answer that arrives in the wrong channel is a Stage 8 battery question, and the corrected comment says what
@@ -496,8 +496,8 @@ assertion were untouched by the correction (`RESULT=OK`, `delta CASE=0 END=0 per
 
 Two further claims were checked against the migration before committing rather than left as reasoning: that only
 `api.resolve_guest_invitation()` among the six new wrappers is argument-free (`api.issue_guest_invitations` declares
-three parameters, one of them defaulted, at `:1094-1098`), and that all six bodies are
-`LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''` (`:159`, `:317`, `:375`, `:470`, `:549`, `:709`) — which is
+three parameters, one of them defaulted, at `:1120-1124`), and that all six bodies are
+`LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''` (`:159`, `:317`, `:375`, `:485`, `:564`, `:724`) — which is
 what makes the comment's arithmetic (thirteen→nineteen exposed, twenty-four→thirty internal, eleven twin-less
 maintenance bodies unchanged) true rather than merely plausible. The guest-mint table above was re-read row by row
 before `c8d6090` went out and the readings agree with it.
@@ -623,7 +623,7 @@ link to rotate", so the client has one branch for "nothing to rotate here" and o
 facts about the caller's own wedding — which is why neither is folded into the `insufficient_privilege` refusals that
 must not distinguish those cases from a stranger's.
 
-The `COMMENT` on the body at `:1211-1212` and the design paragraph in `docs/architecture/guest-rsvp-security.md` §3 were
+The `COMMENT` on the body at `:1222-1223` and the design paragraph in `docs/architecture/guest-rsvp-security.md` §3 were
 rewritten in the same commit, because both previously stated the carry-across rule as though it were unconditional.
 
 ### What was checked about the repair, and what was not
@@ -721,3 +721,258 @@ guards answer `23514` with the shape sentence, that `{}` now raises instead of r
 `23502` path is unreachable from any body, and that the twenty-two bodies per header state in group A's `A0` still all
 refuse for the body's own reason. Group A's probes 19-22 are the cases this repair is for, and they are written to
 fail if it is reverted.
+
+## 10. The citations the three line-shifts moved, re-derived by content
+
+§9 ended owing this. It is done: twenty-four replacements, twelve in this audit and twelve in
+`supabase/tests/stage8/90_guest_rsvp.sql`, each one accepted only after reading the line the new number names. The
+sweep began with a shift map and abandoned the idea of trusting one, for a reason the map could not see: these files
+were not all written against the same version of the migration.
+
+### Four versions, three shift events
+
+`git log --follow -- supabase/migrations/20261009120000_stage8_guest_invitations_rsvp.sql` prints four commits, and
+`git show <sha>:<path> | wc -l` on each gives the arithmetic:
+
+| commit | lines | delta | what was inserted |
+| --- | --- | --- | --- |
+| `be5200d` | 1219 | — | the migration as authored |
+| `7e0fd8c` | 1227 | +8 | the widened `answers` bound, re-added under Stage 2's generated constraint name |
+| `6f0d09a` | 1242 | +15 | `rotate_guest_invitation`'s spent-deadline refusal and its rationale |
+| `9be8d2d` | 1253 | +11 | the four shape guards, their defect comment, and the rewritten `COMMENT` |
+
+`9be8d2d` inserts in five regions — `752..753`→`752..761` (+8), `784..785`→`792..794` (+9), `795..796`→`804..806`
+(+10), `804..805`→`814..816` (+11), `1220..1221`→`1231..1232` (+11) — which is exactly what §9 meant by +8/+9/+10/+11
+"depending on which side of the four insertions it sits". What §9 did not say is that the audit's numbers were struck
+against three different rows of that table: §3's census against `be5200d`, §7's against `7e0fd8c`, §8's and both
+Stage 8 batteries' against `6f0d09a`. So the same file carries citations whose correct home differs by which section
+wrote them, and a single arithmetic key would have quietly misedited half of them.
+
+### The twenty-four, and what each new number names
+
+This audit:
+
+| old | new | the line |
+| --- | --- | --- |
+| `:145`,`:307`,`:365`,`:460`,`:539`,`:699` | `:153`,`:315`,`:373`,`:483`,`:562`,`:722` | the six `CREATE FUNCTION internal_api.*` lines |
+| `:1086`-`:1138` | `:1120`-`:1164` | the `api` wrapper block, first and last `CREATE OR REPLACE` |
+| `:923`,`:1026` | `:957`,`:1060` | the two re-declared publication verbs, publish and revoke |
+| `:1116` | `:1150` | the file's only `LANGUAGE sql STABLE SECURITY INVOKER` |
+| `:1130` | `:1156` | `CREATE OR REPLACE FUNCTION api.resolve_guest_invitation()` |
+| `:1138` | `:1164` | `CREATE OR REPLACE FUNCTION api.submit_guest_rsvp(p_answers jsonb)` |
+| `:814` | `:840` | the submit body's `request.headers` read |
+| `:568` | `:583` | the resolve body's `request.headers` read |
+| `:1094-1098` | `:1120-1124` | `api.issue_guest_invitations`' three parameters |
+| `:159`,`:317`,`:375`,`:470`,`:549`,`:709` | `:159`,`:317`,`:375`,`:485`,`:564`,`:724` | the six `LANGUAGE plpgsql … SECURITY DEFINER` lines |
+| `:1211-1212` | `:1222-1223` | `COMMENT ON FUNCTION internal_api.rotate_guest_invitation` |
+| "1219 lines, measured with `wc -l`" | "1219 lines then, 1253 lines as §10 re-measures it, both with `wc -l`" | §3's own size claim, kept and dated rather than overwritten |
+
+Battery 90:
+
+| old | new | the line |
+| --- | --- | --- |
+| `:878-889` | `:889-900` | the scope loop's `NOT EXISTS` test (`:662`, its `JOIN` half, was already right and did not move) |
+| `:1219` | `:1226` | the `get_guest_invitation_state` `COMMENT` text the battery quotes |
+| `:916-918` (twice) | `:927-929` | the "no `last_used_at` stamp on this path" comment |
+| `:749-827` versus `:829` | `:749-838` versus `:840` | the guard block's `END LOOP;` and the header read after it |
+| `:750-834` | `:750-838` | the shape-guard block |
+| `:829-852`, `:866` | `:840-863`, `:877` | the credential-resolution block, and the cap loop's `FOR` |
+| `:868` | `:879` | the cap's `AND v_expected IS NOT NULL` arm |
+| `:883-886` | `:894-897` | the scope test's `OR NOT EXISTS (` through its `) THEN` |
+| `:911` | `:922` | `answers = '{}'::jsonb;` |
+| `:866-889`, `:892` | `:877-900`, `:910` | the two guard loops, and `INSERT INTO public.rsvp_responses (` |
+| `:836-856` | `:847-867` | `SELECT t.wedding_id, t.household_id` through the household lookup |
+
+### Checked by an instrument, then confirmed by reading
+
+`q8-logs/s8-cite-verify.cjs` loads all four committed versions from git and asks, for every old→new pair, which
+version the *old* number named correctly. It prints `still-current=1 drifted=32 never-true=2 total=35`, where the 35
+rows are the distinct start-anchors behind the 24 replacements. The distribution is the drift story above, per
+citation: 10 old numbers were true in `be5200d`, 9 in `7e0fd8c`, 13 in `6f0d09a`, and `:159` is still correct in the
+current file — which is why it stayed `:159` in a row whose neighbours moved. Nothing in that 32 was invented after
+the fact; every one of them was a true reading of a file that then grew.
+
+Two were not true in any version, and both happen to be in battery 90. `:1219` for the published-promise `COMMENT`:
+`be5200d` ends at 1219 and `7e0fd8c`/`6f0d09a` have a blank line there, so the number never named that text — the
+`COMMENT` string is `:1226`. And "the first INSERT at `:892`": `:892` is the write loop's `FOR` in `6f0d09a` and
+`SET attending = EXCLUDED.attending` in `7e0fd8c`, while the `INSERT` is `:910`. Those two are ordinary
+mis-transcriptions caught by the same pass that was sweeping for drift, which is the useful argument for doing the
+sweep by content instead of by adding eleven to everything.
+
+The instrument got one of these wrong before I fixed it: with three baselines loaded it labelled `:1116` (the STABLE
+wrapper) as never-true, because `7e0fd8c:1116` is a *different* wrapper's `LANGUAGE sql SECURITY INVOKER`. Loading
+`be5200d` from git showed `:1116` is precisely the STABLE line there. A verifier is only as complete as its baseline
+set, and an incomplete one will manufacture false findings — which is a claim about citations that generalises badly
+in the interesting direction.
+
+### The scanner that could not do this job, in two ways
+
+`q8-logs/s8-citation-scan.cjs` was written to attribute each bare `:NNN` to the file its surrounding prose names,
+then print the cited line so a human reads it. Two defects had to be fixed before its output meant anything: an
+undeclared `byTarget` counter, which made the captured first run crash with a `ReferenceError`
+(`q8-logs/s8-citation-sweep-01.txt` keeps that crash), and a group-index error that read the *range end* as the
+citation start, which would have silently checked the wrong line for every `a-b` citation — worse than crashing.
+After both fixes: `node ../q8-logs/s8-citation-scan.cjs <pre-sweep audit> <pre-sweep battery 90>` prints
+`tokens=206 attributed=205 unattributed=1 stage8-shown=7`, over the current battery `41/40/7`, and over the current
+audit `330/330/0`. Captured in `q8-logs/s8-citation-sweep-02.txt`.
+
+So it surfaced seven citations and none of the audit's. Its heuristic is "nearest preceding explicit file name,
+carried forward across blank-line-separated blocks", and this repository's citation grammar breaks exactly that: the
+audit names the migration once and thereafter writes `20260925120300…:21` with a Unicode ellipsis, or a bare `:814`
+whose subject the *sentence* supplies from several lines away. The seven it did surface were all correct and all in
+battery 90, and the capture prints each with the current line under `NOW:` — `:583` the header read, `:650-660` the
+event card, `:627-632` the greeting, `:684-697` the answer object, `:480-482` §3.4's rationale, `:1226` the host-read
+`COMMENT` — so the instrument is good for confirming a citation it happens to reach, and cannot be trusted as the
+scope of a sweep. The 165 audit and 44 battery `:NNN` tokens (counted with
+`grep -oE ':[0-9]{2,4}(-[0-9]{2,4})?' <file> | wc -l`) were walked by hand, which is how the twelve-plus-twelve got
+their list.
+
+### Anchors checked and left alone, and one §9 claim withdrawn
+
+Re-read in place and unchanged, because they sit below the first insertion: `:209`, `:415-420`, `:425`, `:442-445`,
+`:447`, `:453-464`, `:512` (all of §8), and §9's own `:760`, `:793`, `:805`, `:815`, `:797-802`. Two more moved
+numbers were already correct and are recorded above without change: `:662` and `:480-482`.
+
+The migration needs no self-citation work. It contains 35 `:NNN` tokens, and the grep that finds bare ones on a line
+naming no stamped migration (`grep -nE '[^` ]:[0-9]{2,4}' <migration> | grep -vE '2026[0-9]{8}'`) returns three
+lines — `:1495`, `:188`, `:32` — every one of which names `20_attacks.sql`, `stage-2-migration-plan.md` or
+`supabase/config.toml` on that same line. No citation in the migration points at the migration, so nothing in it had
+to move.
+
+The design note cites this file only inside Ruling 4.2, which `9be8d2d` wrote against the current bytes, so its five
+anchors are current by construction. Its other bare numbers belong to other stages' files; the one that looked most
+like a Stage 8 anchor, `:524`'s `CASE WHEN p_expires_at IS NULL THEN 'no_expiry' ELSE 'fixed' END`, is Stage 3's line
+524 and reads identically there — which is the point of the citation, since Stage 8 copied it.
+
+§9 said `supabase/tests/stage3/30_publication.sql` cites into this file and so owed re-derivation. That is wrong as
+stated, and it is withdrawn: the file names this migration exactly once (`:1368`, measured after §11's repair re-flowed
+that paragraph — it sat at `:1366` before) and points at §4-§6 of it — section
+numbers, not line numbers — so it owed nothing to this sweep. What that line *does* contain is a false claim about
+how the six Stage 8 census rows were obtained, which is a different defect, is proven, and is recorded in §11.
+
+### What this section is not
+
+No gate was run and no tier is claimed here; this is a reading result. `df -k /c` measured while writing it reads
+195,232 KB free of 498,133,316, 100 % used — down from §9's 311,376 KB inside the same working hour, with no install,
+no image pull, no build and nothing larger than these text files written by this pass, so the cause is outside what
+this repository can see and nothing on the shared disk was touched to buy headroom. `docker version` still exits 1
+(`docker_exit=1`, measured alongside the numbers above). Everything in §9's "Not checked" list therefore remains
+unchecked, and the twenty-four edits change what the batteries *say*, not what they assert: battery 90 re-measured
+with `node ../q8-logs/s8-sql-shape.cjs supabase/tests/stage8/90_guest_rsvp.sql` still reports
+`RESULT=OK (region balance only)`, `dollar-tags=8 odd=none scan-odd=none`, `pg_temp_perform_calls=80`, byte-identical
+to the same run over the pre-sweep copy in `q8-logs/v0-battery90-pre-citefix.sql`. The citation fixes alone were
+`12 insertions(+), 12 deletions(-)` in this file with `git diff --word-diff` showing digit changes and the dated size
+sentence and nothing else; that was measured before §10 and §11 were added to it, so the combined diff of this pass is
+the one stated at the end of §11, and a reader who re-measures this sentence against the whole file will not get 12/12.
+
+### The rule this leaves behind
+
+Any future edit that changes this migration's line count owes the same sweep, in the same pass, before any tier of
+the stage is named: re-measure `wc -l`, re-run `s8-cite-verify.cjs` over the pairs, and re-read each surviving
+citation by content. The cheaper discipline is the one Stage 7 discovered and Stage 8 kept failing: cite a construct
+name or a section reference, since `internal_api.submit_guest_rsvp` and §3.4 do not move when an insert lands above
+them, and a `:NNN` does.
+
+## 11. The Stage 8 census rows were transcribed, not parsed — a provenance claim S8-3 shipped wrong
+
+Walking `supabase/tests/stage3/30_publication.sql` for citations into this stage's migration (§10) meant reading the
+provenance paragraph at its `:1363`, and one clause in it is false. It said
+"`q8-logs/s8-derive-census.cjs` parses each name's signature, `LANGUAGE` clause and `GRANT`/`REVOKE` lines out of
+`20261009120000_stage8_guest_invitations_rsvp.sql` §4-§6". It does not parse them out of that file. The instrument
+takes two argv paths, calls `readFileSync` exactly once — on `argv[2]`, which its own output records as
+`derived_from=../s5qual/supabase/tests/stage3/30_publication.sql` — pulls `$matrix7$`, `$impl7$` and `$pairs7$` out of
+that battery (13/24/13 rows, printed as `old_counts`), and appends six rows per set built from a `sig` / `anon` / `vol`
+table hand-written into the script at its lines 15-41. It never opens the migration.
+
+The tell is inside the instrument. Its own transcription comments point at `:1157`/`:1161`/`:1165`/`:1169`/`:1173`/
+`:1177` for the grants and `:1092`-`:1132` for volatility — anchors into a superseded version of the file, because the
+current grant lines are `:1191`-`:1211` and the wrapper block is `:1120`-`:1164`. That is what a hand-transcription
+looks like after three line-shifts: the digits it cites moved, and nothing in the tool noticed, because the tool was
+never reading the file those digits name.
+
+Two consequences, one narrow and one not.
+
+The narrow one is that `19/30/19` is a property of an assembled list, not a measurement of the schema. The script's
+"refuses to print unless the three literals come out at 19/30/19 with no duplicate name" guard is real and catches a
+row that goes missing or arrives twice. It cannot catch a transcription that has stopped matching what the migration
+declares, because the declaration is not one of its inputs. Anyone reading the old comment would have believed the
+census re-derives itself from the migration on every run, and it does not.
+
+The wider one is that the six rows then needed a hand check against the current file, which is the check the comment
+claimed had been automated. It comes out faithful, for reasons worth stating because two of them are not obvious:
+
+* the six signatures agree, and the one that looks wrong is right. The migration writes
+  `p_expires_at timestamptz DEFAULT NULL` at `:1123` while the row says `p_expires_at timestamp with time zone`,
+  because these rows are compared against `pg_get_function_identity_arguments` (`:1322`, `:1468`), which omits
+  defaults by design and spells the type long. A row built from `pg_get_function_arguments` would have failed the
+  first time it was run against a catalog.
+* the grant split is exactly as asserted: `TO authenticated` at `:1191`, `:1195`, `:1199`, `:1203` and
+  `TO anon, authenticated` at `:1207`, `:1211` — four and two, with `anon=y` on `resolve_guest_invitation` and
+  `submit_guest_rsvp` and on no other name.
+* the volatility split is exactly as asserted: one `LANGUAGE sql STABLE SECURITY INVOKER` at `:1150`, on the
+  `api.get_guest_invitation_state` wrapper, five plain at `:1126`, `:1134`, `:1142`, `:1158`, `:1166`, and the one
+  STABLE internal body at `:485` — so `vol=s` on that name alone and `vol=v` on the other five holds on both sides of
+  the wrapper pair.
+
+What is still not established is the thing none of this can establish from a file: `pg_proc` itself. A transcription
+that matches the declaration is still a restatement of intent, and the paragraph's last sentence survives its own
+falsified neighbour — `q8-logs/s8-census-literals-01.txt` must be diffed line-for-line against a throwaway-cluster
+readout of the applied chain before any head's battery is called anything. The correction therefore does not shrink
+that obligation; it makes it the only remaining one, since the automated re-derivation it leaned on does not exist.
+
+### The repair, and what it deliberately did not touch
+
+`supabase/tests/stage3/30_publication.sql:1363-1379` is rewritten to say what is true: the script's only file input is
+that battery, the Stage 8 rows are transcribed by hand from a reading of §4-§6, the size guard catches a missing or
+duplicated row and not a stale transcription, and the hand re-check above is named where a future reader can find it.
+No assertion in the battery moved: the `$matrix8$`, `$impl8$` and `$pairs8$` literals, the catalogue queries, the
+`COLLATE "C"` ordering and the expected counts are untouched, so this is not a historical test widened to accommodate
+a defect — it is the paragraph *about* the test being made honest. `q8-logs/s8-derive-census.cjs` keeps its behaviour,
+including its own now-accurate header line, because its output is still how the literals were assembled; what changed
+is that the record no longer claims the tool reads a file it does not open.
+
+### Instruments run, and what is not checked
+
+The repair itself needed two rounds, and the first round is on record. Rewriting the paragraph as it stood left it
+naming the three dollar-quoted blocks with their literal tag spellings, which is a comment containing `$matrix7$`,
+`$impl7$` and `$pairs7$`. Over that intermediate state `node ../q8-logs/s8-sql-shape.cjs supabase/tests/stage3/30_publication.sql`
+printed `dollar-tags=27 odd=impl7:3,matrix7:3,pairs7:3 scan-odd=none` and
+`RESULT=INCONCLUSIVE odd tags and no baseline to compare against`, `code=1` — the tag total is unchanged because the
+instrument counts tag *names*, and three of them had gone from two occurrences to three; what it can no longer do is
+say which block is which, and the run's own literal report shows it: `literal matrix7/impl7/pairs7 occurrences` vanish
+from the output entirely while `matrix8/impl8/pairs8` survive. `node ../q8-logs/s8-derive-census.cjs` over the same
+bytes failed outright with `derived sizes 56/170/306 != expected 19/30/19`, `code=1`, because its non-greedy
+`/\$matrix7\$([\s\S]*?)\$matrix7\$/` now matched from my comment to the real block and swallowed the Stage 3 and Stage 5
+rows into the "old" set. Both are captured in `q8-logs/s8-citation-sweep-04.txt`, kept rather than deleted. Postgres
+ignores a tag inside a `--` comment, so this would have shipped as a broken instrument set against a correct
+migration, and only re-running the instruments — not re-reading the paragraph — could catch it. The comment was then
+rewritten with the tags spelled bare (matrix7, impl7, pairs7) and both instruments re-run into
+`q8-logs/s8-citation-sweep-05.txt`, which is the clean record: shape over the edited battery now reads
+`dollar-tags=27 odd=none scan-odd=none` with `RESULT=OK (region balance only)` and
+`matrix7=[13] matrix8=[19] impl7=[24] impl8=[30] pairs7=[13] pairs8=[19]`, and the same run over the pre-edit copy in
+`q8-logs/v0-30pub-pre-citefix.sql` differs only on the lines that print the file path. Census re-derivation from the
+edited battery (`s8-census-literals-02.txt`) diffs against the pre-edit capture (`-01.txt`) on nothing but its own
+`derived_from=` line, and derivation from the pre-edit copy (`-03.txt`) is identical to `-02.txt` once CR is stripped;
+the raw diff between those two is CRLF-vs-LF, because `core.autocrlf=true` with no `.gitattributes` makes the worktree
+CRLF while `git show` yields LF — pre-existing repo state, not something this pass introduced, and the reason an
+instrument that splits on `\n` carries a trailing CR into each derived row.
+
+The paragraph's span moved with its length: it was `:1363-1371` in the committed file and is `:1363-1379` now, which is
+also why the migration-name line went from `:1366` to `:1368` — a second instance of the drift this whole section
+exists to catch, produced by the repair rather than by the migration.
+
+No gate ran and no tier is claimed: `docker version` still exits 1 (`docker_exit=1`, re-measured with the runs above).
+`df -k /c` was at 195,232 KB free of 498,133,316 (100 % used) when §10 was measured and read 912,236 KB free at the
+end of this pass — the number moved on its own again, with nothing installed, pulled or built here, which reinforces
+rather than resolves §10's point that the cause is outside what this repository can see. Specifically unverified, and
+unverifyable until a cluster exists: the three census literals against `pg_proc`, the twelve battery-90 citations'
+claims about behaviour rather than position, and every item still on §9's "Not checked" list. What this pass changed in
+the tracked files is prose and digits only. In the battery: `git diff --numstat` reports `16 insertions(+), 8
+deletions(-)` for the paragraph replacement — nine old lines (`:1363-1371`) out, seventeen in (`:1363-1379`), which is
+the whole of the file's growth from 2366 to 2374 lines and the whole of the `:1366`→`:1368` shift. In this file:
+§10 and §11 added and the twelve citation digits changed, and because §11's own wording is part of that diff, its
+combined `--numstat` figure is not written into prose here; it is recorded as measured in
+`q8-logs/s8-citation-sweep-05.txt` section I, alongside the `wc -l` of both files, so a reader gets a number taken from
+the bytes that were committed rather than one that goes stale as the paragraph describing it is edited.
+
+
