@@ -261,6 +261,29 @@ from "does not exist"), and a bounded vocabulary for correctable answers
 (`'party_size_too_large'`, `'answers_not_accepted'`). The set is closed by CHECK in the body, and the
 battery asserts that no message from the second family can be produced by a credential problem.
 
+**Ruling 4.2 — a malformed *body* is a third thing, and it is refused before the credential is looked at.**
+The paragraph above lists "malformed shape" among the credential problems because that is what it means at
+the *read* door, where the only malformed thing is a header that is not 43 characters. At the write door a
+malformed body is not a credential state and must not wear `unavailable`'s bytes: the guest's own page has
+to be able to tell "this form was filled wrong" from "this link is dead", and a refusal that cannot be
+named is a refusal nobody can act on. So `api.submit_guest_rsvp` raises `23514` with one sentence —
+`the answers submitted are not in the shape this invitation records` — for a body that is not an object,
+that names no `events` array, that names an empty one, or whose cards miss or mistype `event_id`,
+`attending` or `party_size`, and it does so before reading `request.headers`. Two consequences are part of
+the ruling rather than accidents of it: a probe learns nothing about a credential from a body it refused
+(`22` malformed bodies × 2 header states all raise the body's own sentence, asserted as group A's `A0`),
+and no malformed body can ever reach a table constraint, because the guard that would have caught it reads
+the type of a key that is *absent* as `jsonb_typeof(NULL)` = SQL NULL, which is not `<>` anything.
+
+That last clause is the reason this ruling is written down as a ruling. The first body of the function
+tested each key with `jsonb_typeof(x) <> 'string'`, which is NULL — not true — for a missing key, so the
+four guards were silent on exactly the input they existed to refuse. The results were a `{}` body returning
+`{"recorded": true, "events_recorded": 0}` (a thank-you for an answer that named nothing), and a card
+missing `attending` or `party_size` passing every guard and aborting inside the `INSERT` on that column's
+own `NOT NULL` (`20260925120300...:78-79`) — a `23502` naming a table and a column, delivered to an
+anonymous caller, which is the same disclosure the uuid-as-text test at `:797-802` exists to close,
+arriving by a different route. Each guard now names absence itself (`:760`, `:793`, `:805`, `:815`).
+
 ## 5. Personalisation without touching the frozen document
 
 The obvious implementation of "personalised invitation" is to freeze a document per household. This

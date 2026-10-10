@@ -750,7 +750,15 @@ BEGIN
   IF p_answers IS NULL OR jsonb_typeof(p_answers) <> 'object' THEN
     RAISE EXCEPTION '%', v_bad_shape USING ERRCODE = 'check_violation';
   END IF;
-  IF jsonb_typeof(p_answers -> 'events') <> 'array'
+  -- Each of the four tests below names its key's absence as well as its wrong type, and the reason is
+  -- three-valued logic rather than style: `jsonb_typeof()` answers SQL NULL for a missing key, so
+  -- `jsonb_typeof(x) <> 'array'` is NULL — not true — for exactly the bodies this test exists to refuse.
+  -- Before that was written down, `{}` and `{"welcome":"x"}` fell through to a successful return of
+  -- `recorded: true, events_recorded: 0`, and a card missing `attending` or `party_size` reached the
+  -- INSERT and aborted there with a `23502` naming a table and a column — the same leak the uuid test
+  -- below exists to close, arriving by a different route.
+  IF p_answers -> 'events' IS NULL
+     OR jsonb_typeof(p_answers -> 'events') <> 'array'
      OR jsonb_array_length(p_answers -> 'events') = 0 THEN
     RAISE EXCEPTION '%', v_bad_shape USING ERRCODE = 'check_violation';
   END IF;
@@ -782,7 +790,8 @@ BEGIN
       RAISE EXCEPTION '%', v_bad_shape USING ERRCODE = 'check_violation';
     END IF;
 
-    IF jsonb_typeof(v_item -> 'event_id') <> 'string' THEN
+    IF v_item -> 'event_id' IS NULL
+       OR jsonb_typeof(v_item -> 'event_id') <> 'string' THEN
       RAISE EXCEPTION '%', v_bad_shape USING ERRCODE = 'check_violation';
     END IF;
     -- Checked as text before it is cast: a uuid cast that fails answers 22P02 with the offending
@@ -793,7 +802,8 @@ BEGIN
     END IF;
     v_eid := v_seen::uuid;
 
-    IF jsonb_typeof(v_item -> 'attending') <> 'string'
+    IF v_item -> 'attending' IS NULL
+       OR jsonb_typeof(v_item -> 'attending') <> 'string'
        OR (v_item ->> 'attending') NOT IN ('attending', 'declined') THEN
       RAISE EXCEPTION '%', v_bad_shape USING ERRCODE = 'check_violation';
     END IF;
@@ -802,7 +812,8 @@ BEGIN
     -- `party_size` is required. Stage 2's column default is 0, and an "attending" row with a headcount
     -- of zero is a contradiction the host panel would read as nobody coming; the page always sends a
     -- number, so making it explicit costs nothing and removes the invented default of 1.
-    IF jsonb_typeof(v_item -> 'party_size') <> 'number' THEN
+    IF v_item -> 'party_size' IS NULL
+       OR jsonb_typeof(v_item -> 'party_size') <> 'number' THEN
       RAISE EXCEPTION '%', v_bad_shape USING ERRCODE = 'check_violation';
     END IF;
     -- `jsonb_typeof` says "number" for 1 and for 1.5, and the text form of the second is refused by an
@@ -1218,7 +1229,7 @@ COMMENT ON FUNCTION internal_api.resolve_guest_invitation() IS
   'Anonymous household door. Reads the x-guest-token request header, shape-checks it before hashing, and answers with the schema-v2 guest projection plus one hand-built object about that household alone — greeting, its own scoped events and its own answers — for a live credential on an active publication, or {"available": false} for every other case including a malformed, forged, revoked, expired, rotated-away or withdrawn one. Stamps last_used_at on a successful read only.';
 
 COMMENT ON FUNCTION internal_api.submit_guest_rsvp(jsonb) IS
-  'Anonymous household answer. Credential arrives in the x-guest-token header, never as an argument. Writes or revises one rsvp_responses row per named event, with response_source = ''guest'', all rows or none; refuses an event outside this household''s scope with the generic unavailable, refuses a party size above the host''s expected_party_size actionably, refuses optional-question answers as not asked, and writes nothing to the frozen document.';
+  'Anonymous household answer. Credential arrives in the x-guest-token header, never as an argument. Refuses a body that is not an object naming at least one event card, or a card missing or mis-typing event_id, attending or party_size, with one 23514 shape sentence and before the credential is read, so no malformed body can reach a table constraint. Writes or revises one rsvp_responses row per named event, with response_source = ''guest'', all rows or none; refuses an event outside this household''s scope with the generic unavailable, refuses a party size above the host''s expected_party_size actionably, refuses optional-question answers as not asked, and writes nothing to the frozen document.';
 
 COMMENT ON FUNCTION api.resolve_guest_invitation() IS
   'INVOKER single-statement wrapper over the anonymous household door. Zero arguments, so the credential cannot be addressed in a query string.';
