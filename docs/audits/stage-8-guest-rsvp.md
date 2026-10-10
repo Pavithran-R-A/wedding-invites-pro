@@ -975,4 +975,174 @@ combined `--numstat` figure is not written into prose here; it is recorded as me
 `q8-logs/s8-citation-sweep-05.txt` section I, alongside the `wc -l` of both files, so a reader gets a number taken from
 the bytes that were committed rather than one that goes stale as the paragraph describing it is edited.
 
+## 12. The two Stage 8 batteries and their runner — authored, and one floor that could never have run
+
+This section covers `supabase/tests/stage8/80_guest_invitation_links.sql` (2,027 lines, 132,876 bytes),
+`supabase/tests/stage8/90_guest_rsvp.sql` (4,064 lines, 279,238 bytes) and `supabase/tests/stage8/run.sh` (317 lines,
+18,189 bytes). None of the three had been in the repository before this pass; `q8-logs/s8-audit-12-measurements-01.txt`
+sections B–J hold the digests and the counters, section J restating battery 80's after the wording repair described
+below — section B's digest for that file is the bytes as they stood before it, kept rather than overwritten. **Nothing
+in this section is a tier result.** The engine did not start for it: `docker version` exits 1, re-measured with every
+command below.
+
+### The eight re-issue exports, and the arithmetic error one of them was asserting
+
+Battery 90's group Qb (`:3414`, `:3448`, `:3497`, `:3528`, `:3568`, `:3597`, `:3659`, `:3695`) is the half that
+qualifies what happens *after* a takedown: a withdrawn wedding can still be revised and a revision is not a revival
+(Qb1); republishing makes a new document and revives no old link (Qb2); after a takedown the only way to reach a
+family is a new secret (Qb3); exactly two families gain a credential and no other family loses or moves (Qb4); the new
+links open and the withdrawn ones do not (Qb5); a re-invited family is shown the corrected document (Qb6); the
+re-issued link is a working invitation that is neither wider nor a second mouthpiece (Qb7); and the three secrets the
+group minted appear in no text-shaped column of any base table in `public` or `private` (Qb8).
+
+Qb7 shipped wrong, and the way it shipped wrong is the interesting part. One arm asserted that the Pillai household
+held *no* answer before the re-issued link was used — a "provable zero" meant to show the new secret could not create a
+row beside the old one. There is no such zero to prove: group A4 (`:1784`) answers a live Pillai credential against
+Muurtham with `attending`, `party_size 2`, and its own last arm reads that row back, so the submission Qb7 makes is an
+in-place upsert and the pre-existing count is one, not zero. The assertion was not weakened to accommodate that — it
+was re-armed to say what the file actually does, and the "no second mouthpiece" claim moved onto the shape that is true
+and testable: `pp_then = 1`, `pp_now = pp_then`, the value going `attending|2` → `attending|1` with
+`response_source` still `guest`, one event recorded, the wedding's total answers unchanged from what group Q left
+(`ans_w = s8b.ans_then`), the Nair family untouched in both count and value, and the host's panel still reporting one
+reply. The repair was checked by enumerating every possible writer of a Pillai row in the file rather than by re-reading
+the one group: every `INSERT INTO public.rsvp_responses` statement and every `s8b_answer` call site, which is also how
+the two lookalike probe strings at `:2006-2048` and `:2079` were excluded — they are unexecuted text handed to the
+refusal helper, not writes.
+
+### The closing census, and why the probe count is read from a table
+
+Group Z (`:3741` through `:3983`) is the battery's own accounting, and every arm is forced through an expression the
+file computes rather than a literal the author believed. Z7 (`:3956`) is the load-bearing one: it reads the probe
+census out of the `probes` table and pins five things at once — fifty-six rows, eight groups, fifty-six distinct
+group/label pairs, the per-group distribution `MA1:22 MA2:22 MR1:2 MR2:1 MR3:1 MR4:3 QB:2 QF:3`, and zero rows missing
+a statement, a label, an expected state or an expected message.
+
+That table read is not stylistic. The counter harness has exactly three increment sites (`:85` inside `ok`, `:95`
+inside `eq`, `:195` once per probe row inside `run`'s loop; `s8b_add` is called nowhere else, and never with an argument
+other than 1), so a text count of *assertion calls* does equal the number the closing line will report — but the
+*probe* count does not follow from a text count at all. There are seven textual `s8b_run` call sites (`:1669`,
+`:2054`–`:2057`, `:3266`, `:3370`) and eight groups, because `:1669` sits inside the `FOREACH g IN ARRAY
+ARRAY['MA1','MA2']` loop at `:1575`: the shape storm runs the same twenty-two bodies twice, once under a live household
+header and once under no header at all, so that the ordering claim in group A cannot be satisfied by a door that
+resolved the credential first. A grep over the file would have said seven. The table says fifty-six, and Z7 is the
+assertion that makes the difference visible instead of silent.
+
+Battery 80 is the contrast case, and its floor comment is allowed a sentence 90's is not. There the twenty `s8f_run`
+call sites (`:831`–`:842`, `:912`, `:1074`, `:1173`, `:1301`, `:1304`, `:1683`–`:1685`) sit one per group invocation with
+nothing inside a loop, so its recipe genuinely can say the text count and the run count are the same number — and its
+Z7 (`:1962`) still pins the forty-three from the `probes` table anyway, with the per-group breakdown (`B1 3 … B12 2`, W
+1, S 5, A 1, R 2, GA 2, GB 1, GC 1) named in the assertion's own text. A grep and a table read agreeing is worth
+asserting precisely because the two files show that agreement cannot be assumed from one to the other.
+
+Z8 (`:3983`) closes the residue the next tiers need: the three 43-octet secrets group Qb minted, each checked against
+the digest row it belongs to and against the door it is supposed to open, so an HTTP or browser battery can name those
+strings instead of minting a fourth. Its last arm counts the switched-off events of the *whole wedding* rather than the
+three this cast names, which is the tighter claim and safe to make: battery 80's fixture is the only writer of the
+`enabled` column in this stage's SQL set — its event insert at `:349`-`:370` puts exactly three events on this wedding,
+two live and the farewell off, and reads them back at `:509` — and battery 90 contains no write to that column at all,
+so any reading other than one means the implementation hid a card on its own. A cast-scoped count could not see that.
+
+### The floor, re-counted, and battery 80's number that was never runnable
+
+Both batteries end with the same shape: a floor assertion that refuses a short run, then a closing `SELECT` that
+reports the harness's own counter (`90:4056`/`4064`, `80:2019`/`2027`). Both floors now read 181.
+
+For battery 90 that number is new and derived: 121 direct equalities (the anchored grep returns 122 and one of those is
+the call inside `s8b_has_keys`'s own body at `:129`, which is how a `has_keys` site earns its increment), plus 4
+`has_keys` sites, plus the 56 probes Z7 pins = 181, with L1 (`:4060`) as the 182nd. For battery 80 it is a *repair*: the
+file as authored floored at 183, and 183 is more than battery 80 can run. Two inherited mistakes make up the difference
+— an unanchored `s8f_eq` total that counted prose quoting the call, and a tally that put L1's own `ok` on the pre-floor
+side. Recounted: 120 direct (121 anchored, less the forwarding call at `:104`), 15 `ok` before L1 (16 less `:2023`), 3
+`has_keys`, 43 probe rows from the refusal table's own declared shape = 181.
+
+This is a defect class distinct from anything else in this stage, and it is worth naming as its own kind, because it is
+not a product
+defect and not a weakened test: it is an *instrument* that was wrong in a direction that would have made the file die
+on a healthy run. No assertion was added, removed or relaxed to get from 183 to 181 — only the floor constant, the
+message beside it, and the recipe comment above it. The recipe is now anchored (`^[[:space:]]*PERFORM …`) so prose
+cannot move it, and the polluted numbers it mentions are labelled as what the earlier draft's *unanchored* form printed,
+not as commands to re-run; in the version committed here the quoted patterns are written escaped, so the anchored and
+unanchored forms agree at this head.
+
+### Four measurement errors made while writing this section, kept in the record
+
+All four are the same failure the section is about — a number believed rather than taken — so they belong here instead
+of being quietly re-taken.
+
+The first was mine and is described above: the rewritten comments initially said the unanchored greps "now return 123,
+5 and 2", which stopped being true the moment the patterns were escaped — the sentence was false about the very bytes it
+sat in. It now attributes those numbers to the earlier draft.
+
+The second was an instrument, not a sentence. A check meant to prove "no `add()` is ever called with anything but 1" was
+written as `grep -cE 's8b_add\([^1)]'` and returned 1, which reads like a fourth increment site with an argument of
+`n`. It is the *definition* line — `CREATE FUNCTION pg_temp.s8b_add(n integer)` at `90:71` (and `80:61`) — matching its
+own formal parameter. The honest instrument is the one above: enumerate every mention of the helper, which shows three
+call sites and one definition in each file. A pattern that can match a declaration is not measuring calls.
+
+The third was in battery 80's own floor comment, and the re-measurement caught it before the file was committed. The
+paragraph introducing its recipe asserted, in the present tense, that "an unanchored substring search also matches the
+three lines of this comment that quote the patterns" — while the paragraph twenty lines below it correctly said the two
+forms agree at this head. The lower paragraph is the measured one: `121`, `16` and `3` for the anchored and the
+unanchored forms alike (section J of the capture), because every pattern this comment quotes is escaped, and a BRE `.`
+cannot match the two characters `\.`. The upper clause was therefore true of the *draft* it replaced and false of the
+bytes it sat in — the same mistake as the first one, inherited rather than newly made, and repaired by rewriting those
+three comment lines as three comment lines so that no citation below them moved: `:104`, `:1962`, `:2019`, `:2023` and
+`:2027` read the same before and after, and only the file's byte count changed.
+
+The fourth was arithmetic done in prose. This section first said the two batteries report "all 362 assertions"; each
+closing line reports 182, because the floor's own `ok` is the 182nd, so the pair is 364. The figure was written before it
+was re-derived from the two floors it summarises.
+
+### The runner: three chain kinds, because two of the three censuses count the whole cluster
+
+`supabase/tests/stage8/run.sh` takes `guest | family | historic | all` (`:56`), builds databases named
+`st8qual_<kind>`, and travels `app.stage_head=stage8` to the head-aware assertions via `PGOPTIONS` (`:61`). It masks
+43-octet runs out of every line it prints, for the Stage 7 reason: a failing comparison in this workflow routinely
+compares a live review or guest credential, and §I10 forbids handing that to a terminal or a log.
+
+Three chain kinds, not two, is a consequence of the censuses rather than a preference: battery 90's group Z counts
+households, live credentials by kind, `rsvp_responses` and the unused `rsvp` kind *cluster-wide*, so it cannot share a
+database with `20_attacks.sql`, which deliberately commits seed rows; 90 also reads its cast out of rows battery 80
+committed, so 80 must precede 90 in the same database (hence `guest`, and hence no single-suite argument); and Stage 7's
+R1–R7 census has the same whole-cluster property, so Stage 7's pair gets its own empty `family` chain at the Stage 8
+head instead of being folded into `historic`, which runs the legacy suites. `historic` keeps Stage 2's outcome-before-
+attacks ordering for the reason `stage2/run.sh` gives. `probe_sql` carries both the chain's database and the chain's
+`PGOPTIONS` because Stage 7 measured the alternative: the same census written through `admin_sql` printed three numbers
+about the maintenance database, sitting directly above suites asserting 19 and 30.
+
+The 19 and 30 are re-derived rather than inherited. Stage 7's runner measured 13 exposed wrappers and 24 internal
+bodies at its own head; the Stage 8 migration declares exactly six new names in each schema
+(`get_guest_invitation_state`, `issue_guest_invitations`, `resolve_guest_invitation`, `revoke_guest_invitation`,
+`rotate_guest_invitation`, `submit_guest_rsvp`) and re-creates two internal bodies for the nested-call grant
+(`publish_invitation_version`, `revoke_invitation_publication`), which changes no name. So the expected census is 19 and
+30, and `:194` prints the expectation rather than asserting it. The caveat is stated in the file: a grep counts distinct
+*names*, `pg_proc` counts *rows*, and only a run can settle whether an overload hides in the difference.
+
+### What was measured, and what nothing here can measure
+
+Against the bytes described above, and only these: `bash -n supabase/tests/stage8/run.sh` exits 0; `bash run.sh bogus`
+exits 2 on the usage guard; the shape instrument (`q8-logs/s8-sql-shape.cjs`, absolute mode, no baseline) reports
+`RESULT=OK (region balance only)` for both batteries with every region returning to depth 0 —
+90: `dollar-tags=16 odd=none scan-odd=none`, `pg_temp_perform_calls=150`, `CASE=8 END=56 BEGIN=32 IF=12 END IF=12
+LOOP=4 END LOOP=4`; 80: `dollar-tags=13 odd=none`, `pg_temp_perform_calls=163`, `CASE=2 END=40 BEGIN=26 IF=10 END IF=10
+LOOP=2 END LOOP=2`. Region balance and a counter's arithmetic are properties of text; neither is evidence about
+Postgres. Prior captures hold the rest of the static record: `q8-logs/s8-battery90-z-shape-01.txt` for the Z/L splice
+against its pre-edit baseline (the instrument refusing a PERFORM delta, `exit=1`, with the +10 decomposed) and
+`q8-logs/s8-runsh-static-01.txt` for the runner's path existence, glob expansions and unusable-backend behaviour
+(`exit=127`, i.e. it fails loudly rather than reporting a pass).
+
+Still unmeasurable until a cluster exists, and unclaimed by every sentence above: that either battery runs at all, and
+therefore both floors and the 364 assertions their closing lines will report (182 each, the floor's own pass
+included); whether the 181/181 arithmetic matches what `s8b.passed` and `s8f.passed`
+actually reach; the `pg_proc` census; every claim either file makes about a status code, a refusal message, a
+`last_used_at`, a partial index, or a constraint's text; and the whole of §11's remaining obligation, which is that the
+three Stage 8 census literals in `supabase/tests/stage3/30_publication.sql` have never been diffed against a readout.
+
+`docker version` still exits 1 (`docker_exit=1`), and `df -k /c` read 269,052 KB free of 498,133,316 (100 % used) at
+the time of writing — below the 1,048,576 KB floor this stage set for starting a tier at all, and lower again than the
+912,236 KB §11 recorded at the end of its own pass. Both are asks for the human holding the machine: free headroom on
+`C:` without touching another project's files, volumes or build artifacts, and start Docker Desktop. Until then the
+correct description of Stage 8's SQL tier is *authored and statically checked*, with no tier green.
+
+
 
