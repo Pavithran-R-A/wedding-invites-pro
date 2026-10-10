@@ -648,3 +648,76 @@ own change had invalidated. It was caught by grepping the file for bare `` `:NNN
 self-citation among seven, the rest naming their file immediately — and replaced with a reference to §3.4, which survives
 any future edit to this file. Worth recording because the failure mode is invisible to every instrument this pass has:
 the shape checker, `git diff` and a careful reader all accept a wrong line number.
+
+## 9. Four shape guards that refused nothing, found by writing the probes meant to catch them
+
+§8's reading pass continued into `internal_api.submit_guest_rsvp`, driven by group A of the second battery: eighteen
+malformed bodies were being written down as expected refusals, and the third one (`{}`) made a refusal that the code
+does not contain. Re-reading the validation block line by line against three-valued logic found four.
+
+### The defect
+
+Each of the four guards tested a key's *type* and never its presence. The four numbers in this block are the file as
+it stood before this section, which is what they are being quoted for:
+
+```sql
+IF jsonb_typeof(p_answers -> 'events') <> 'array'          -- :753 before this section
+IF jsonb_typeof(v_item -> 'event_id') <> 'string'          -- :785
+IF jsonb_typeof(v_item -> 'attending') <> 'string' …       -- :796
+IF jsonb_typeof(v_item -> 'party_size') <> 'number'        -- :805
+```
+
+`jsonb_typeof()` answers SQL NULL for a missing key, and `NULL <> 'array'` is NULL, which `IF` does not take. So a body
+whose `events` key is absent — `{}`, or `{"welcome":"x"}` — passed the block, and an event card missing `attending` or
+`party_size` passed it too. The guards fired for a *wrong type* (`3`, `"x"`, `'maybe'`) and stayed silent for *no value
+at all*, which is the more common malformed body by a wide margin, because it is what a client sends when a field is
+left out of a payload by accident.
+
+### What that actually did, in order of severity
+
+* A card missing `attending` or `party_size` survived every guard, passed the cap loop (`v_attending[i] = 'attending'`
+  is NULL, so the comparison is skipped), passed the scope loop (`event_id` was well-formed, so the row is found), and
+  reached the `INSERT` at `:910-922` (current file) with a NULL in a `NOT NULL` column — `20260925120300...:78-79`. An anonymous
+  caller writing an RSVP would have received `null value in column "attending" of relation "rsvp_responses" violates
+  not-null constraint`. That is the disclosure the uuid-checked-as-text guard at `:797-802` was written to prevent,
+  arriving through a different door.
+* A body with no `events` was **accepted**: the loops over `array_length(NULL, 1)` run zero times, nothing is written,
+  and the function returns `{"recorded": true, "household_id": …, "events_recorded": 0}`. A guest page built on that
+  answer thanks the family for an answer that named no event, and the same bytes turn a junk body into a live/dead
+  oracle for the credential that sent it.
+* No data was ever wrong. The scope loop and Stage 2's `rsvp_responses → household_event_scopes` FK sit in front of
+  every write, so the reachable outcomes were an error message and a hollow success, never an out-of-scope row. The
+  defect is disclosure and honesty, not integrity, and it is recorded at that size.
+
+### The repair, and what it deliberately did not touch
+
+All four guards now name absence themselves (`:760`, `:793`, `:805`, `:815`), each as `x -> 'k' IS NULL OR` in front of
+the type test. A key present with JSON `null` still fails the type arm (`jsonb_typeof` answers `'null'`, which genuinely
+differs from the expected word), so presence and shape are both covered by the two arms together. `COMMENT ON FUNCTION
+internal_api.submit_guest_rsvp` and the design note gain Ruling 4.2, which states the body-refusal family as a third
+thing beside the door's two answer families rather than as one more member of `unavailable`. Nothing moved: no new
+function, no new parameter, no grant, no wrapper, no exposed name, so the §8 catalogue tripwires and the 19/30/19
+census are untouched by construction.
+
+### Instruments run, and the one thing they cannot see
+
+`node q8-logs/s8-sql-shape.cjs` against the pre-edit copy (`q8-logs/v1-migration.sql`, 1242 lines) gives
+`RESULT=OK (region balance + delta verified)` with `delta CASE=0 END=0 perform=0`, `odd tags introduced=[none]` and
+`IF=46 END IF=46` before and after — four conditions widened, no region added, which is exactly what this repair should
+look like to that instrument. The file is 1253 lines now, so every `:NNN` citation pointing into it moved by +8, +9,
++10 or +11 depending on which side of the four insertions it sits, and §8's "smaller thing that nearly went out" is
+therefore still open at a larger scale: the audit itself, `supabase/tests/stage3/30_publication.sql` and both Stage 8
+batteries cite into this file, and 6f0d09a's fifteen-line insertion moved them once already. Re-deriving those
+citations by content is a separate commit and is owed before any tier of this stage is claimed.
+
+### Not checked, because nothing can be run
+
+`df -k /c` measured alongside this section reads 311,376 KB free out of 498,133,316 (100 % used). §8's figure of 698,880 KB
+had itself moved down by nearly 400 MB in the meantime, and this pass ran no gate, installed nothing, pulled no image and
+wrote no file larger than these batteries, so the reduction is not attributable to it; naming its cause is outside what
+this repository can see, and nothing on the shared disk was touched to obtain headroom. `docker version` still exits 1,
+so both chains are still unbuilt and this section is a reading result. Specifically unverified: that the four widened
+guards answer `23514` with the shape sentence, that `{}` now raises instead of returning `events_recorded: 0`, that the
+`23502` path is unreachable from any body, and that the twenty-two bodies per header state in group A's `A0` still all
+refuse for the body's own reason. Group A's probes 19-22 are the cases this repair is for, and they are written to
+fail if it is reverted.
