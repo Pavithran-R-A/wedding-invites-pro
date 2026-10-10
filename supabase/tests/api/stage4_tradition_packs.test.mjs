@@ -612,11 +612,13 @@ describe('§17 CATALOGUE', () => {
     const exposed = sqlRows(`select routine_name from information_schema.routines
                                where routine_schema = 'api' order by 1`).join(',');
     assert.deepEqual(exposed.split(','), [
-      'create_invitation_version', 'get_approval_requests', 'get_invitation_publication_state',
-      'preview_invitation', 'preview_invitation_document',
-      'publish_invitation_version', 'request_family_review', 'resolve_family_review',
-      'resolve_public_invitation', 'revoke_family_review', 'revoke_invitation_publication',
-      'rotate_invitation_token', 'submit_family_review',
+      'create_invitation_version', 'get_approval_requests', 'get_guest_invitation_state',
+      'get_invitation_publication_state', 'issue_guest_invitations', 'preview_invitation',
+      'preview_invitation_document', 'publish_invitation_version', 'request_family_review',
+      'resolve_family_review', 'resolve_guest_invitation', 'resolve_public_invitation',
+      'revoke_family_review', 'revoke_guest_invitation', 'revoke_invitation_publication',
+      'rotate_guest_invitation', 'rotate_invitation_token',
+      'submit_family_review', 'submit_guest_rsvp',
     ], 'the callable surface changed shape; the pack design has no RPC of its own, and adding one '
       + 'without a ruling is exactly what this list is for');
     // Stage 5 added the eighth name, and there is a ruling: `preview_invitation_document` is the
@@ -635,8 +637,17 @@ describe('§17 CATALOGUE', () => {
     // schema, and why `stage3_publication.test.mjs` puts only the first three in its anonymous-refusal
     // matrix. None of the five takes a pack key, a release id or a selection reference: the fifth
     // assertion below is the one that would notice if one ever did, and the SQL tier's own catalogue
-    // tripwire pins the same thirteen names (`supabase/tests/stage2/40_catalog.sql`). Their behaviour
+    // tripwire pins the same nineteen names (`supabase/tests/stage2/40_catalog.sql`). Their behaviour
     // at the transport is qualified in `supabase/tests/api/stage7_family_approval.test.mjs`.
+    //
+    // Stage 8 added the last six, under that stage's own design note. Two host verbs are keyed by the
+    // caller's wedding (`get_guest_invitation_state`, `issue_guest_invitations`), two by a household id
+    // (`revoke_guest_invitation`, `rotate_guest_invitation`), and two are guest doors
+    // (`resolve_guest_invitation`, `submit_guest_rsvp`) that carry no identity argument and read the
+    // credential from the `x-guest-token` request header (`20261009120000_stage8_guest_invitations_rsvp.sql:583`,
+    // `:840`), exactly as Stage 7's reviewer pair reads `x-review-token`. None of the six takes a pack
+    // key, a release id or a selection reference either. Their behaviour at the transport is qualified
+    // in `supabase/tests/api/stage8_guest_rsvp.test.mjs`.
     const maintenanceSchema = sqlRows(`select coalesce(string_agg(distinct n.nspname, ',' order by n.nspname), '(none)')
                                          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                                         where p.proname like '%tradition_pack%'`);
