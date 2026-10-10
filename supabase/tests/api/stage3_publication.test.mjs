@@ -11,14 +11,18 @@
 //   * `api` is the only callable surface, it is reachable, and `private` is not
 //     reachable as a profile at all — a grant the schema-cache cannot see is a grant
 //     nobody can use.
-//   * Every anonymous door — the guest resolver and, from Stage 7, the two reviewer
-//     verbs — takes no argument and reads its credential from a header. Every way of
-//     asking that could put the secret in a URL fails.
+//   * Every anonymous door reads its credential from a header, never from an argument. Three of the
+//     five — `resolve_public_invitation`, `resolve_family_review` and `resolve_guest_invitation` —
+//     take no argument at all; the two `submit_*` doors take the answer only, because an answer has
+//     to arrive somehow. Every way of asking that could put the secret in a URL fails.
 //   * The host RPCs take identity from the JWT and nowhere else, so a request cannot
 //     name another owner's wedding and get an answer that says whether it exists. From
-//     Stage 7 this list is nine names, and the three new ones are host-only in exactly
-//     the same way: a reviewer reaches an invitation through its token, never through a
-//     wedding id.
+//     Stage 8 this list is eleven names: Stage 7's three host-side review verbs and
+//     Stage 8's two wedding-keyed household verbs are host-only in exactly the same way,
+//     because a reviewer reaches an invitation through its token, never through a wedding
+//     id, and a household reaches its own through its link and nothing else. Stage 8's two
+//     verbs keyed by a household id are refused the same grant, and are probed against a
+//     real household in that stage's own file rather than with a null id here.
 //   * What a guest receives is a whitelist, and what a refusal looks like is one
 //     value, byte for byte, for every kind of bad credential.
 //
@@ -281,12 +285,25 @@ describe('§6.1 what is callable over HTTP', () => {
     }],
     ['revoke_family_review', { p_request_id: null }],
     ['get_approval_requests', { p_wedding_id: null }],
+    // Stage 8's two wedding-keyed household verbs, on the same rule again. Two more of Stage 8's
+    // host verbs are deliberately *not* here, and the reason is this matrix's own device: every
+    // argument is spelled as null so no real row is named, `revoke_guest_invitation` and
+    // `rotate_guest_invitation` are keyed by a household id, and a null household id is answered by
+    // their own "name the household" refusal before the ownership sentence this test reads — which
+    // is a different fact, and API04 exists to hold one fact. Both are qualified in
+    // `stage8_guest_rsvp.test.mjs` against a real household belonging to the other host, which is
+    // the stronger case anyway. The two doors are absent for Stage 7's reason: a guest has no
+    // account, so `resolve_guest_invitation` and `submit_guest_rsvp` are granted to `anon` like the
+    // reviewer pair above, and they are qualified as anonymous doors in that file too.
+    ['get_guest_invitation_state', { p_wedding_id: null }],
+    ['issue_guest_invitations', { p_wedding_id: null, p_household_ids: null, p_expires_at: null }],
   ];
 
   // PostgREST binds an RPC call by argument *name*, so a key the signature does not declare
   // would give a request a second reason to fail — and these two tests are each about one
   // reason. The wedding id is therefore substituted only where the verb takes one;
-  // `revoke_family_review` is keyed by the request id and gets exactly what it declares.
+  // `revoke_family_review` is keyed by the request id and Stage 8's two link verbs by the
+  // household id, so each gets exactly what it declares.
   const withWedding = (args, weddingId) => {
     const call = { ...args };
     if ('p_wedding_id' in call) call.p_wedding_id = weddingId;
@@ -325,7 +342,7 @@ describe('§6.1 what is callable over HTTP', () => {
     }
 
     // Positive control: the same anonymous client, the same profile, one function
-    // that is meant for it. Without this, nine refusals could just mean "anon cannot
+    // that is meant for it. Without this, eleven refusals could just mean "anon cannot
     // reach api at all".
     const ok = await anonApi().rpc('resolve_public_invitation');
     assert.equal(ok.error, null, `the control call was refused too: ${ok.error?.message}`);
@@ -360,7 +377,7 @@ describe('§6.1 what is callable over HTTP', () => {
         `${name} refused with something other than the ownership sentence: ${error.message}`);
     }
 
-    // Positive control beside nine refusals: the same role and profile, this caller's own
+    // Positive control beside eleven refusals: the same role and profile, this caller's own
     // wedding, answered with data. Without it the refusals could describe a surface that
     // refuses everyone.
     const { data, error } = await api('hostA').rpc('preview_invitation', {
@@ -1040,8 +1057,8 @@ describe('§6.5 taking a link down', () => {
 // `api`, which PostgREST serves and which now holds only one-line SECURITY INVOKER
 // wrappers, and `internal_api`, which it does not serve and which holds the privileged
 // SECURITY DEFINER bodies those wrappers name. Asserting them in one pass is what makes
-// the split a fact rather than a claim: the same thirteen names, in two postures, with the
-// same thirteen caller sets.
+// the split a fact rather than a claim: the same nineteen names, in two postures, with the
+// same nineteen caller sets.
 describe('§6.6 the callable catalogue is closed', () => {
   /** `grantees` lists the roles this build intends to reach the function. The owner is
    *  always allowed and is not a caller; nothing else may appear. */
@@ -1064,10 +1081,10 @@ describe('§6.6 the callable catalogue is closed', () => {
     ['preview_invitation_document', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
     // Stage 7's five family-review doors, and the reason they are five and not one: opening an
     // invitation and answering it are different acts, so they cannot share a door, and a host
-    // asking who has been invited is a third caller class again. Signatures and grantees below
-    // are read from `q7-logs/s7-census-readout-03.log`, which is a census of the whole published
-    // chain applied through the Stage 7 head — not from the migration's intent. What this map
-    // proves over HTTP is that the same thirteen names sit in the same two postures behind the
+    // asking who has been invited is a third caller class again. Signatures and grantees for the
+    // five below are read from `q7-logs/s7-census-readout-03.log`, which is a census of the whole
+    // published chain applied through the Stage 7 head — not from the migration's intent. What
+    // this map proves over HTTP is that all nineteen names sit in the same two postures behind the
     // transport, with `service_role` on none of them.
     ['get_approval_requests', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
     ['request_family_review', {
@@ -1082,6 +1099,32 @@ describe('§6.6 the callable catalogue is closed', () => {
       args: 'p_decision text, p_reviewer_label text, p_message text, p_section_key text',
       grantees: ['anon', 'authenticated'],
     }],
+    // Stage 8's six household verbs: four host operations on the caller's own wedding, and two doors
+    // a guest reaches with no account at all. Both doors read the secret from the `x-guest-token`
+    // header, and `resolve_guest_invitation` therefore takes no argument — an argument is a query
+    // string, and a household link in a query string is a household link in a proxy log, a browser
+    // history file and a referrer. `submit_guest_rsvp` carries the answer only, never the credential,
+    // for the same reason. The provenance of these six lines is weaker than the five above them and
+    // says so: Stage 7 had a live census to copy from and this head does not, so the signatures are
+    // transcribed from `supabase/migrations/20261009120000_stage8_guest_invitations_rsvp.sql` (the
+    // six bodies at `:153`, `:315`, `:373`, `:483`, `:562`, `:722`; the six paired wrappers at
+    // `:1120`-`:1170`) and the caller sets from that file's §8. Two of the renderings are forms this
+    // instrument has never printed from a live row: `p_household_ids uuid[]` and `p_answers jsonb`,
+    // both predicted from what `format_type` does rather than from a measurement. The `timestamptz`
+    // expansion in `issue_guest_invitations` is not a prediction — `publish_invitation_version` and
+    // `request_family_review` have each been measured printing the long form here, on a stack that
+    // passed. Reading those two renderings back out of `pg_get_function_identity_arguments` is an
+    // obligation the first HTTP run at this head carries, and until that run these six lines are a
+    // claim about a schema nobody has deployed.
+    ['get_guest_invitation_state', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['issue_guest_invitations', {
+      args: 'p_wedding_id uuid, p_household_ids uuid[], p_expires_at timestamp with time zone',
+      grantees: ['authenticated'],
+    }],
+    ['resolve_guest_invitation', { args: '', grantees: ['anon', 'authenticated'] }],
+    ['revoke_guest_invitation', { args: 'p_household_id uuid', grantees: ['authenticated'] }],
+    ['rotate_guest_invitation', { args: 'p_household_id uuid', grantees: ['authenticated'] }],
+    ['submit_guest_rsvp', { args: 'p_answers jsonb', grantees: ['anon', 'authenticated'] }],
   ]);
 
   // The maintenance surface Stage 5 added, named here rather than left to be discovered: the
@@ -1313,10 +1356,10 @@ describe('§6.6 the callable catalogue is closed', () => {
     // executable by a browser role. A leftover in `public` would be reachable through the
     // default profile without anybody changing a setting, and API05 only proves three
     // particular names are gone. `internal_api` is excluded from this scan on purpose:
-    // the thirteen bodies that have a wrapper beside them *are* browser-callable, by
+    // the nineteen bodies that have a wrapper beside them *are* browser-callable, by
     // necessity — PostgreSQL checks a nested call as the invoking role, so a wrapper's
     // caller must also hold EXECUTE on the body beside it. API33 is what keeps that
-    // necessary grant to exactly those thirteen paired names, API38 is what proves the
+    // necessary grant to exactly those nineteen paired names, API38 is what proves the
     // eleven maintenance bodies behind them are granted to nobody but the owner, and
     // `stage3_security.test.mjs` is what measures that none of it is reachable as an HTTP
     // profile.
