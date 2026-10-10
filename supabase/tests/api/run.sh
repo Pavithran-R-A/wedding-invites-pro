@@ -91,6 +91,11 @@ psql_q "select '  db: ' || version()"
 # `publications`) plus the version rows an ask is pinned to. A row in any of them under a wedding that
 # still exists moves no `weddings` count at all, so the pre-Stage-7 census could not see it, and an
 # over-broad teardown that cleared someone else's review rows would have looked like a pass.
+# Stage 8 adds the three stores a household invitation writes (`guest_households`,
+# `household_event_scopes`, `rsvp_responses`), which Stage 2 created and nothing until this stage ever
+# wrote through a browser door, plus a kind-filtered read of `private.access_tokens`: the total above
+# cannot tell a leaked guest credential from a leaked review credential, and the two have different
+# owners, so a run that tore down the wrong kind would still have matched it.
 # Add a store by adding one `select` line; the comparison below reads whatever names come back.
 leak_census() {
   psql_q "select 'weddings='||count(*) from public.weddings
@@ -101,8 +106,12 @@ leak_census() {
     union all select 'approval_requests='||count(*) from public.approval_requests
     union all select 'approval_feedback='||count(*) from public.approval_feedback
     union all select 'access_tokens='||count(*) from private.access_tokens
+    union all select 'guest_invitation_tokens='||count(*) from private.access_tokens where token_kind = 'guest_invitation'
     union all select 'publications='||count(*) from public.publications
-    union all select 'invitation_versions='||count(*) from public.invitation_versions"
+    union all select 'invitation_versions='||count(*) from public.invitation_versions
+    union all select 'guest_households='||count(*) from public.guest_households
+    union all select 'household_event_scopes='||count(*) from public.household_event_scopes
+    union all select 'rsvp_responses='||count(*) from public.rsvp_responses"
 }
 BASE_CENSUS=$(leak_census)
 printf '%s\n' "$BASE_CENSUS" | sed 's/^/  ..  baseline /'
