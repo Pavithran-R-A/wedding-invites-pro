@@ -65,6 +65,7 @@ import {
 } from '@/integrations/supabase/publicReview';
 import { headingOf, SECTION_LABELS } from '@/lib/invitationAuthoring';
 import { PACK_SECTION_KEYS, type PackSectionKey } from '@/lib/traditionPackContract';
+import { formatInstant } from '@/lib/instantText';
 import type { FamilyReviewDocument } from '@/lib/familyReview';
 
 const LABEL_MAX = 120;
@@ -81,21 +82,6 @@ interface SentAnswer {
   label: string;
   message: string | null;
 }
-
-/** The day-and-time text for an absolute instant. `requested_at` and `expires_at` are
- *  `timestamptz`, so they mean the same moment in Chennai and in London; printing the raw
- *  string's first ten characters would show the UTC day, which is sometimes not the reader's.
- *  A ceremony's wall-clock time is deliberately never handled this way — see
- *  `InvitationRenderer`, where moving a muhurtham across a timezone would be a lie — but a
- *  link's deadline is a deadline, and the honest rendering of a deadline is the reader's own. */
-const formatInstant = (iso: string | null): string | null => {
-  if (iso === null) return null;
-  const moment = Date.parse(iso);
-  if (!Number.isFinite(moment)) return null;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-    new Date(moment),
-  );
-};
 
 /** A section's words for someone who has never seen the platform's vocabulary. The heading the
  *  release wrote for that slot is what the reviewer is looking at on the document above, so

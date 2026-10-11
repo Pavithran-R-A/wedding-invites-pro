@@ -45,40 +45,10 @@
 import type { PublicInvitation, InvitationEvent, InvitationPerson } from '@/lib/publicInvitation';
 import type { RenderSection } from '@/lib/invitationSections';
 import { normalizeInvitationSections } from '@/lib/invitationSections';
+import { formatDate, formatTime } from '@/lib/wallClock';
 
 const FONT_NAME = /^[A-Za-z ]{1,40}$/;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
-/** `2026-11-14T07:30:00`, as `private.build_invitation_snapshot` writes it. The seconds
- *  are read and dropped rather than trusted. */
-const LOCAL_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:\d{2})?$/;
-
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-/** "14 November 2026" from the snapshot's own digits. */
-const formatDate = (stamp: string): string | null => {
-  const parts = LOCAL_TIMESTAMP.exec(stamp);
-  if (!parts) return null;
-  const [, year, month, day] = parts;
-  const monthName = MONTHS[Number(month) - 1];
-  if (!monthName) return null;
-  return `${Number(day)} ${monthName} ${year}`;
-};
-
-/** "7:30 AM". A muhurtham is written in the morning, and a guest should not have to
- *  work out whether 07:15 is before or after breakfast. */
-const formatTime = (stamp: string): string | null => {
-  const parts = LOCAL_TIMESTAMP.exec(stamp);
-  if (!parts) return null;
-  const hour = Number(parts[4]);
-  const minute = parts[5];
-  if (hour > 23) return null;
-  const suffix = hour < 12 ? 'AM' : 'PM';
-  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
-  return `${displayHour}:${minute} ${suffix}`;
-};
 
 /**
  * The lead size, in px, kept inside a range the paper can carry. The editor offers 8 to
