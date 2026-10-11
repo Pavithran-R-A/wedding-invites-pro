@@ -1,5 +1,5 @@
 // Database types for the canonical Stage 5 schema: the RLS-governed tables in `public`,
-// and the thirteen browser-callable RPCs in `api`.
+// and the nineteen browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -92,6 +92,17 @@
 // generator's own key order, optionality and `Record<PropertyKey, never>` spelling — were
 // applied. `npm run dbtypes:check` is what makes that verifiable: it compares every column of
 // every public table against the migrations that produce them.
+//
+// Stage 8 adds six RPCs and no columns, and its block below carries a label the others do not need: the
+// qualification stack was not running when it was written, so `supabase gen types` could not be executed.
+// The six entries are therefore authored from the wrapper DDL at
+// `20261009120000_stage8_guest_invitations_rsvp.sql:1120-1170` — parameter names and alphabetical order,
+// `uuid[]` as `string[]`, the `DEFAULT NULL` that makes `p_expires_at` optional, the argument-free
+// household door as `Record<PropertyKey, never>`, `jsonb` as `Json` — and a real regeneration must
+// replace them before Stage 8 is certified. Nothing else moved: Stage 8 gave no public table a column,
+// so the part of this file that `dbtypes:check` actually verifies is untouched and still generator-derived.
+// That check does not read `api.Functions`, which is why the label lives in this header rather than only
+// in a commit message — a mistake in these six entries is a diff at the next regeneration, not a red gate.
 export type Json =
   | string
   | number
@@ -117,8 +128,20 @@ export type Database = {
         Args: { p_wedding_id: string }
         Returns: Json
       }
+      get_guest_invitation_state: {
+        Args: { p_wedding_id: string }
+        Returns: Json
+      }
       get_invitation_publication_state: {
         Args: { p_wedding_id: string }
+        Returns: Json
+      }
+      issue_guest_invitations: {
+        Args: {
+          p_household_ids: string[]
+          p_expires_at?: string
+          p_wedding_id: string
+        }
         Returns: Json
       }
       preview_invitation: { Args: { p_wedding_id: string }; Returns: Json }
@@ -147,6 +170,10 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: Json
       }
+      resolve_guest_invitation: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
       resolve_public_invitation: {
         Args: Record<PropertyKey, never>
         Returns: Json
@@ -155,8 +182,16 @@ export type Database = {
         Args: { p_request_id: string }
         Returns: Json
       }
+      revoke_guest_invitation: {
+        Args: { p_household_id: string }
+        Returns: Json
+      }
       revoke_invitation_publication: {
         Args: { p_wedding_id: string }
+        Returns: Json
+      }
+      rotate_guest_invitation: {
+        Args: { p_household_id: string }
         Returns: Json
       }
       rotate_invitation_token: { Args: { p_wedding_id: string }; Returns: Json }
@@ -167,6 +202,10 @@ export type Database = {
           p_reviewer_label: string
           p_section_key: string
         }
+        Returns: Json
+      }
+      submit_guest_rsvp: {
+        Args: { p_answers: Json }
         Returns: Json
       }
     }
