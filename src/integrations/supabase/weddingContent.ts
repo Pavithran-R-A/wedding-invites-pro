@@ -411,7 +411,20 @@ export async function removeCeremony(
     .eq('id', ceremonyId)
     .eq('wedding_id', weddingId)
     .select('id');
-  if (error) return fail('the ceremony could not be removed', error);
+  if (error) {
+    // `wedding_events(wedding_id, id)` has exactly one referrer — the composite key on
+    // `household_event_scopes` (`20260925120300_stage2_guests_approvals_rsvp.sql:57`), which carries no
+    // `ON DELETE` clause and is therefore `NO ACTION` — and that scope table is in turn pinned by
+    // `rsvp_responses` (`:93-94`). So the only way this delete can earn a 23503 is a family having been
+    // invited to this ceremony, and `docs/architecture/guest-rsvp-security.md:400` requires the host be
+    // told that in words: a reply row already pins a scope row, so a ceremony that still holds a scope
+    // may well hold answers too. The code is the only part of the database's answer worth carrying; the
+    // message would name both tables.
+    if (codeOf(error) === FOREIGN_KEY_VIOLATION) {
+      return refused('families are still invited to this ceremony, and any answer they gave is kept with it, so it cannot be removed');
+    }
+    return fail('the ceremony could not be removed', error);
+  }
   if (!wroteRow(data)) return fail('the ceremony could not be removed', null);
   return { data: null, error: null };
 }

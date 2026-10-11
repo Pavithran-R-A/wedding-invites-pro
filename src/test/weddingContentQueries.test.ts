@@ -371,6 +371,35 @@ describe("ceremonies", () => {
     // supabase/tests/stage3/30_publication.sql is where that is qualified over Postgres.
   });
 
+  it("reports a ceremony a household is still invited to as an instruction, not a constraint", async () => {
+    planQueries({
+      wedding_events: [
+        databaseError(
+          'update or delete on table "wedding_events" violates foreign key constraint "household_event_scopes_wedding_id_event_id_fkey" on table "household_event_scopes"',
+          "23503",
+        ),
+      ],
+    });
+    const result = await removeCeremony(WEDDING, CEREMONY);
+    // The one referrer of `wedding_events(wedding_id, id)` is the household's scope key
+    // (`20260925120300_stage2_guests_approvals_rsvp.sql:57`), and Stage 8 makes it reachable from the
+    // host's own screen: a family with a link and an answer is holding the ceremony. The sentence has
+    // to say whose removal the host owes, because "delete the ceremony" is the control that just failed.
+    expect(result).toEqual({
+      data: null,
+      error: "families are still invited to this ceremony, and any answer they gave is kept with it, so it cannot be removed",
+    });
+    expect(result.error ?? "").not.toMatch(/foreign key|household_event_scopes|rsvp_responses|constraint|23503/);
+  });
+
+  it("keeps every other ceremony removal failure generic", async () => {
+    planQueries({ wedding_events: [databaseError("permission denied for table wedding_events", "42501")] });
+    await expect(removeCeremony(WEDDING, CEREMONY)).resolves.toEqual({
+      data: null,
+      error: "the ceremony could not be removed",
+    });
+  });
+
   it("reports a ceremony that changed no row as unsaved", async () => {
     planQueries({ wedding_events: [emptyResult(), rowReturned([]), rowReturned([])] });
     await expect(updateCeremony(WEDDING, CEREMONY, ceremonyDraft())).resolves.toEqual({
