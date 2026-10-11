@@ -521,7 +521,7 @@ Household CRUD, event-scope editing, manual RSVP recording, and the host's reply
 functions. They are the three tables under the twelve owner policies that already exist — four each,
 `20260925120500...:222-244` for households, `:246-268` for scopes, `:270-299` for replies — reached from
 one new adapter module (`src/integrations/supabase/`), which is what `canonical-table-read-outside-the-adapter`
-(`scripts/check-product-contract.mjs:238-244`) is built to keep in one place. The thirtieth reason for
+(`scripts/check-product-contract.mjs:252-263`) is built to keep in one place. The thirtieth reason for
 the split is the one Stage 7 recorded about its own minting surface: the smaller the set of paths that
 can write a credential table, the shorter the list a reader must trust
 (`docs/architecture/domain-model.md:402` — "the whole minting surface" is enumerable because it is).
@@ -571,10 +571,37 @@ household-scoped table is reachable by a browser role except under an owner poli
 | P4 | A guest link never reveals approval requests, feedback, or the couple's people list | the overlay is built from household rows only; the invitation half is the same DTO the wedding link renders, which already omits them (`20260926130000...:273`) | SQL, HTTP |
 | P5 | RSVP details are written by the guest or by the host's own hand, never conflated | `response_source` pinned in the policy WITH CHECK (`20260925120500...:278-294`) and set only inside the DEFINER body | SQL, HTTP, unit |
 | P6 | A credential appears in a response exactly once, at the call that minted it | `path` returned only when minted; `get_guest_invitation_state` names no token column | SQL, HTTP, browser |
-| P7 | The secret never reaches a URL, a query argument, a stored key, or a log line | zero-argument resolver + header transport, pinned by two contract rules and their fixtures (`check-product-contract.mjs:204-225`); `x-guest-token` joins the pair as a third rule | unit, HTTP, browser (network observation) |
-| P8 | Nothing about a guest is inferred into anything ceremonial | `guest_households` has no ceremony-bearing column; the projection cannot name a section it was not given; the checker's Stage 4/5 identity rules already forbid a derivation from name/place/language to a tradition (`check-product-contract.mjs:269-355`) | unit, checker self-test |
+| P7 | The secret never reaches an **API** request URL, a function argument, a stored key, or a log line — the paragraph under this table states the URL it *does* reach | zero-argument resolver + header transport. Stage 3's wedding door and Stage 7's review door are pinned by two contract rules (`check-product-contract.mjs:204-225`) and this door is the third of the three (`household-door-called-with-arguments`, `:226-239`), which sends `x-guest-token` | unit, HTTP, browser (network observation) |
+| P8 | Nothing about a guest is inferred into anything ceremonial | `guest_households` has no ceremony-bearing column; the projection cannot name a section it was not given; the checker's Stage 4/5 identity rules already forbid a derivation from name/place/language to a tradition (`check-product-contract.mjs:288-373`) | unit, checker self-test |
 | P9 | A guest's own data is the only personal data its page can hold | overlay fields enumerated in §5 and asserted key-by-key; a new key in the response is a battery failure | HTTP |
 | P10 | A withdrawn or republished invitation refuses on both doors at once | ruling 8.1's takedown widening, plus `revoked_at`/`status` predicates in the one liveness join | SQL, HTTP |
+
+[MEASURED CORRECTION, 2026-10-11: P7 was written as "the secret never reaches a URL", and that sentence
+is false as stated — this stage's own §11 journey and `src/lib/guestInvitation.ts:78-81` contradict it on
+every run, because the product mints the household's address as `/g/<credential>` and
+`src/pages/GuestDoor.tsx:408` reads the credential back out of that route parameter (`const { token } = useParams…`).
+The correction narrows the claim to the hop the mechanism actually governs, in the words Stage 3 already used for the
+wedding link: "The **browser address** is still `/i/<token>` — a shareable link has to carry its own
+credential, and there is no other channel to the guest" (`docs/architecture/public-invitation-security.md:85-89`).
+What is eliminated here is the *API* hop repeating the secret, which is a real and measured difference:
+`api.resolve_guest_invitation` takes zero arguments, so no request line of any call to PostgREST carries
+it, whereas a parameter-taking function would have accepted `GET /rest/v1/rpc/…?p_raw_token=…` (§4). The
+residual is the same size as the wedding link's and is disclosed rather than argued away: the household's
+credential sits in that guest's **browser history**, in any **same-origin log that records request
+paths**, and in **hosting/CDN request logs** for `/g/<token>`, which is the limit Stage 3 stated for its
+own path (`public-invitation-security.md:109-113`, restated at `docs/audits/stage-3-public-invitation.md:1024`
+and `:1527`) and the limit ADR 0006 recorded as a design cost at
+`docs/architecture/decisions/0006-database-rpc-publication-boundary.md:63`. A referrer policy changes what
+leaves the browser toward other origins; it cannot unwrite a URL from the places a URL is written.
+Consequently two things follow rather than one. The household link is a bearer credential in the strictest
+sense — anyone holding that guest's history or the hosting logs holds one household's view, which is the
+blast radius §10 already states — and the Stage 8 browser tier must re-measure the `/g/` page's outgoing
+requests for this shape rather than inherit Stage 3's `no measured request carried the credential in
+Referer` (`public-invitation-security.md:101`), because that measurement was taken of a different route
+and different page. **That re-measurement is not yet run:** the browser tier needs the local stack and a
+production build, and both were blocked for the whole of this segment (Docker engine not running, engine
+start human-only). P7 is therefore recorded as unit- and HTTP-qualified on the API hop and unmeasured on
+the guest page's own request surface, not as a passed invariant.]
 
 ## 10. Abuse resistance, stated with its limits
 
@@ -597,11 +624,20 @@ P3 and the cap are for. Stating this as a limitation rather than presenting the 
 is required by the same honesty rule Stage 7 closed on: possession of a link is not verified human
 identity.
 
+One further limit is not about missing machinery but about where a bearer credential has to live, and it
+is stated here so §9's P7 cannot be read as a clean claim: the household's address is `/g/<credential>`,
+so the secret is in that guest's browser history and in any log that records request paths, exactly as the
+wedding link's is (§9's correction of 2026-10-11, citing `public-invitation-security.md:85-89`). Rotating
+the link retires the old secret at the door but does not remove it from those places, so a withdrawn
+household's past address stops *resolving* while remaining *legible as a string* to whoever kept it. No
+mechanism in this repository — and none a static frontend can have — takes it back.
+
 ## 11. Mobile-first and accessible, as a contract rather than a wish
 
 Guests open this link in a WhatsApp or Chrome in-app browser on a phone, often one-handed, often outdoors.
 The requirements Stage 3 and Stage 6 established for that same page are inherited rather than restated:
-the guest route mounts no auth provider (`src/App.tsx:84` and its Stage 3 repair), the page renders the
+the guest route mounts no auth provider (`src/App.tsx:81-85` carries Stage 3's repair and the wedding
+route, and the household's own `/g/:token` sits beside it at `:95`), the page renders the
 same `InvitationRenderer` as the host preview so what the couple checked is what the guest reads, tap
 targets are at least 44 px (Stage 6 closed 18 sub-44 px targets and the browser tier re-measures them),
 and the sweep runs at Android-representative widths — 320, 360, 393, 430 — on the shipped `dist/`, not on
@@ -616,7 +652,7 @@ text is not a refusal the guest can find; submitting moves focus to the confirma
 it under a vanished button; a slow door shows a disabled-in-form state rather than a dead button; and
 `prefers-reduced-motion` is respected by the inherited token set. The greeting is rendered as **text**:
 `salutation` is host-authored free text, so a family's name containing `<` must appear as `<`, and the
-markup-sink rule (`check-product-contract.mjs:417-432`) already fails a build that writes HTML — a unit
+markup-sink rule (`check-product-contract.mjs:436-452`) already fails a build that writes HTML — a unit
 test puts a hostile salutation through the shape layer and asserts it neither becomes markup nor is
 dropped.
 

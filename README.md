@@ -510,8 +510,9 @@ npm audit
 npm audit --omit=dev --audit-level=high
 ```
 
-`npm run product:check` is the contract guard: **29 rules** over the active surfaces this tree scans
-(**186 files** at `8e62c38`, from `q6-logs/s6-head-cert-8e62c38.log`; the count has moved three times
+`npm run product:check` is the contract guard: **31 rules** over the active surfaces this tree scans
+(**213 files** at this Stage 8 head, from `q8-logs/s8-productcheck6.log`; **186 files** at `8e62c38`,
+from `q6-logs/s6-head-cert-8e62c38.log`; the count has moved three times
 since the rule list was first written — once for the storage adapter and the host's file panel, once
 for the adapter's own unit battery, and once for `8e62c38`'s panel tap-target test, which is the file
 that took it from the 185 every earlier certification printed) — retired brand names, fabricated
@@ -519,8 +520,12 @@ social proof and per-guest pricing
 language, the retired scaffold vocabulary, which tables may be named outside the data adapter, the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets
-machine-assisted draft text read as though it had been reviewed, and one rule about writing HTML into
-the DOM. Nothing was removed to get from 23 to 29. Three of the five Stage 5 rules deliberately reach
+machine-assisted draft text read as though it had been reviewed, the three public-door rules that
+refuse a credential passed as an RPC argument (`guest-door-called-with-arguments`,
+`reviewer-door-called-with-arguments`, and Stage 8's `household-door-called-with-arguments`), and one
+rule about writing HTML into
+the DOM. Nothing was removed to get from 23 to 31 (`git show 8e62c38` diffs to the current list as
+**+2 / −0**: `reviewer-door-called-with-arguments` in Stage 7 and `household-door-called-with-arguments` in Stage 8). Three of the five Stage 5 rules deliberately reach
 into `docs/product/` and `docs/content-review/`, because this matrix is itself under the rule that
 forbids calling the draft candidate shippable; the last of the three (`main-landmark-absence-claim`)
 was added while assembling the Stage 5 report, after that report's own truth pass had left a stale
