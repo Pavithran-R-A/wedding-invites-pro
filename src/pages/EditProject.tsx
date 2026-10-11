@@ -86,6 +86,8 @@ import TraditionPackPanel from '@/components/invitation/TraditionPackPanel';
 import WeddingAssetsPanel from '@/components/invitation/WeddingAssetsPanel';
 import FamilyReviewPanel from '@/components/invitation/FamilyReviewPanel';
 import PublicationPanel from '@/components/invitation/PublicationPanel';
+import GuestInvitationPanel from '@/components/invitation/GuestInvitationPanel';
+import GuestRepliesPanel from '@/components/invitation/GuestRepliesPanel';
 
 interface EditorState {
   font: string;
@@ -886,6 +888,18 @@ const EditProject = () => {
             onRotate={handleRotate}
             onRevoke={handleRevoke}
           />
+
+          <Separator />
+
+          {/* After publication because that is the order the product works in: a link needs a published
+              version to point at, and a household's own address points at the same document the wedding
+              link does. Both panels read only this wedding's rows, through the owner policies and the
+              household-pinned `api` verbs — see `docs/architecture/guest-rsvp-security.md` §7 and §8. */}
+          <GuestInvitationPanel weddingId={id} />
+
+          <Separator />
+
+          <GuestRepliesPanel weddingId={id} />
         </aside>
       </main>
     </div>
