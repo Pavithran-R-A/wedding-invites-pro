@@ -1302,5 +1302,97 @@ asked for anything genuinely different. The one thing that *did* change the repo
 which came from this stage's own scratch script rather than from any injected instruction — recorded separately for that
 reason, and not folded into this section.
 
+## 15. Head certification: the nine §4 gates re-run at the pushed head, on a tree this stage did not install
+
+`91a5c956ebc21fc6d7577d1ed4accfe95f6f3cc6` is the head this section certifies. It was read back off the remote two ways
+before anything was run, because a local `origin/*` reference is stale by construction in this clone: `git ls-remote
+origin refs/heads/stage8/guest-rsvp` and `gh api repos/Pavithran-R-A/wedding-invites-pro/git/refs/heads/stage8/guest-rsvp
+--jq .object.sha` both returned that SHA, equal to local HEAD, and `refs/heads/main` still reads
+`333803f85293050d7282a55af5ceda67caed11c0` — the branch was pushed branch-only and `main` was never touched.
+
+The battery is scripted (`q8-logs/s8-head-cert-run.sh`) for one reason: this stage has already published a capture whose
+exit codes came from `tail` instead of from the gate. Each gate here writes its own output file and prints `exit=$?` on
+the line after the gate returns, with no pipe between them. Full capture `q8-logs/s8-headcert-91a5c5-stdout.txt` plus the
+nine per-gate files (`…log.lint.log`, `…log.test.log`, …). The two names differ because the runner was invoked with a
+shell variable whose short form (`91a5c5`) was mistyped into the stdout path while the per-gate files were built from the
+full head SHA — so the battery's summary stream and its gate-by-gate streams do not share a stem. Nothing was renamed to
+tidy that up: renaming a capture would break the path this section cites, and the mismatch is cosmetic, not a question of
+which run produced which bytes. The prelude printed, not assumed: `node v24.21.0`, `npm 11.19.0`,
+`df_kb_free=13,429,416`.
+
+| Gate | Own exit | What it printed |
+| --- | --- | --- |
+| `npm run lint` | `exit=0` | **0 errors, 9 warnings**, every one a `react-refresh/only-export-components` note in a file this stage did not touch (`AuthProvider.tsx`, `ContentEditor.tsx`, and seven `src/components/ui/` primitives) |
+| `npm run typecheck` | `exit=0` | clean |
+| `npm run dbtypes:check` | `exit=0` | `Database contract OK — 22 migration file(s). schema: 19 public + 10 non-client table(s); client types: 19 table(s); data layer: 45 query column group(s) reconciled, 0 finding(s).` |
+| `npm run product:check` | `exit=0` | `Product contract OK — 213 active file(s) scanned, 0 violation(s).` |
+| `node scripts/check-product-contract.mjs --self-test` | `exit=0` | `Product contract self-test OK — 31 rule(s) verified.` |
+| `npm test` | `exit=0` | **Test Files 42 passed (42) · Tests 765 passed (765)** in 126.31 s. The Stage 8 suites re-count inside this run rather than from the previous one: `guestRepliesPanel` **31**, `guestInvitationPanel` **27**, `guestDoorPage` **30**, `guestInvitationShape` **45**, `guestDoorTransport` **22**, and the host adapter's own transport battery `guestInvitationsTransport` **34** |
+| `npm run build` | `exit=0` | `✓ built in 1m 12s`. Route chunks measured on these bytes: `GuestDoor-CHVKsaUZ.js` **10.35 kB / 4.05 kB gzip** — the guest door ships as its own lazy chunk, so a host who never opens a household page does not download it — beside `guestInvitation-BSUyLe0o.js` 4.01 / 1.41, `EditProject-B_rU-CVo.js` 148.98 / 40.98, `index-CFPUdCYd.js` 577.95 / 172.44, `index-Btp1A1On.css` 69.34 / 12.28 |
+| `npm audit --omit=dev --audit-level=high` | `exit=0` | `found 0 vulnerabilities` |
+| `git diff --check` | `exit=0` | no output |
+
+**One disclosure travels with the whole table.** The tree these gates ran on is not one this stage installed. The
+discriminator is the symlink form, printed by the runner's prelude: `node_modules/vite` resolves to
+`.pnpm/vite@6.4.3_@types+node@22.20.5_jiti@1.21.7/node_modules/vite`, and both installer markers
+(`node_modules/.modules.yaml` and `node_modules/.package-lock.json`) exist at once. This is not a new observation about
+this machine: the same fingerprint is recorded at `docs/audits/stage-2-domain-database.md:578-589` (an install from
+outside the stage, timed between two passes), `stage-4-tradition-pack-foundation.md:1545-1548` and `:1622-1627`,
+`stage-6-storage-assets.md:343-347` and `:930`, and `stage-7-family-approval.md:719`. Stage 4's `:1622` is the sentence
+that settled the method this section uses — check the marker you are claiming, `node_modules/.package-lock.json` for npm,
+`node_modules/.modules.yaml` for pnpm — because both can be present at once and only the symlink form says which one
+owns the tree. This stage ran no installer and did not repair the tree: forcing an npm-shaped one to make a disclosure
+cleaner would be a larger unrequested action than recording the fact. The numbers above are therefore *this tree's*
+numbers, and re-deriving them needs only the same nine commands.
+
+**Why this section does not re-run the battery for itself.** The commit that carries §15 touches this file and the
+guest-household row of the readiness matrix, and nothing that any gate reads for behaviour; the checker's own scan count
+stays 213 because the matrix and this audit are already inside its document scope. That is the same docs-only-delta rule
+Stages 6 and 7 settled on after noticing that writing another certification section for each certification commit never
+terminates. The three doc-sensitive gates were re-run anyway at this head, each with its own `exit=0`
+(`q8-logs/s8-docgates-recheck3.log`: `product:check` 213 files / 0 violations, `--self-test` 31 rules, `git diff --check`
+clean).
+
+**A citation this section wrote about itself, and what the capture actually holds.** A draft of the paragraph above claimed
+that recheck3 re-confirmed the matrix's Stage 8 rows as single physical lines with four pipes each; that clause is not in
+the committed version, because §15 reaches a commit for the first time with this push and the claim was retracted while the
+section was still only in the working tree. Re-opening the file to check it, recheck3 holds three gate exits and their
+one-line verdicts and nothing else — no row-shape output at all. The claim came from a row check that was run in the
+session and never captured, so §15 was citing a file for evidence the file does not contain: the same failure mode this
+stage has been repairing everywhere else, arriving in the section whose subject is evidence discipline.
+`grep -al "pipes"` across `q8-logs/` returns exactly two files, `s8-docgates-recheck4.log` and `s8-docgates-recheck5.log`,
+and they are the two recorded below.
+
+**The row the re-taken check then caught, and its repair.** The readiness matrix is a GFM table, so each row must be one
+physical line: two interior pipes for the three columns, plus the two delimiting ones, equals four. Adding the host
+adapter's transport count to the guest-household row split it across three lines, and recheck4 printed exactly that
+— `222 pipes=3`, `223 pipes=0`, `224 pipes=1`, with the rows after it at `pipes=4`. The break was caught by the shape check
+folded into the same command as those gates, and it sat in the working tree while the paragraph above was being written;
+nothing broken was committed. Folding the two extra lines back into one gives recheck5: `product:check` **exit=0** / 213
+files / 0 violations, `--self-test` **exit=0** / 31 rules, `git diff --check` **exit=0**, and rows 222–226 each `pipes=4`.
+That capture's `git diff --check` block is 126 bytes rather than empty. The gate's own exit is still 0 and the only text is
+`warning: in the working copy of 'docs/audits/stage-8-guest-rsvp.md', LF will be replaced by CRLF the next time Git touches
+it`, on stderr, from the `core.autocrlf=true` that this machine's own
+`C:/Program Files/Git/etc/gitconfig` sets — a property of this Windows clone that this stage neither introduced nor
+changed, and not a whitespace finding, which `--check` would have reported as one and exited non-zero on. It is also why
+the nine-gate table above can honestly say "no output" for that gate while this paragraph prints a warning: at `91a5c95`
+the tree was clean, so git had no modified file to normalise and said nothing.
+
+These two paragraphs are the last words §15 changes, so the three gates were run one final time over exactly the bytes that
+carry them, in the same log as the commit (`q8-logs/s8-commit-8.log`), rather than given a capture of their own — which is
+how this section avoids re-certifying itself into the ground.
+
+**What is still not run, unchanged by this section.** `supabase/tests/stage8/80_guest_invitation_links.sql`,
+`90_guest_rsvp.sql` and their `run.sh`; `supabase/tests/api/stage8_guest_rsvp.test.mjs`; the Stage 2–7 historical chains
+at this head; and every browser, accessibility, mobile and network observation §7 asks for. All of them need
+`localvivaahvarnam`, whose engine probe was re-taken for this section too: `docker version --format` **exit=1** with
+`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine` (`q8-logs/s8-engine-probe-03.log`).
+The exit on that line is the gate's own. An earlier probe in the same segment printed `docker_exit=0` beside the same
+failure text, because it piped `docker version` through `head` and read `head` back; that reading reached no capture — it
+lived only in the session — so it is recorded here as a discarded instrument output rather than cited as a file, and the
+0 is not evidence of anything. Disk is not the blocker: 13,429,416 KB free at the battery's start, against §7's
+1,048,576 KB floor.
+Starting the engine remains a human action, so the Stage 8 tiers stay labelled authored-not-run and no tier is green.
+
 
 
