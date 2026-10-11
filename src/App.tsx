@@ -21,6 +21,7 @@ const ConfigureProject = lazy(() => import("./pages/ConfigureProject"));
 const EditProject = lazy(() => import("./pages/EditProject"));
 const PublicInvitation = lazy(() => import("./pages/PublicInvitation"));
 const FamilyReview = lazy(() => import("./pages/FamilyReview"));
+const GuestDoor = lazy(() => import("./pages/GuestDoor"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const TermsOfService = lazy(() => import("./pages/TermsOfService"));
 const CookiePolicy = lazy(() => import("./pages/CookiePolicy"));
@@ -87,6 +88,11 @@ const App = () => (
                 chunk is separate, because a relative who came to approve an invitation has no
                 more use of the editor than a guest does. */}
             <Route path="/r/:token" element={<FamilyReview />} />
+            {/* Stage 8's household is a guest of the same third kind: one credential in one header, no
+                account, nothing to sign in to. Same reason, same placement — and its own chunk, because a
+                family came to read an invitation and answer it, not to see an editor, a dashboard or a
+                sign-in form. */}
+            <Route path="/g/:token" element={<GuestDoor />} />
             <Route path="/*" element={<AccountApplication />} />
           </Routes>
         </Suspense>
