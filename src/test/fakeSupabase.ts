@@ -3,27 +3,48 @@
 // in Postgres and is qualified by supabase/tests/stage2/. What this proves is the client
 // half of the contract — which table is named, which columns are read, and what the adapter
 // does when the response is an error or an absent row.
+//
+// `schema('api').rpc(...)` is recorded alongside the table steps because four of the project's
+// verbs touch credentials only through an `api` function, and the thing worth asserting about
+// those calls is their argument list: a bearer secret in an argument is a bearer secret in a query
+// string. A planned response may be queued under a function name exactly as under a table name.
 
 export type FakeStep = { table: string; method: string; args: readonly unknown[] };
+
+export type FakeRpcCall = { schema: string; fn: string; args: Record<string, unknown> };
 
 export type FakeResponse = { data: unknown; error: unknown };
 
 type Plan = Record<string, FakeResponse[]>;
 
-const state: { steps: FakeStep[]; plan: Plan } = {
+const state: { steps: FakeStep[]; rpcCalls: FakeRpcCall[]; plan: Plan } = {
   steps: [],
+  rpcCalls: [],
   plan: {},
 };
 
-/** Queue the responses each table should hand back, in call order. */
+/** Queue the responses each table or function should hand back, in call order. */
 export function planQueries(plan: Plan): void {
   state.plan = plan;
   state.steps = [];
+  state.rpcCalls = [];
 }
 
 /** Every step recorded since the last `planQueries`, in call order. */
 export function recordedSteps(): FakeStep[] {
   return state.steps.map((step) => ({ ...step }));
+}
+
+/** Every `rpc()` recorded since the last `planQueries`, in call order. */
+export function recordedRpc(): FakeRpcCall[] {
+  return state.rpcCalls.map((call) => ({ ...call }));
+}
+
+/** The arguments one function was called with, refusing to answer for a call that never happened. */
+export function rpcArgsOf(fn: string): Record<string, unknown> {
+  const call = state.rpcCalls.find((item) => item.fn === fn);
+  if (!call) throw new Error(`api.${fn}() was not called`);
+  return call.args;
 }
 
 /** Steps against one table, in call order. */
@@ -44,6 +65,17 @@ export function payloadOf(table: string, method: string): Record<string, unknown
     throw new Error(`${table}.${method}() was not called with an object payload`);
   }
   return value as Record<string, unknown>;
+}
+
+/** Drain one name's queue. A table read and an `api` function call are planned the same way because
+ *  both are one named thing the adapter asked about. */
+function settleFor(key: string, described: string): FakeResponse {
+  const queue = state.plan[key] ?? [];
+  const next = queue.shift();
+  if (next) return next;
+  // An unplanned read is not a silent success: returning `[]` would let a test pass by
+  // proving nothing about the response the adapter was written to handle.
+  throw new Error(`no planned response for ${described}`);
 }
 
 class FakeChain {
@@ -95,12 +127,7 @@ class FakeChain {
   }
 
   private settle(): FakeResponse {
-    const queue = state.plan[this.table] ?? [];
-    const next = queue.shift();
-    if (next) return next;
-    // An unplanned read is not a silent success: returning `[]` would let a test pass by
-    // proving nothing about the response the adapter was written to handle.
-    throw new Error(`no planned response for table "${this.table}"`);
+    return settleFor(this.table, `table "${this.table}"`);
   }
 
   then<TResult1 = FakeResponse, TResult2 = never>(
@@ -115,9 +142,25 @@ class FakeChain {
   }
 }
 
+/** `schema(name)` answers with something that can call a function, which is the only way this
+ *  project's credential-touching verbs reach the database. */
+class FakeApi {
+  constructor(private readonly schemaName: string) {}
+
+  rpc(fn: string, args: Record<string, unknown> = {}): Promise<FakeResponse> {
+    state.rpcCalls.push({ schema: this.schemaName, fn, args });
+    // Deferred for the same reason as a table read, and unplanned for the same consequence.
+    return Promise.resolve().then(() => settleFor(fn, `function "${fn}"`));
+  }
+}
+
 export const fakeSupabase = {
   from(table: string): FakeChain {
     return new FakeChain(table).from(table);
+  },
+
+  schema(name: string): FakeApi {
+    return new FakeApi(name);
   },
 };
 
