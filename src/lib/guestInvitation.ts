@@ -41,7 +41,7 @@ const GUEST_PATH_PREFIX = '/g/';
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 
 /** The two answers a household may give about an event, closed by the column's CHECK at
- *  `20260925120300_stage2_guests_approvals_rsvp.sql:76`. A form offers these; a parse accepts any
+ *  `20260925120300_stage2_guests_approvals_rsvp.sql:78`. A form offers these; a parse accepts any
  *  string, because a word this build has not read is still the family's answer. */
 export const ATTENDANCE_LABELS = ['attending', 'declined'] as const;
 
@@ -53,7 +53,7 @@ export const SEND_STATUSES = ['issued', 'already_live'] as const;
 export const LINK_STATES = ['never_issued', 'live', 'expired', 'revoked'] as const;
 
 /**
- * The three reasons `api.submit_guest_rsvp` can refuse a *well-shaped* body (`…sql:726-728`).
+ * The three reasons `api.submit_guest_rsvp` can refuse a *well-shaped* body (`…sql:727-729`).
  *
  * They are not one family. `unavailable` covers every credential, scope and publication state —
  * revoked, expired, withdrawn publication, an event the household was never shown — and is deliberate

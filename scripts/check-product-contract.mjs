@@ -224,19 +224,38 @@ export const RULES = [
     scope: ["src/"],
   },
   {
+    id: "household-door-called-with-arguments",
+    // Stage 8's third public door, and the same shape question again: `api.resolve_guest_invitation` is
+    // argument-free so a household's credential can only arrive in a header (`…stage8_guest_invitations_rsvp.sql:583`
+    // reads it from `request.headers`, and the wrapper at `:1156-1162` takes no parameter to put it in).
+    // A family's link is held by a whole household — a shared phone, an aunt who forwarded it — so a URL
+    // form would be one more copy of it in every log and history between here and the wedding.
+    // No `exclude`, for the reason the other two rules give: the module that must not write this shape
+    // is the one that owns the call.
+    pattern: /\.rpc\(\s*['"]resolve_guest_invitation['"]\s*,/g,
+    message: "passes arguments to the household resolver, which would put a guest credential in a URL",
+    fix: "call `rpc('resolve_guest_invitation')` with no arguments and send the credential in the x-guest-token header",
+    scope: ["src/"],
+  },
+  {
     id: "ad-hoc-supabase-client",
     // The guest page must hold no session and write nothing to storage; the signed-in app
     // must hold exactly one. A client constructed in a component is a third kind of
     // caller, and its auth/storage defaults are nobody's audited choice.
     pattern: /createClient\s*[(<]/g,
     message: "constructs a Supabase client outside the integration layer",
-    fix: "read through src/integrations/supabase/ — publicInvitation.ts and publicReview.ts are the app's only two anonymous clients, one per public door",
+    fix: "read through src/integrations/supabase/ — publicInvitation.ts, publicReview.ts and guestDoor.ts are the app's only three anonymous clients, one per public door",
     scope: ["src/"],
     exclude: ["src/integrations/supabase/", "src/test/"],
   },
   {
     id: "canonical-table-read-outside-the-adapter",
-    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|wedding_assets|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases|approval_requests|approval_feedback)['"]\s*\)/g,
+    // Stage 8 adds the three tables a host edits directly, and they belong in this list for the reason
+    // the others do: `guest_households` carries `host_notes`, `household_event_scopes` decides which
+    // ceremonies a family is shown, and `rsvp_responses` is a guest's private answer. A page reading one
+    // of them with `.from()` picks its own column list and its own error prose, and the column contract
+    // this file's sibling checker reconciles stops covering it.
+    pattern: /\.from\(\s*['"](?:weddings|wedding_people|venues|wedding_events|wedding_assets|invitation_drafts|invitation_versions|publications|design_templates|tradition_packs|tradition_pack_releases|approval_requests|approval_feedback|guest_households|household_event_scopes|rsvp_responses)['"]\s*\)/g,
     message: "queries a canonical wedding table outside the adapter",
     fix: "add the read to src/integrations/supabase/ so its columns, errors and refusals stay in one place",
     scope: ["src/"],
@@ -447,6 +466,21 @@ export const SHIPPED_REVIEWER_COPY = [
   "changed nothing on that version — only the family's own editor does that",
 ];
 
+/** Copy the household door prints today, quoted verbatim from `src/integrations/supabase/guestDoor.ts`,
+ *  on the same terms as the reviewer list above and for the same reason: a family's own refusal has to
+ *  stay printable, and the only witness that it is the product's sentence rather than a plausible
+ *  rewording of one is that it appears in the shipped source. The three raised sentences are here
+ *  because this file passes them through as the guest's own message, which makes them app copy. */
+export const SHIPPED_GUEST_DOOR_COPY = [
+  "This invitation link is not available.",
+  "Your reply could not be recorded.",
+  "That is more guests than this invitation is for. Ask the host if more can be added.",
+  "The couple is not asking that question on this invitation yet.",
+  "the answers submitted are not in the shape this invitation records",
+  "too many answers in one submission",
+  "the same event was answered twice",
+];
+
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
 export const MUST_NOT_MATCH = [
   "Razorpay",
@@ -504,6 +538,10 @@ export const MUST_NOT_MATCH = [
   // a verified person, and saying so must not become a finding.
   `const { data } = await client.schema('api').rpc('resolve_family_review');`,
   ...SHIPPED_REVIEWER_COPY,
+  // Stage 8's third door, on the same terms: the argument-free household call is the shape its rule
+  // exists to permit, and the four sentences are the refusals a family is actually shown.
+  `const { data } = await client.schema('api').rpc('resolve_guest_invitation');`,
+  ...SHIPPED_GUEST_DOOR_COPY,
 ];
 
 export function isScannedPath(relativePath) {
@@ -594,12 +632,16 @@ export function selfTest() {
     "legacy-table-as-current-terminology": `// each row of the projects table is a customer`,
     "guest-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_public_invitation', { raw_token: token });`,
     "reviewer-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_family_review', { p_token: token });`,
+    "household-door-called-with-arguments": `const { data } = await client.schema('api').rpc('resolve_guest_invitation', { p_raw_token: token });`,
     "ad-hoc-supabase-client": `const supabase = createClient(url, anonKey);`,
     "canonical-table-read-outside-the-adapter": [
       `const { data } = await supabase.from('weddings').select('*');`,
       `const { data } = await supabase.from('wedding_assets').select('*');`,
       `const { data } = await supabase.from('approval_requests').select('status');`,
       `const { data } = await supabase.from('approval_feedback').select('message');`,
+      `const { data } = await supabase.from('guest_households').select('host_notes');`,
+      `const { data } = await supabase.from('household_event_scopes').select('event_id');`,
+      `const { data } = await supabase.from('rsvp_responses').select('party_size');`,
     ],
     "service-role-key-in-browser-code": `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
     "tradition-pack-identity-branch": `if (option.packKey === "tamil_english_foundation") showMuhurthamBlock();`,
@@ -725,6 +767,39 @@ export function selfTest() {
   for (const path of ["src/integrations/supabase/publicReview.ts", "src/pages/FamilyReview.tsx", "src/lib/familyReview.ts"]) {
     if (!scanContent(path, reviewerArgumentForm).some((v) => v.rule === "reviewer-door-called-with-arguments")) {
       failures.push(`the reviewer argument form was not a finding at ${path}`);
+    }
+  }
+
+  // Stage 8's household door is the third one, so the same three questions are asked of it rather than
+  // inherited from the other two: the sanctioned module stays clean at its own path, a page writing the
+  // identical shapes is still a finding, and the argument form is a finding *including* in `guestDoor.ts`
+  // itself. The last of these is the one that matters most here, because a household credential is the
+  // most-forwarded secret in this product — an invitation sent to a family reaches whoever they show it
+  // to — so a query-string form is the mistake a well-meaning repair would make first.
+  const householdShapes = [
+    `const { data } = await client.schema('api').rpc('resolve_guest_invitation');`,
+    `const client = createClient<Database>(url, key, { auth: { persistSession: false } });`,
+    `const { data } = await supabase.from('guest_households').select('display_name');`,
+    `const { data } = await supabase.from('rsvp_responses').select('party_size');`,
+  ].join("\n");
+  const sanctionedHousehold = scanContent("src/integrations/supabase/guestDoor.ts", householdShapes);
+  if (sanctionedHousehold.length > 0) {
+    failures.push(
+      `the household adapter's own file was flagged: ${sanctionedHousehold.map((v) => v.rule).join(", ")}`,
+    );
+  }
+  const unsanctionedHousehold = scanContent("src/pages/GuestDoor.tsx", householdShapes);
+  // A set rather than the list the other two blocks use, because this fixture deliberately names two of
+  // the Stage 8 tables — a page that reads `guest_households` and one that reads `rsvp_responses` are the
+  // same mistake, and the question here is which rules fire, not how many times.
+  const unsanctionedHouseholdRules = [...new Set(unsanctionedHousehold.map((v) => v.rule))].sort();
+  if (unsanctionedHouseholdRules.join(",") !== "ad-hoc-supabase-client,canonical-table-read-outside-the-adapter") {
+    failures.push(`a household page writing the same shapes produced ${unsanctionedHouseholdRules.join(", ") || "nothing"}`);
+  }
+  const householdArgumentForm = `const { data } = await client.schema('api').rpc('resolve_guest_invitation', { p_raw_token: token });`;
+  for (const path of ["src/integrations/supabase/guestDoor.ts", "src/pages/GuestDoor.tsx", "src/lib/guestInvitation.ts"]) {
+    if (!scanContent(path, householdArgumentForm).some((v) => v.rule === "household-door-called-with-arguments")) {
+      failures.push(`the household argument form was not a finding at ${path}`);
     }
   }
 

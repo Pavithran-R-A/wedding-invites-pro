@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   MUST_NOT_MATCH,
   RULES,
+  SHIPPED_GUEST_DOOR_COPY,
   SHIPPED_REVIEWER_COPY,
   isScannedPath,
   scanContent,
@@ -39,6 +40,11 @@ describe("product contract checker", () => {
         // is Stage 7's addition to this list. The two doors are one rule each because a checker
         // only covers the wording it was written with.
         `const { data } = await client.schema('api').rpc('resolve_family_review', { raw_review_token });`,
+        // `household-door-called-with-arguments` — Stage 8's third door, and the reason the household
+        // rule is named apart from the guest-page one: `/g/<credential>` and the wedding's public link
+        // are different secrets with different readers, and a checker only covers the call it was told
+        // about.
+        `const { data } = await client.schema('api').rpc('resolve_guest_invitation', { p_raw_token: token });`,
         `const supabase = createClient(url, anonKey);`,
         `const { data } = await supabase.from('weddings').select('*');`,
         `const key = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;`,
@@ -87,7 +93,10 @@ describe("product contract checker", () => {
     // Stage 4 found this rule's table list named seven of the nine tables the adapter reads:
     // `wedding_people`, `venues` and the new `tradition_pack_releases` were absent, so a stray
     // `.from()` on them outside the adapter would have passed CI. Stage 7 also adds
-    // `wedding_assets`, which Stage 6 correctly recorded as a missing adapter boundary.
+    // `wedding_assets`, which Stage 6 correctly recorded as a missing adapter boundary, and Stage 8
+    // adds the three household tables its own adapter reads — `guest_households` carries
+    // `host_notes`, `household_event_scopes` decides which ceremonies a family is shown, and
+    // `rsvp_responses` is a guest's private answer.
     // The list is now derived from
     // what the adapter does, so a future table that leaves it out is a visible gap in this
     // assertion rather than an invisible one in the gate.
@@ -96,6 +105,9 @@ describe("product contract checker", () => {
       `const b = await supabase.from('venues').select('*');`,
       `const c = await supabase.from('tradition_pack_releases').select('*');`,
       `const d = await supabase.from('wedding_assets').select('*');`,
+      `const e = await supabase.from('guest_households').select('host_notes');`,
+      `const f = await supabase.from('household_event_scopes').select('event_id');`,
+      `const g = await supabase.from('rsvp_responses').select('party_size');`,
     ].join("\n");
     expect([
       ...new Set(
@@ -103,11 +115,21 @@ describe("product contract checker", () => {
       ),
     ]).toEqual(["canonical-table-read-outside-the-adapter"]);
 
-    // The positive control: the identical statements are legal where they belong, and an
-    // unrelated table name is not swept in by the widening.
+    // The positive control: the identical statements are legal where they belong.
     expect(scanContent("src/integrations/supabase/weddingContent.ts", stray)).toEqual([]);
+    // …and the widening is anchored on the whole quoted name, not on a prefix of it. These three
+    // tables do not exist in the schema; they exist here to show that adding `rsvp_responses`,
+    // `guest_households` and `household_event_scopes` to the list did not sweep in every name that
+    // starts with one of them.
     expect(
-      scanContent("src/pages/EditProject.tsx", `supabase.from('rsvp_responses').select('*')`),
+      scanContent(
+        "src/pages/EditProject.tsx",
+        [
+          `const a = await supabase.from('rsvp_responses_v2').select('*');`,
+          `const b = await supabase.from('guest_household_members').select('*');`,
+          `const c = await supabase.from('household_events').select('*');`,
+        ].join("\n"),
+      ),
     ).toEqual([]);
   });
 
@@ -242,6 +264,22 @@ describe("product contract checker", () => {
       .join("\n");
     for (const sentence of SHIPPED_REVIEWER_COPY) {
       expect(shippedReviewerSource, sentence).toContain(sentence);
+      expect(MUST_NOT_MATCH, sentence).toContain(sentence);
+    }
+  });
+
+  it("pins the guest door copy guard to the copy the household door actually prints", () => {
+    // Same instrument as the reviewer block above, aimed at Stage 8's third door. A family's refusal is
+    // the one thing on that page that has to be the product's own sentence — the door shows no other
+    // context to explain itself with — so the list is read back out of the shipped transport rather
+    // than vouched for by a fixture. `src/pages/GuestDoor.tsx` is not in this list because it does not
+    // exist yet; when it does, it will print these phrases from `guestDoor.ts`'s exports, not restate
+    // them, and this test will still be reading the one file that owns the words.
+    const shippedGuestDoorSource = ["src/integrations/supabase/guestDoor.ts"]
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
+    for (const sentence of SHIPPED_GUEST_DOOR_COPY) {
+      expect(shippedGuestDoorSource, sentence).toContain(sentence);
       expect(MUST_NOT_MATCH, sentence).toContain(sentence);
     }
   });
