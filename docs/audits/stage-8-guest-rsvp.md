@@ -1246,7 +1246,10 @@ cultural-safety rules, **31** rules total.
 
 **A second truth pass on the rows this section had just written, and one false citation it found in itself.** Before
 committing the matrix, every `file:line` citation in the five new rows was re-printed from the file it names rather than
-trusted from the writing of it. Twenty-seven resolved, and the counts behind them re-derived: the five unit batteries at
+trusted from the writing of it. **27** citations resolved by the script that prints each named line beside its file
+(`q8-logs/s8-verify-row-cites.cjs`, kept outside the run's temp dir precisely because the sentence cites it), and the remaining `:NNN` shorthand — the bare forms that inherit the file cited
+just before them — was printed one by one, **25** more, so nothing in those five rows is unprinted. The counts behind
+them were re-derived too: the five unit batteries at
 **30 / 22 / 45 / 27 / 31** come from the authoritative run's own per-file lines (`q8-logs/s8-fulltest3.log`, which is
 also the only reason `guestRepliesPanel.test.tsx` reads 31 where a `grep -c "it("` reads 27 — four cases are generated in
 a loop, so the runner's number, not the text's, is the one to publish), the two SQL batteries at **163 / 150** re-produce
