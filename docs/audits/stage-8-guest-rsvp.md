@@ -1894,5 +1894,211 @@ CLI command that touches a database or the API, because neither is reachable and
 It closes the engine-independent half of the directive's safety clause and leaves the rest where §21 left it: behind a
 human action on this machine.
 
+## 23. The engine came up, and the remaining tiers ran on it: the one migration a dry-run named first, 337 HTTP tests, and the eight instrument defects the browser tier found
 
+This section supersedes §19's list of things that had not run and §22's account of what could not be run. Everything
+below was measured against the existing `localvivaahvarnam` stack on this machine; nothing was reset, nothing was
+pushed to a hosted project, and no merge was made.
 
+**Identity before anything else.** `git ls-remote origin refs/heads/stage8/guest-rsvp` and `git rev-parse HEAD` printed
+the same 40 hex characters (`b73f7c8…` at the start of this segment), so there was no newer remote work to preserve and
+nothing to reconcile. The engine probe that §19 and §22 recorded as `docker info exit=1` now returns a running daemon,
+and the six containers §22 named in advance are the six that came up: `supabase_db_localvivaahvarnam`, `_rest_`,
+`_auth_`, `_kong_`, `_inbucket_`, `_storage_`, all `Up … (healthy)` except `rest`, which reports no healthcheck
+(`q8-logs/s13-engine-up-01.log`). The same capture lists the `_dueweave` cluster as Exited and left exactly that way —
+this segment started and stopped nothing but the `localvivaahvarnam` stack's own services, and the instruments assert
+`project_id === 'localvivaahvarnam'` and loopback endpoints (`127.0.0.1:54400` api, `:54401` db) before they will act.
+
+**The migration, dry-run first, `--local` only.** §22 deliberately did not predict the pending set; the dry-run named
+it. `npx supabase db push --local --dry-run` printed `Would push these migrations:` followed by exactly one line,
+`20261009120000_stage8_guest_invitations_rsvp.sql`, and exited 0 (`q8-logs/s13-db-push-dryrun-local-01.log`). Only then
+did `npx supabase db push --local` apply that one file, exit 0
+(`q8-logs/s13-db-push-local-apply-01.log`). Bare `supabase db push` was never run. The row counts taken immediately
+before the apply — `weddings=1, users=1, drafts=1, households=0, responses=0, tokens=0`
+(`s13-db-pre-apply-01.log`) — are the baseline the HTTP tier was later required to return to, and they are also the
+proof that this stack was not empty: it carried one pre-existing wedding and its author, which this stage neither
+created nor cleared. Post-apply, the twelve Stage 8 policies are present by name (`s13-db-post-apply-01.log:32-43`): four
+each on `guest_households`, `household_event_scopes` and `rsvp_responses`, all twelve `PERMISSIVE` and all `owners_*`,
+including `owners_record_manual_rsvps`.
+
+**The HTTP battery: 337 tests, 0 failures, one exit code.** `supabase/tests/api/run.sh all` against the running stack,
+serially, before/after residue included (`q8-logs/s14-http-battery-all-01.log`, `run exit=0`):
+
+| Suite | tests | fail |
+| --- | --- | --- |
+| `stage3_publication` | 38 | 0 |
+| `stage3_security` | 56 | 0 |
+| `stage4_tradition_packs` | 28 | 0 |
+| `stage5_admin_cli` | 36 | 0 |
+| `stage5_pack_driven_http` | 28 | 0 |
+| `stage6_storage` | 34 | 0 |
+| `stage7_family_approval` | 61 | 0 |
+| `stage8_guest_rsvp` | **56** | 0 |
+| total | **337** | **0** |
+
+The Stage 8 file holds **53** `test(` sites as authored and runs **56**, because `G-01` is one template over a
+four-entry `HOST_CALLS` list (`stage8_guest_rsvp.test.mjs:892-897`, the loop at `:899`, the template at `:900`) —
+53 − 1 + 4 = 56, which is the arithmetic this section publishes rather than the two numbers side by side as if they were
+different claims. The residue census printed after the Stage 8 teardown (`s14-http-battery-all-01.log:650-662`) is
+`weddings=1, wedding_events=1, invitation_drafts=1, invitation_versions=0, publications=0, guest_households=0,
+household_event_scopes=0, rsvp_responses=0, approval_requests=0, access_tokens=0, audit_events=0, auth.users=1` — every
+Stage 8 counter at 0 and the two pre-existing rows (§23's baseline above) exactly where the pre-apply count left them,
+so the battery that mints links, answers and withdrawals on a live database returned them all. This green run is the one
+that already carries the battery's own repair commit `4e5e86e`, *"make the HTTP battery's failures measure what they
+claim"*: that edit is what the `15:40:11` capture measured, and it was committed three minutes after the capture.
+
+**The three gate captures that were my own mis-naming, kept in the record.** Their times are read from the files, not
+recalled, because they decide what each capture is evidence for. Both sides are in UTC: `q8-logs` mtimes reported by
+`date -u -r`, and the commit instants converted from the `+0530` offset that `git log --date=iso` prints on this machine
+(`4e5e86e` at `21:13:41 +0530`, `04d6b50` at `21:14:10 +0530`). The battery's green run is `15:40:11`, then `typecheck`
+`15:42:24`, `product:check` `15:43:01`, `dbtypes:check` `15:43:09`, `lint` `15:43:19` — and only after them come the two
+commits those measurements were taken around, `15:43:41` and `15:44:10`. So those four captures are the static gates of
+the tree *as the HTTP repair was being finished*, with that repair uncommitted; they are reported here because they are
+what was measured when they were measured, and the authoritative set is re-taken at the final head in the next section.
+The results at `15:43:19` were: `typecheck` exit 0 with no output, `lint` exit 0 at **0 errors / 9 warnings** (all
+`react-refresh/only-export-components`, as §17 records), `product:check` exit 0 with **213 active file(s) scanned, 0
+violation(s)** — 213 rather than §17's 211 for the reason §17 itself gives, the two untracked `pnpm-*.yaml` files in
+*this* tree — and `dbtypes:check` exit 0 with **22 migration file(s)**, **19 public + 10 non-client table(s)** and
+**45 query column group(s) reconciled, 0 finding(s)**. `build` at `15:45:50` and `preview` at `15:48:07` are both after `04d6b50`, so the bundle the browser tier
+clicked is built from a head with a clean tracked tree: `✓ 2227 modules transformed`, `✓ built in 46.00s`, with
+`GuestDoor-CHVKsaUZ.js` **10.35 kB / 4.05 gzip** and `guestInvitation-BSUyLe0o.js` **4.01 / 1.41** still their own lazy
+chunks (`s14-build-01.log`). The same batch also contains three captures whose only content is
+`npm error Missing script: "check:db"` / `"check:product"` / `"db:check"`: I invoked script names I recalled instead of
+reading `package.json`, whose actual keys are `product:check` and `dbtypes:check`. Those three files are a measurement
+error, not three failed gates, and they are kept rather than deleted so the log shows what was asked of npm. The
+bundle served from `dist/` (`vite preview --host 127.0.0.1 --port 4173 --strictPort`, `s14-preview-server-01.log`)
+fingerprints to
+`071169257071e5b89cc7fea9df6cef354d81220624b51dd0f04241ce8953f116` over **38 files**, produced by
+`q8-logs/s16-dist-fingerprint.cjs` and captured at `q8-logs/s16-dist-fingerprint-01.log` (`code=0`). The method is the
+file, not a prose description: walk `dist/` recursively, sort entries by name at every level, and feed SHA-256 each
+file's POSIX-relative path followed immediately by its bytes. An earlier ad-hoc read of this same tree printed a
+different digest because that walk's path form was never recorded, so it is not published here and the script above is
+what a reader can re-run; the tree's own mtimes are the bridge — 36 of the 38 files carry the build instant
+`2026-10-12T15:45:49` UTC and the other two are copied static assets holding their source mtime
+(`favicon.ico`, `robots.txt`, `2026-10-05T06:44:55`), nothing in `dist/` is later than the build, and the first browser
+run started at `16:04:39`, so these bytes are the artifact all ten runs clicked.
+
+**The browser tier: five full runs and five scoped ones, eight defects — all of them the instrument's.**
+`scripts/stage8-browser-guest.mjs` is now committed (`926e52a`) as the artifact that produced these captures, which
+means the file that runs is the file a reader can re-run. The sequence, each line a measured total from that run's own
+`==>` summary:
+
+| Capture | Scope | checks | measurements | findings |
+| --- | --- | --- | --- | --- |
+| `s15-browser-journeyA-01.log` | A only | 56 | 7 | 4 |
+| `s15-browser-journeyA-02.log` | A only | 66 | 7 | 1 |
+| `s15-browser-journeyA-03.log` | A only | 69 | 8 | **0** |
+| `s15-browser-journeyB-01.log` | `b` only — the void subset run, defect 7 | 18 | 3 | 2 |
+| `s15-browser-all-journeys-01.log` | A→D | 90 | 11 | 5 (3 of them harness aborts) |
+| `s15-browser-journeyAB-02.log` | A+B | 93 | 13 | **0** |
+| `s15-browser-all-journeys-02.log` | A→D | 132 | 25 | 4 |
+| `s15-browser-all-journeys-03.log` | A→D | 133 | 25 | 1 |
+| `s15-browser-all-journeys-04.log` | A→D | **133** | **25** | **0**, `STAGE 8 BROWSER TIER: PASS`, `tier_exit=0` |
+| `s15-browser-all-journeys-05.log` | A→D, same bytes | **133** | **25** | **0**, `tier_exit=0` |
+
+Two consecutive clean runs on one bundle is the claim; run 04 alone would not be, because defects 2, 3 and 8 are all
+timing-dependent — defect 2 alone covers three separate reads — and a single pass cannot show that a wait was the fix
+rather than luck. Each defect below names the capture that measured it.
+
+1. *The Copy press in the shown-once block was addressed as if it were a status row.* `pressRow` matched rows by
+   `div > p`, which is the panel's **state** row; the once-only address lives in an `<li>` whose first child is a
+   `<p>` naming the family (`GuestInvitationPanel.tsx:657-673`). The press therefore polled a container that holds no
+   Copy button, and the panel's own status line stayed on its not-yet-copied sentence
+   (`s15-browser-journeyA-01.log:38` reads `Nothing has been sent to anyone. Copy it, or hand the link over yourself.`),
+   so the check at `:39` reported `not pressable twice` — a finding about the harness's selector, not about the
+   product's clipboard. Fixed by `markLinkBlock` / `pressLinkBlock` / `linkBlockStatus`, which locate that `<li>` by its
+   own heading text; from A-02 onward the same line reads `Copied to the clipboard.`
+   (`s15-browser-journeyA-02.log:38`).
+2. *A panel read that raced its own load, in three places.* After a reload the harness read the row's link word
+   immediately and got `no-row` (`s15-browser-journeyA-01.log:41`) because the rows render only under
+   `rows !== null` (`…Panel.tsx:630`, with the loading skeleton at `:627`); fixed by waiting for the row by name. The
+   same class then surfaced in journey B as a stranger panel with `ceremony null` and a harness abort
+   `nothing at #scope-…` (`s15-browser-all-journeys-01.log:120-121`), and once more as an empty-state read taken while
+   the panel was still loading (`s15-browser-all-journeys-03.log:177`, the tier's last finding): the no-families copy
+   renders only after the panel's own load resolves, so the harness now waits up to 15 s for that sentence and fails
+   with the page's actual text if it never arrives (`stage8-browser-guest.mjs:854-861`). The sibling `hasText` sites
+   were swept rather than left as a guess: each either already polls (`openGuestDoor`) or follows a settling wait
+   (`waitForText` on the heading, `rowButtonState`).
+3. *The same race, in journey B, on a word that had genuinely changed.* `Link has run out` was read as `Link is live`
+   (`s15-browser-all-journeys-01.log:89`) because the DOM predated the harness's own time-machine UPDATE
+   (`stage8-browser-guest.mjs:1261-1263`, one `expires_at = now() - interval '1 hour'` written as the database
+   superuser, disclosed at `:1278`) that moved that token row's expiry into the past. The SQL that computes `link_state` (`…sql:512-513`) is correct and was re-read to prove
+   it; the harness reloads and waits now.
+4. *Two fields that only exist conditionally were addressed unconditionally.* The headcount input and its hint render
+   only under "We are coming" (`GuestDoor.tsx:224-249`; the id itself is formed at `:192`), so the hint read got `null`
+   (`s15-browser-journeyA-01.log:51`) and the `#guest-party-size-1` write got `no-field` and aborted the journey
+   (`:59`). The product was already right; the sequence of presses was wrong.
+5. *The host's write-in radios carry no `value`.* `pickRadio`/`radioValue` address a radio by its `value` attribute;
+   `GuestRepliesPanel.tsx:315-330` builds fully controlled inputs with `name` and `id` but no `value`, so the harness
+   could not see the choice it had just made and aborted with `[s8-host] radio reply-attending=attending → absent`
+   (`s15-browser-journeyA-02.log:69`). Rather than weaken the assertion, the tier now presses `#reply-attending`
+   by id and re-reads `.checked` (`pickAnswerById`), and the asymmetry is recorded here as an observation about the two
+   panels: the guest door's radios declare `value={value}` (`GuestDoor.tsx:207-211`) and the host's do not. No product
+   change was made, because the panel's behaviour is correct and the brief limits repairs to proven defects.
+6. *Journey C enumerated the door by pattern-match and got the census backwards.* Its filter was
+   `/_(resolve|submit)_guest_invitation/` — a leading underscore and a write-verb name that does not exist. Stage 8's
+   six verbs (`get_guest_invitation_state`, `issue_guest_invitations`, `resolve_guest_invitation`,
+   `revoke_guest_invitation`, `rotate_guest_invitation`, `submit_guest_rsvp`) do not share one suffix rule: the read
+   verb is singular, the issue verb is plural, and the write verb is an RSVP, not an invitation. So `doorCalls` was
+   empty, `nonDoorRpc` listed the two legitimate door calls as intruders, and the allowset's mis-declared write RPC
+   turned the honest `x-guest-token` header into a "stray header" — three findings, one root cause. Fixed by matching
+   the two verbs by their real names (`DOOR_VERBS`) and correcting the allowset, then *widening the check*: the header
+   must now carry **the credential that the address in the browser's own URL names**, and no other credential this run
+   minted, which is a stronger claim than the one it replaced and would fail if a link were ever sent to the wrong
+   family. The three findings it produced, as measured: `s15-browser-all-journeys-02.log:176-178` — the door-header
+   check printing an empty list, the "no verb other than the two doors" check naming `resolve_guest_invitation,
+   submit_guest_rsvp` as intruders, and the reach check putting `x-guest-token@…rpc/submit_guest_rsvp` in the
+   "undeclared places" column.
+7. *A subset run of a stateful instrument produced findings that were not about the product.* `--only=b` reuses
+   journey A's host, wedding, households and links, so running B alone could not run at all
+   (`s15-browser-journeyB-01.log:14`, "journey A did not produce a host page or a wedding") and — worse — its masking
+   check *passed* while reporting nothing (`:22`, `0 credential(s) registered, 0 appeared in what this run tried to
+   print, 0 write(s) were rewritten, 0 escaped`): a green assertion with nothing behind it. The harness now refuses to
+   start without `a` when any of `b`, `c`, `d` is requested, and `--only=a,b` is documented as an ordered prefix
+   (`s15-browser-journeyAB-02.log` is that prefix, and it is green). The `carried.length > 0` assertion was left in
+   place precisely because every valid run mints credentials.
+8. *A focus read taken before the confirmation existed.* Journey D presses the door's send button and then asks the
+   browser which element holds focus; taken straight after the press the answer was a `<div>` with no words in it
+   (`active element DIV ""`, `s15-browser-all-journeys-02.log:154`), because the receipt had not yet replaced the form.
+   The harness now waits for the receipt's own sentence before reading (`stage8-browser-guest.mjs:1582`), and the
+   assertion asks the driver's `label` field, which is the focused element's own text
+   (`scripts/stage5-browser-driver.mjs:637-639`) — so the check is *stricter* than the one it replaced: it fails unless
+   the confirmation's words are the thing holding focus
+   (`s15-browser-all-journeys-05.log:155` reads `active element DIV "Your reply is recordedYour answer is sav"`).
+
+**What the green runs actually proved**, beyond the arithmetic in the table: a host lists four families, scopes each to
+a ceremony, sends one link per household, and the address the panel shows once is the address that opens the door; the
+same click a second time reports the live link and reveals nothing (`H-02`'s product counterpart at the UI layer); the
+door refuses `0`, `1.5` and `1001` in its own words before the server is asked
+(`the page refuses a headcount of "1001" … That is more guests than one reply can hold`, run 05 line 57) while the host
+may write 6 for a family expecting 2 (`guest 6 > expected 4 refused; host wrote 6 for a family expecting 2 →
+attending/6/host_manual`); withdrawn, expired and forged render one identical page (`1 distinct length(s) across three
+refusals`) and the forged attempt wrote nothing; a signed-in stranger on the host's project URL sees no family, no
+answer and no note, and asking the table directly from that session is `401 42501`; the household's own page URL holds
+its credential by design, and everywhere else the credential appears only in `x-guest-token` on
+`resolve_guest_invitation` and `submit_guest_rsvp` (`2 of 2 RPC(s)`), with **no** analytics, session-replay or telemetry
+host contacted; the only destination outside this machine is the font pair the product ships, and the request that
+*first* leaves it carries an **empty** `Referer` (`fonts.googleapis.com ← (empty)`; the follow-on request refers only to
+that font host, `fonts.gstatic.com ← https://fonts.googleapis.com/`).
+The digest claim carries its list: `6 of 7 credential(s) matched a stored digest; 0 stored verbatim` — the seventh is
+the credential the harness *invents* for the forged probe (`stage8-browser-guest.mjs:1283-1284`, 43 base64url
+characters from `randomBytes`), which has no row by design, so all six credentials the run actually minted are stored as
+SHA-256 and none as plaintext; the assertion is `stored ≥ 1` **and** `0 stored verbatim`, which proves the
+never-plaintext property outright and the every-minted-token property only by the composition just given. Teardown
+returned every counter to 0 against the pre-apply baseline, and the closing masking sweep reports `7 credential(s)
+registered, 5 appeared in what this run tried to print, 5 write(s) were rewritten, 0 escaped`.
+
+**Ruling 3.3 confirmed rather than repaired.** The battery that tried to send links for an unpublished wedding gets
+HTTP 400 `{"code":"23514", …}` from `RAISE EXCEPTION … USING ERRCODE = 'check_violation'`
+(`20261009120000_stage8_guest_invitations_rsvp.sql:224-225`), and the panel prints its own sentence for it (`the
+invitations could not be sent`). A check-violation-shaped refusal for a policy the migration states in words is the
+designed behaviour; §8's method — read the raise, then read the status — is what distinguishes it from the defect it
+looks like.
+
+**Not measured here, stated rather than implied.** The shared CDP driver attaches no console listener, so "the raw
+credential never reached the JavaScript console" remains unpinned by this tier (the app's own `describe()` masking is
+pinned by unit test); the driver's network log carries request headers and response bodies but not request bodies, so
+"the credential is never in the submit body" is pinned by the transport unit test, not here. Journey C's own capture
+prints the reach limit in its words: the household address *is* the credential, so it also sits in that browser's
+history and in whatever access log a hosting stack keeps — which is why the panel shows it once and why rotation
+exists.
