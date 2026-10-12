@@ -717,8 +717,8 @@ GRANT EXECUTE ON FUNCTION internal_api.resolve_guest_invitation() TO anon, authe
 -- A problem with *access* — missing, malformed, unknown, forged, revoked, expired, rotated-away,
 -- withdrawn publication, an event this household was not given — is one indistinguishable
 -- `{"recorded": false, "reason": "unavailable"}`, and writes nothing. Between them sit exactly two
--- correctable answer problems, `party_size_too_large` and `answers_not_accepted`, and the battery
--- proves that no credential state can produce either.
+-- correctable answer problems: `party_size_too_large`, which no credential state can produce, and
+-- `answers_not_accepted`, which is a fact about the body and arrives identically for a stranger (`:779`).
 CREATE FUNCTION internal_api.submit_guest_rsvp(p_answers jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
