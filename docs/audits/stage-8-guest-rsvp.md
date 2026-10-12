@@ -1811,5 +1811,88 @@ container outside that stack is touched), then `supabase/tests/api/run.sh` for S
 plus the historical suites and their before/after residue checks, then the browser, attack, mobile, a11y and network
 tiers against the bundle §17 built.
 
+## 22. The database-safety pre-flight, taken while the engine is still down: what the CLI actually offers, what this repo pins, and the one thing deliberately not run
+
+The next directive makes the reconcile sequence conditional on the engine ("once Docker Server responds") and
+unconditional on one safety point: **a bare `supabase db push` must never be the instrument**, because the CLI's own
+defaults can address a linked project. That clause is checkable without a running stack, so it was checked now, on
+this host, with the engine still refusing — the latest in a probe series §16 onward has kept taking
+(`s8-engine-probe-01` … `-04`, `s9-engine-probe-01`, `s10-engine-probe-01`/`-02`, `s11-engine-probe-03`), each of them
+the same missing pipe: `docker info` **exit=1** and `docker ps` **exit=1** against
+`npipe:////./pipe/dockerDesktopLinuxEngine` in the newest capture, `q8-logs/s12-baseline-01.log`. One honesty note
+about that series: `s8-engine-probe-01.log` prints `docker_info exit=0` beside a connection failure it plainly
+recorded, because that capture asked `$?` after a `docker info --format` template had already errored into the log —
+the *number* in that file is an artifact of the same piped-exit mistake §21 names, and every later probe in the series
+prints the failure with its exit taken adjacent. Baseline first,
+because the directive asks for it: local `git rev-parse HEAD` and `git ls-remote origin refs/heads/stage8/guest-rsvp`
+both print `2b824ce437938e19e8c68fe01783f1b85d2459fc` (`ls-remote exit=0`), `git fetch --dry-run origin` prints
+nothing and exits **0**, so there is no newer remote work to preserve and the tree holds nothing but the two untracked
+pnpm files.
+
+**The CLI is not on PATH, and the repo's own record says why.** `which supabase` → **exit 1**, and a bare
+`supabase --version` → **exit 127** (`command not found`). Every stage of this project has therefore driven the CLI
+through `npx`, which is what `README.md:694` documents for starting the stack (`npx supabase start   # kong 54400, db
+54401, mailpit UI 54403`). Measured here: `npx --yes supabase --version` → **exit 0**, printing **2.120.0**, and
+`supabase/.temp/cli-latest` contains `v2.120.0` — the cached binary and the version the resolver picked agree, so
+captures taken later will be against a known CLI, not a moving one. Two `--help` runs, each with its own adjacent exit
+(capture `q8-logs/s12-cli-preflight-03.log`), are the substance of this section because they are printed text, not
+recollection:
+
+- `npx supabase db push --help` → **exit 0**. Its `FLAGS` block offers `--local` ("Pushes to the local database"),
+  `--linked` ("Pushes to the linked project"), `--project-ref <ref>`, `--db-url <string>` and `--password`, plus
+  **`--dry-run`** ("Print the migrations that would be applied, but don't actually apply them"), `--include-all`,
+  `--include-roles`, `--include-seed` and `--skip-vault`. **The directive's warning is confirmed by the instrument's
+  own wording:** `db push` has three target-selecting shapes and the safe one is a flag, not a default — so the
+  command form for this stage is `npx supabase db push --local --dry-run` first, read the list, then
+  `npx supabase db push --local` only if what it lists is exactly the pending Stage 8 file. The global
+  `--workdir` flag is worth knowing about for the same reason: the help text says it is "used exactly as given, with
+  no ancestor directory search", i.e. it is how a caller pins *which* `supabase/` folder the CLI reads when the
+  default behaviour is to search upward — on a host that runs several projects from sibling directories, that
+  upward search is a real way to reach someone else's config.
+- `npx supabase migration list --help` → **exit 0**, offering the same `--local` / `--linked` / `--project-ref` /
+  `--db-url` target selection and **no** `--dry-run` (none needed: the command reads). History inspection is
+  therefore `npx supabase migration list --local`, which is read-only and is the step that answers "what is pending"
+  before anything is applied.
+
+**No project is assumed unlinked; the check that would prove it is the one the brief forbids.** `~/.supabase/` on
+this host contains `access-token` (44 bytes, existence and size only — the bytes were not read and are not printed
+anywhere in this repository) and `telemetry.json`, so the CLI does hold an API credential here. `SUPABASE_ACCESS_TOKEN`
+is **unset** in this shell. Locally there is no link state: `supabase/.temp/` contains only `cli-latest`, and a
+`find` for `linked*` at depth 2 from the project root returns nothing. That is *absence of local evidence*, not proof
+— proving a linked ref means asking the hosted API, and hosted Supabase contact is a hard stop, so no
+`npx supabase projects list` and no `link status` against the API was run. **This is exactly why `--local` is spelled
+out on every CLI call in this stage rather than relied on a state that this session cannot verify without breaking a
+different rule.**
+
+**What the repository pins, read rather than recalled.** `supabase/config.toml` line **20** `project_id =
+"localvivaahvarnam"`, line **24** `[api] port = 54400`, line **37** `[db] port = 54401`, line **65** `[studio] port =
+54403` — matching the directive's stated endpoint and Stage 7's recorded stack identity
+(`stage-7-family-approval.md:350`, "project_id=localvivaahvarnam, API http://127.0.0.1:54400"). The untracked
+`.env.local` points the app at the same loopback pair (`VITE_SUPABASE_URL` and `SUPABASE_LOCAL_URL` at `54400`,
+`SUPABASE_LOCAL_DB_URL` at `127.0.0.1:54401`) — quoted as ports only; it is not a tracked file and its values are not
+copied into this repository. With the engine down, `netstat -ano | grep -E "5440[0-9]"` matches **nothing**, so
+nothing else on this host currently owns those ports; the disposable cluster §16 used sits on **55440** and cannot
+collide with 54401, which is the fact that makes re-running a SQL battery alongside the stack safe for the cluster and
+unsafe for nothing else.
+
+**The six containers named, in advance of seeing them.** The post-start check in the directive has to compare against
+something, and the repo already records the set by name: `supabase_db_localvivaahvarnam`,
+`supabase_rest_localvivaahvarnam`, `supabase_auth_localvivaahvarnam`, `supabase_kong_localvivaahvarnam`,
+`supabase_inbucket_localvivaahvarnam` (all five listed at `stage-6-storage-assets.md:47-48`, where Stage 6 measured
+that storage was *absent*) plus `supabase_storage_localvivaahvarnam`, which Stage 6's own `supabase start` brought up
+(`stage-6-storage-assets.md:432`) — six, which is the count Stage 7's §18 and §21 record as `Up` and healthy
+(`stage-7-family-approval.md:895`, `:1208`). Stage 7's cleanup note at `:1208` also fixes what must stay untouched
+beside them: the `_dueweave` containers and `p3c-rest-v16`. A start that yields five is a storage service that did not
+come up, and Stage 6 §1 already records the two-step that made it come up for real — a `docker rm` of the stale
+container by name, then `supabase start` — so a missing sixth member is a diagnosis with a known first move, not a
+reason to touch a shared volume.
+
+**What this section does not claim.** It does not list the pending migrations: "pending" is a property of the local
+history table, which only exists once the db container is running, and `supabase/migrations` holds 22 files by
+`dbtypes:check`'s own count — the delta is a measurement, not an inference from that number. It does not run any
+CLI command that touches a database or the API, because neither is reachable and one of the two is forbidden anyway.
+It closes the engine-independent half of the directive's safety clause and leaves the rest where §21 left it: behind a
+human action on this machine.
+
 
 
