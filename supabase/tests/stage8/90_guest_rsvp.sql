@@ -2505,7 +2505,7 @@ BEGIN
 END $S$;
 
 -- --------------------------------------------------------------------------- P: a revision the families follow
--- Ruling 8.1 (`docs/architecture/guest-rsvp-security.md:539-551`) re-declared
+-- Ruling 8.1 (`docs/architecture/guest-rsvp-security.md:573-589`, re-derived 2026-10-12) re-declared
 -- `publish_invitation_version` for one reason: the Stage 3 retarget touched only
 -- `token_kind = 'public_invitation'`, so a host publishing a corrected version would have stranded every
 -- household link on the publication the same call had just revoked — each family's saved URL answering
@@ -2772,7 +2772,7 @@ SELECT t.id AS tid, t.publication_id AS pub, t.expires_at AS exp,
 -- --------------------------------------------------------------------------- Pb: rotating the wedding link
 -- The second sentence of Ruling 8.1 is a prohibition about a verb Stage 8 did *not* re-declare:
 -- `api.rotate_invitation_token` keeps its kind filter, "so rotating the wedding link cannot touch a
--- household's" (`docs/architecture/guest-rsvp-security.md:550-551`). The filter is
+-- household's" (`docs/architecture/guest-rsvp-security.md:584-585`). The filter is
 -- `20260926150000_stage3_privileged_bodies_behind_wrappers.sql:393-398` and the revoke is a single-row
 -- `WHERE id = v_old.id` at `:407`, so the reading is unambiguous — but the ruling's whole point is that
 -- two kinds of credential now share a table, a wedding and a publication, and a Stage 8 widening of

@@ -465,11 +465,11 @@ export async function recordManualReply(
 /**
  * Delete one recorded answer.
  *
- * This is also the honest half of "correct a family's answer": a host may not save an edit that
- * re-labels a guest's row as their own (`owners_update_manual_rsvps`' WITH CHECK,
- * `20260925120500…:285-294`), so the path §7 rules out is a silent overwrite and the path it rules in is
- * this delete followed by `recordManualReply`. Two writes, both visible in the reply list's
- * `response_source`, and no policy edited to make the single click work.
+ * This is also the honest half of "correct a family's answer". `owners_update_manual_rsvps`' WITH CHECK
+ * (`20260925120500…:285-294`) refuses any UPDATE whose *result* is still labelled `'guest'`, so a host
+ * may not change what a family said and leave it presented as theirs — §7 rules that silent overwrite
+ * out and rules this delete followed by `recordManualReply` in, no policy edited. A relabelling-only
+ * PATCH is accepted by that clause (measured; §7 records it) and this module never sends one.
  */
 export async function removeGuestReply(
   weddingId: string,

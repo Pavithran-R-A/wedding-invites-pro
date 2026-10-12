@@ -464,7 +464,31 @@ it as written.
   correct a family's answer does it where the correction is honest — delete the reply (`:296-299` in the
   same file) and
   record a manual one — and the host screen will say so in those words rather than offering a silent
-  overwrite. **No Stage 2 policy is edited or weakened for convenience in either direction.**
+  overwrite.
+  [MEASURED CORRECTION, 2026-10-12: the sentence above describes a policy, and reads as though it
+  described what that policy does. `WITH CHECK` examines the *new* row, so what it refuses is an UPDATE
+  whose result is still labelled `'guest'` — measured: a `party_size` PATCH against a guest row, sent
+  with an owner's bearer, is refused SQLSTATE 42501 as HTTP 403 with
+  `new row violates row-level security policy for table "rsvp_responses"`
+  (`supabase/tests/api/stage8_guest_rsvp.test.mjs` R-02; `q8-logs/s14-http-stage8-repair-02.log:57`).
+  What it does not refuse is a PATCH that only changes the label: `response_source = 'host_manual'` on
+  that same row satisfies the clause and is accepted — measured HTTP 204, and the row then reads
+  `declined/0/host_manual/true` (`q8-logs/s14-http-stage8-repair-02.log:58`). So "presents a guest's
+  answer as the host's own" is in fact reachable by one client write, and the phrase "stays blocked"
+  was too strong.
+  *Why that is not the dangerous direction:* the label moves authority **from** the guest **to** the
+  host, over a row that host already owns, may read and may delete outright; the family's answer is
+  untouched, and the identical end state is reachable by the sanctioned two-step with the same contents.
+  The direction the clause exists to block is a client writing `'guest'` — putting words into a family's
+  mouth — and that stays shut on both doors: the forged `'guest'` INSERT in the same case is refused
+  42501, and a `'guest'` row is otherwise produced only by the `SECURITY DEFINER` write door. What this
+  correction changes is the *reason* the host screen offers delete instead of an editor: delete is not
+  the only route the policy permits, it is the route that records the correction with its provenance
+  stated at entry rather than rewriting provenance underneath an answer. Nothing in the product depends
+  on either reading, because no product code path PATCHes this table — the client surface is the select
+  at `src/integrations/supabase/guestInvitations.ts:417`, the insert at `:447` and the delete at `:479`.
+  ]
+  **No Stage 2 policy is edited or weakened for convenience in either direction.**
 * **`answers` stays small and stays an object.** The column is reserved for optional questions
   ("meal, transport, accommodation", `:84-87`). This stage asks no such question, and will not let a
   guest write arbitrary prose into a host's database: the body accepts `attending` and `party_size`
