@@ -313,5 +313,5 @@ echo "    that contains Stage 8. The older runners' own totals still describe th
 echo "==> Boundary: plain Postgres + role/auth shim + a storage-schema fixture. PostgREST, Supabase Auth"
 echo "    and the Storage API were not executing, so no REST-level, header-level or browser-level claim is"
 echo "    carried by these numbers — the guest door's actual HTTP status and body, the"
-echo "    `x-guest-token`/`x-invitation-token` separation and the rendered invitation are the HTTP and"
+echo '    `x-guest-token`/`x-invitation-token` separation and the rendered invitation are the HTTP and'
 echo "    browser tiers' to prove."
