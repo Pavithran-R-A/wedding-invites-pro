@@ -632,10 +632,19 @@ sense — anyone holding that guest's history or the hosting logs holds one hous
 blast radius §10 already states — and the Stage 8 browser tier must re-measure the `/g/` page's outgoing
 requests for this shape rather than inherit Stage 3's `no measured request carried the credential in
 Referer` (`public-invitation-security.md:101`), because that measurement was taken of a different route
-and different page. **That re-measurement is not yet run:** the browser tier needs the local stack and a
-production build, and both were blocked for the whole of this segment (Docker engine not running, engine
-start human-only). P7 is therefore recorded as unit- and HTTP-qualified on the API hop and unmeasured on
-the guest page's own request surface, not as a passed invariant.]
+and different page. **That re-measurement has since run**, on the live `localvivaahvarnam` stack against
+the production bundle, after the engine came up — it was blocked for the whole of the segment that wrote
+the paragraph above, and the block was recorded rather than argued away at the time. Journey C opens
+`/g/<token>` and inspects every request the door makes: the household's credential is in that page's own
+URL by design (`q8-logs/s15-browser-all-journeys-05.log:37`), both guest verbs carry it in `x-guest-token`
+and nowhere else in what they send (`:114`, `resolve_guest_invitation:present, submit_guest_rsvp:present`),
+the only destinations outside this machine are the two font hosts the product ships (`:122`,
+`outside the allowset: none`), the first of those requests leaves with an **empty** `Referer` and the
+follow-on refers only to the other font host (`:124`), and `:125` records that no `Referer` reaching a
+host outside this machine names this machine's address or carries a credential-shaped string. P7 is
+therefore measured on the API hop **and** on the guest page's own request surface — at the residual §9
+states, not instead of it — and the run that produced those five lines is §23 of
+`docs/audits/stage-8-guest-rsvp.md.]
 
 ## 10. Abuse resistance, stated with its limits
 

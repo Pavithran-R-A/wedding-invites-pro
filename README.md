@@ -349,13 +349,21 @@ through the product's own screens against a **local** Supabase stack (see
   `src/pages/EditProject.tsx:898`) for households, salutations and per-recipient ceremony scopes,
   `GuestRepliesPanel` (**377 lines**, `:902`) for the host's own manual entries beside the guest's, and
   `/g/:token` (`src/App.tsx:95`, outside `AuthProvider` and `ProtectedRoute`, shipped as its own lazy
-  chunk) for the guest's door. **No part of this bullet has been exercised over HTTP or driven in a
-  browser.** What has run is its SQL qualification, at head `eb128f7`: `80_guest_invitation_links.sql`
-  **182** and `90_guest_rsvp.sql` **185** assertions with `run.sh all exit=0`
-  (`q8-logs/s9-sql-all-32.log`), on a disposable plain-PostgreSQL 17.10 cluster because the local
-  stack's engine is down — so the HTTP statuses, the `x-guest-token` transport and the rendered page
-  sit outside those numbers, and the repair list they forced is §16 of
-  [`docs/audits/stage-8-guest-rsvp.md`](docs/audits/stage-8-guest-rsvp.md). Unit coverage at the same
+  chunk) for the guest's door. Both transport tiers have now run on the live `localvivaahvarnam` stack,
+  after its Stage 8 migration was forward-applied with `db push --local` behind a `--local --dry-run`
+  that named exactly that one file. HTTP: **337** tests / **0** failures / exit 0
+  (`q8-logs/s14-http-battery-all-01.log`), of which the Stage 8 suite is **56** cases — the **53**
+  authored minus the one `G-01` template plus its 4 `HOST_CALLS` entries. Browser: **checks 133 /
+  measurements 25 / findings 0**, twice in a row (`q8-logs/s15-browser-all-journeys-04.log`,
+  `-05.log`), driving journeys A–D against the production bundle recorded as
+  `071169257071e5b89cc7fea9df6cef354d81220624b51dd0f04241ce8953f116` over **38** files
+  (`q8-logs/s16-dist-fingerprint-01.log`). What ran *before* those tiers was only the SQL
+  qualification, at head `eb128f7`: `80_guest_invitation_links.sql` **182** and `90_guest_rsvp.sql`
+  **185** assertions with `run.sh all exit=0` (`q8-logs/s9-sql-all-32.log`), on a disposable
+  plain-PostgreSQL 17.10 cluster because the local stack's engine was down then. Still unproven is a
+  **hosted** project: every number above is local-stack-only, and §23 of
+  [`docs/audits/stage-8-guest-rsvp.md`](docs/audits/stage-8-guest-rsvp.md) records the eight
+  instrument defects those two tiers found and how each was repaired. Unit coverage at the `eb128f7`
   head: 27 panel + 34 adapter-transport + 45 shape + 30 page + 22 door-transport + 31 replies, inside
   the 765-test / 42-file run (`q8-logs/s10-clean-test.log`)
 
@@ -466,8 +474,10 @@ only read path the product has is a short-lived signed URL issued to the owning 
 HTTP battery carries the refusals around that as named cases — `MINT-02` (a key a client presents),
 `UPL-02` (a stranger writing into the owner's prefix), `A7b` (a second write to a key that already has
 bytes) — and each of the three is printed `✔` in `q6-logs/s6-http-iter-02.log`, taken on
-**2026-10-06** with that run's `fail 0`; the chain has not been re-run since, and §34.4 records why the
-test file that run executed is still this tree's file. The privileged-value sweep re-taken at `dff78c1`
+**2026-10-06** with that run's `fail 0`. That chain has since been re-run inside Stage 8's full battery,
+where the same three cases print `✔` again (`q8-logs/s14-http-battery-all-01.log:414, :421, :447`, inside
+`stage6_storage.test.mjs` at **34** tests / **0** failures) and §34.4 records why the test file that run
+executed is still this tree's file. The privileged-value sweep re-taken at `dff78c1`
 (`q6-logs/s6-i10-valuescan-06.log`, taken at `dff78c1`, whose five node gates are recorded beside it in
 `q6-logs/s6-head-cert-dff78c1.log`) prints
 `tracked_at_HEAD_files_with_hit=0` and `added_lines_main_to_HEAD_with_hit=0` for each of the three

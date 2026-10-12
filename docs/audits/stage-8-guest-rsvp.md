@@ -2102,3 +2102,91 @@ pinned by unit test); the driver's network log carries request headers and respo
 prints the reach limit in its words: the household address *is* the credential, so it also sits in that browser's
 history and in whatever access log a hosting stack keeps — which is why the panel shows it once and why rotation
 exists.
+
+## 24. Three live documents re-taken against the tier that ran: six places that still said a tier had not run, one sum that had quietly become short, and the gates a Markdown edit owes again
+
+§23 went public at `e3fcbbf` while three *other* live documents still described this stage in words that were true
+before the engine came up. They were swept for tier-status wording rather than read end to end, and the pattern list is
+printed here because a checker only covers its own wording: `engine is down`, `needs the engine`, `has not been
+exercised`, `never been exercised`, `unexercised`, `still unrun`, `has not run`, `not driven`, `no part of`, `browser
+tier has not`, `tier has not run`, `not yet run`, `unmeasured`, `blocked`, `has not been re-run`. The first pass over
+`README.md`, `docs/product/` and `docs/architecture/` found one hit; the widened pass found five more, and in one of
+them the falsity was not a tier claim at all but an arithmetic one the tiers had silently invalidated.
+
+**1. `README.md:348-368` said, of the whole guest-side bullet, "**No part of this bullet has been exercised over HTTP
+or driven in a browser**".** Replaced with both measured tiers and their captures: HTTP **337** tests / **0** failures
+/ exit 0 (`q8-logs/s14-http-battery-all-01.log`), with the Stage 8 file's own share stated as **56** = the **53**
+authored `test(` sites − the one `G-01` template + its **4** `HOST_CALLS` entries (`stage8_guest_rsvp.test.mjs:892-897`,
+loop at `:899`); and the browser tier at **checks 133 / measurements 25 / findings 0** twice
+(`s15-browser-all-journeys-04.log`, `-05.log`) against the bundle recorded as
+`071169257071e5b89cc7fea9df6cef354d81220624b51dd0f04241ce8953f116` over **38** files
+(`s16-dist-fingerprint-01.log`). The `eb128f7` SQL qualification was kept as what ran *before* those tiers rather than
+deleted, together with the reason it ran on a disposable cluster, and the hosted-project limit is still the next
+paragraph's (`README.md:370-371`).
+
+**2. `docs/product/feature-readiness.md:222-226`, five rows, said `FOUNDATION`.** All five — guest households,
+personalised salutations, per-recipient event scoping, RSVP submission, manual entry by host — are now `IMPLEMENTED`
+**(local stack only)**, each carrying the same composed evidence sentence (SQL tier at `eb128f7` → `db push --local`
+behind a dry-run → HTTP 337/0 → browser 133/25/0 twice → "nothing here ran against a hosted project"). Two sentences
+§23 made false were replaced rather than restated: row 225's "**53** test cases as written, **still unrun**" and row
+226's "…because the transport tiers have not run". Row 224 gained the honest placement of the exclusion proof — that
+journey's wedding has only two ceremonies and the checked household was scoped to both, so the door page cannot show
+exclusion non-vacuously and the HTTP battery carries that case (`stage8_guest_rsvp.test.mjs:1854-1856`, and the
+all-or-nothing body at `:2301-2312`). Row 223 gained the rendered half of the salutation claim
+(`s15-browser-all-journeys-05.log:44`, entered through `stage8-browser-guest.mjs:558-561`).
+
+**3. `docs/product/feature-readiness.md:270` (the data-access adapter row) carried two false claims at once.** "**None
+of Stage 8's surfaces has been driven in a real browser against the local stack at the time of writing**, and no such
+claim is made here: that tier needs the engine, and the engine is human-only to start" — the engine came up, so the row
+now points at the tier that ran. And the HTTP sum `38 + 56 + 28 + 36 + 28 + 34 + 61 = 281 tests across seven files`,
+which was arithmetically right and had become short: it enumerated the pre-Stage-8 files while Stage 8's own file ran in
+the same battery. It now reads `38 + 56 + 28 + 36 + 28 + 34 + 61 + 56 = 337 tests across eight files`, **0** failures at
+exit 0, which is the same figure `s14-http-battery-all-01.log` prints per suite (`:80, :159, :228, :287, :403, :467,
+:563, :663`) and the total the run itself reports — so the row's word "overall" is now backed by the sum it claims to
+be.
+
+**4. `docs/architecture/guest-rsvp-security.md:635-647` closed P7 with "**That re-measurement is not yet run** … P7 is
+therefore recorded as unit- and HTTP-qualified on the API hop and unmeasured on the guest page's own request
+surface".** Journey C's green run does contain that re-measurement, and the note now names the five lines that hold it:
+the household address as the browser's own URL (`s15-browser-all-journeys-05.log:37`), the credential in
+`x-guest-token` on both verbs and nowhere else in what they send (`:114`), the off-machine destinations being exactly
+the two font hosts the product ships with `outside the allowset: none` (`:122`), the first of those requests carrying
+an **empty** `Referer` and the follow-on referring only to the other font host (`:124`), and `:125` that no `Referer`
+reaching a host outside this machine names this machine's address or carries a credential-shaped string. §9's residual
+— browser history, same-origin path logs, hosting access logs for `/g/<token>` — is kept *beside* those lines, not
+dissolved by them, which is what the paragraph immediately before the note insisted on.
+
+**5. `README.md:477` said the Stage 6 HTTP chain "has not been re-run since" 2026-10-06.** This one came from the `has
+not been re-run` pattern, not from anything Stage-8-shaped: `run.sh all` ran that chain inside §23's 337, so `MINT-02`,
+`UPL-02` and `A7b` print `✔` a second time at `s14-http-battery-all-01.log:414, :421, :447`, inside
+`stage6_storage.test.mjs` at **34** tests / **0** failures. The sentence now records both takes instead of only the
+older one, and no test file was touched to obtain that — the historical suites ran as written, which is where the "do
+not weaken historical tests" duty points when the change is prose about *when* a suite last ran rather than the suite.
+
+**Audit sections were left alone, deliberately.** This file's own earlier statements that the tiers had not run —
+`:336`, `:1179`, `:1202`, `:1658`, `:1700`, `:1873` — and §19's and §22's `docker info exit=1` probes are snapshots of
+the heads that wrote them; the file is append-only, and `:1704` already states that convention for the *earlier*
+stages' documents, which is why `docs/audits/stage-6-storage-assets.md:795, :1034, :1210, :2621` also remain untouched.
+Nothing in this section edits an earlier section of this file.
+
+**The gates a Markdown-only edit owes, taken the way §20 took them.** As the document edits were made, before §24
+existed (`q8-logs/s17-docs-truthsync-gates-01.log`); after §24 was written (`-02.log`); after §24's own citation
+repairs (`-03.log`); and a fourth (`-04.log`) taken after this paragraph was last edited, which is the take these
+committed bytes were checked with. All four print
+`Product contract OK — 213 active file(s) scanned, 0 violation(s)` at `product:check exit=0`,
+`Product contract self-test OK — 31 rule(s) verified` at `selftest exit=0`, and `git diff --check` at
+`diffcheck exit=0` with only the host's `LF will be replaced by CRLF` **warnings** — two files in take 1 (`README.md`,
+`docs/architecture/guest-rsvp-security.md`) and three from take 2 onward (this file joining them, because §24 is its
+own edit) — §15's checkout noise, not a whitespace defect, and not treated as one. The six changed matrix rows
+(`:222-226`, `:270`) were
+re-checked for shape: each a single physical line with `pipes=4`, at lengths 2843 / 2480 / 2852 / 4477 / 2982 / 6089,
+because a row that breaks onto a second line silently drops out of the table. `213` is unchanged because this section
+adds no file and removes none; the two untracked `.yaml` files are still untracked and unstaged, and `git status
+--short` beside them lists exactly the three documents above plus this file. Node gates that read no Markdown
+(typecheck, lint, build, `npm test`, `dbtypes:check`) are not re-run for a `.md` edit — §17's exits stand for the code
+they certify, and the final head's own re-take is a separate gate set, not this paragraph.
+
+**Still understated, still not this stage's sentence to correct.** §20 recorded that the README's opening claim "One
+loop is complete and was exercised end to end" (`README.md:3-4`, quoted there without its bold markup) undercounts
+Stage 7's reviewer loop. It still reads that way: it understates rather than overclaims, and no Stage 8 measurement
+bears on it.
