@@ -353,11 +353,16 @@ through the product's own screens against a **local** Supabase stack (see
   after its Stage 8 migration was forward-applied with `db push --local` behind a `--local --dry-run`
   that named exactly that one file. HTTP: **337** tests / **0** failures / exit 0
   (`q8-logs/s14-http-battery-all-01.log`), of which the Stage 8 suite is **56** cases — the **53**
-  authored minus the one `G-01` template plus its 4 `HOST_CALLS` entries. Browser: **checks 133 /
+  authored minus the one `G-01` template plus its 4 `HOST_CALLS` entries — and the same battery re-taken in a
+  tree resolved from the tracked `package-lock.json` prints the identical **337** / **0** / exit 0
+  (`q8-logs/s19-http-s8clean-01.log`). Browser: **checks 133 /
   measurements 25 / findings 0**, twice in a row (`q8-logs/s15-browser-all-journeys-04.log`,
   `-05.log`), driving journeys A–D against the production bundle recorded as
   `071169257071e5b89cc7fea9df6cef354d81220624b51dd0f04241ce8953f116` over **38** files
-  (`q8-logs/s16-dist-fingerprint-01.log`). What ran *before* those tiers was only the SQL
+  (`q8-logs/s16-dist-fingerprint-01.log`) — bytes §25 shows were resolved from an untracked pnpm lockfile. The
+  tier has since been re-run on the canonical bundle the tracked lockfile produces
+  (`ad0ce11fff294b4c2f836fba6ed7118e4b4d4c4a72e57e14e98ee20da594a73d`, **38** files): the same 133 / 25 / 0 twice
+  in a row (`q8-logs/s19-browser-finalhead-01.log`, `-02.log`). What ran *before* those tiers was only the SQL
   qualification, at head `eb128f7`: `80_guest_invitation_links.sql` **182** and `90_guest_rsvp.sql`
   **185** assertions with `run.sh all exit=0` (`q8-logs/s9-sql-all-32.log`), on a disposable
   plain-PostgreSQL 17.10 cluster because the local stack's engine was down then. Still unproven is a
@@ -365,7 +370,8 @@ through the product's own screens against a **local** Supabase stack (see
   [`docs/audits/stage-8-guest-rsvp.md`](docs/audits/stage-8-guest-rsvp.md) records the eight
   instrument defects those two tiers found and how each was repaired. Unit coverage at the `eb128f7`
   head: 27 panel + 34 adapter-transport + 45 shape + 30 page + 22 door-transport + 31 replies, inside
-  the 765-test / 42-file run (`q8-logs/s10-clean-test.log`)
+  the 765-test / 42-file run (`q8-logs/s10-clean-test.log`), and re-taken at the certified head with the same
+  42 files / 765 tests at exit 0 (`q8-logs/s18-gates-test-01.log:12-17`)
 
 No **production** Supabase environment was validated: a deployed project, its gateway configuration
 and its transport security are all still unproven here. What Stage 3 did close is the layer Stages 1

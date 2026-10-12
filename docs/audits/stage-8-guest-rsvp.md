@@ -2190,3 +2190,172 @@ they certify, and the final head's own re-take is a separate gate set, not this 
 loop is complete and was exercised end to end" (`README.md:3-4`, quoted there without its bold markup) undercounts
 Stage 7's reviewer loop. It still reads that way: it understates rather than overclaims, and no Stage 8 measurement
 bears on it.
+
+## 25. The final implementation head certified in a tree the tracked lockfile actually describes: the bundle §23 published turns out to be built from an untracked resolution, both transport tiers re-taken on canonical bytes, and the gate set the certification owes
+
+**What this section certifies, and which half of the ask it could not discharge.** The brief's seventh item asks for
+the final Node, database-type, product-contract, unit, build and production-dependency gates "against the final
+implementation SHA" and for the mixed npm/pnpm provenance to be resolved "using a genuinely clean npm install **if
+safely possible**". Both halves need a tree the repository's tracked `package-lock.json` describes. §17 had one and
+used it for the Node gates at `eb128f7`, in the worktree `../s8clean`; §23's build, HTTP and browser tiers did not —
+they were taken in `s5qual`, the tree the work was being written in, whose `node_modules/` carries both an npm marker
+and a pnpm store. That gap is what this section closes, and probing it found something under it. The head certified
+here is `81e498ea18cadbca03a8e16eb0c584b83534e94d`, the tip of `stage8/guest-rsvp`, checked out detached in the same
+`../s8clean` worktree (`q8-logs/s18-head-identity-01.log:2-8`, `checkout exit=0`, and `git status --short` printing
+nothing at all before its own `status exit=0` at `:9-10`). The install-tree marker test is the one §17 says
+discriminates: `node_modules/.package-lock.json`
+present (`:12`), `node_modules/.modules.yaml` absent (`:13`), and in this tree neither `.modules.yaml` nor
+`node_modules/.pnpm` exists while the mixed tree has both (`s18-provenance-diff-01.log:4-10`).
+
+**The genuinely clean reinstall was not attempted**, and the reason is measured rather than asserted: the volume sits
+at `C: 476G 474G 1.8G 100% /c` (`:20-21`), and `1.7G` after this section's own build (`q8-logs/s18-gates-build-01.log:25`);
+`npm ci` has to unpack the whole tree before it can drop the old one, so at 100% full it was not safely possible and
+this stage does not do half an install and call the result clean. What *could* be discharged is the provenance
+question itself, and it turned out to have a real answer underneath.
+
+**The divergence, and which side of it is canonical.** `q8-logs/s18-provenance-diff-01.log` compares the two trees
+package by package. Identical on both sides: the toolchain (`vite 6.4.3`, `rollup 4.63.5`, `esbuild 0.25.12` — `:18-20`),
+every runtime peer the bundle carries (`react`/`react-dom 18.3.1`, `react-router-dom 7.18.4`, `clsx 2.1.1`,
+`lucide-react 0.462.0`, `class-variance-authority 0.7.1` — `:21-23, 27-29`), `.env.local` byte-identical (`:31`), and the
+bundle *inputs* at the two heads (`git diff --name-only 04d6b50 81e498e` lists `README.md`, three documents and
+`scripts/stage8-browser-guest.mjs` — `:33-37`, none of which reaches `dist/`). Three packages differ, and they are
+three that end up in the bundle (`:24-26`):
+
+| Package | mixed tree `s5qual` | npm-only tree `s8clean` |
+| --- | --- | --- |
+| `@supabase/supabase-js` | 2.117.2 | **2.97.0** |
+| `@radix-ui/react-slot` | 1.3.3 | **1.2.3** |
+| `tailwind-merge` | 2.6.1 | **2.6.0** |
+
+`package.json` declares `@supabase/supabase-js = ^2.97.0` and the tracked `package-lock.json` resolves it to `2.97.0`
+(`:12-13`), while the mixed tree's `pnpm-lock.yaml` and `pnpm-workspace.yaml` are **untracked** — `s8clean` has no such
+files at all (`:14-16`). So the npm-only bundle is what a reader who clones this repository and runs `npm ci && npm run
+build` gets, and §23's `071169257071e5b89cc7fea9df6cef354d81220624b51dd0f04241ce8953f116` is the fingerprint of a bundle
+built from a resolution this repository does not track — the attribution to pnpm resting on everything a reader can
+inspect independently: the mixed tree's `.modules.yaml` and `.pnpm/` store, the two untracked `.yaml` files, and three
+version pairs the tracked lockfile cannot produce. That digest is **not retired here**: it is, and stays, the bytes §23's ten browser
+runs clicked, and the browser tier's findings about those runs are unaffected by which resolver produced the chunk
+names. What changes is that the certification this section publishes cannot rest on it.
+
+The name-level consequence, counted from the two listings in that capture rather than asserted: each side has **35**
+hashed entries under `assets/` plus `index.html`, `favicon.ico` and `robots.txt` = the **38** files both fingerprints
+cover; **5** names are identical on both sides (`i18n-DqZ-38Hl.js`, `index-Btp1A1On.css`, `instantText-DI7--k6p.js`,
+`safeError-CNIhI6Jh.js`, `sanitizeSvg-CfK6a1-E.js`) and the
+other **30** differ; the logical basename sets are equal, so the two bundles are the same 38 artifacts with different
+content hashes, not two different applications. The five are named so a reader can see which parts of the bundle the
+divergence did not move; this section makes no claim about why those five.
+
+**The canonical bundle, reproduced.** `q8-logs/s18-gates-build-01.log:18-20` prints `dist_files=38`,
+`dist_manifest_sha256=ad0ce11fff294b4c2f836fba6ed7118e4b4d4c4a72e57e14e98ee20da594a73d`, `fingerprint exit=0`, from the
+same `q8-logs/s16-dist-fingerprint.cjs` method §23 names. A second build from a wiped `dist/` — `✓ built in 15.83s`,
+`build exit=0` (`q8-logs/s18-dist-rebuild-01.log:3-4`) — prints the identical digest at `:8`, so the number is a property
+of the tracked resolution and not of one machine's ordering.
+
+**Serving the right bundle is a measurement, not a port check.** `vite preview` answers an unmatched asset path with
+the SPA fallback, so `200 OK` says nothing about *which* tree is being clicked. Re-running the two chunk names through
+`curl -w "%{content_type} %{size_download}"` separates them: the canonical `GuestDoor-xJhsi4kB.js` is
+`text/javascript` over **10,353** bytes, while the mixed-tree name `GuestDoor-CHVKsaUZ.js` is `text/html` over **3,227**
+bytes — that is, `index.html`. The preview that the tier below ran against was started from `s8clean`
+(`q8-logs/s19-preview-s8clean.log`), and the tier's own opening prelude block makes the same proof from the inside: the
+prelude asserts the shipped bundle carries the guest and host copy it tests, calls the loopback target, finds no hosted
+Supabase origin baked in, and reports **977 KB** of shipped JS/CSS/HTML scanned
+(`q8-logs/s19-browser-finalhead-02.log:2-13`).
+
+**The gate set at the certified head, npm-only, every exit adjacent to its own command.** All from
+`q8-logs/s18-gates-node-01.log`, `q8-logs/s18-gates-test-01.log` and `q8-logs/s18-gates-build-01.log`, taken at
+`81e498ea…` with a clean tracked tree:
+
+| Gate | Result | Exit |
+| --- | --- | --- |
+| `typecheck` | clean | `:7` `exit=0` |
+| `lint` | `✖ 9 problems (0 errors, 9 warnings)` | `:15` `exit=0` |
+| `dbtypes:check` | `22 migration file(s)`; `19 public + 10 non-client table(s)`; client types `19 table(s)`; `45 query column group(s) reconciled, 0 finding(s)` | `:24` `exit=0` |
+| `product:check` | `Product contract OK — 211 active file(s) scanned, 0 violation(s)` | `:29` `exit=0` |
+| `product:check --self-test` | `31 rule(s) verified` | `:32` `exit=0` |
+| `npm test` | `Test Files 42 passed (42)`, `Tests 765 passed (765)`, `Duration 178.79s` | `:17` `exit=0` |
+| `build` | `✓ built in 16.60s` | `:15` `exit=0` |
+| `npm audit --omit=dev --audit-level=high` | `found 0 vulnerabilities` | `:23` `exit=0` |
+| `git diff --check` | clean tree, no whitespace defect | `:34` `exit=0` |
+
+The exit-column line numbers are each file's own: rows 1-5 and 9 are
+`s18-gates-node-01.log`, row 6 is `s18-gates-test-01.log:12-17`, rows 7-8 are
+`s18-gates-build-01.log:14-23`. `211` rather than §23's `213` is the proof that this really is the clean tree — it is
+§17's published pair, and the difference is exactly the two untracked `pnpm-*.yaml` files, which are still untracked
+and unstaged in `s5qual` and do not exist in `s8clean`. `42 files / 765 tests` is the same total §17 measured at
+`eb128f7`, now re-taken at this head rather than inherited: `package.json` and `package-lock.json` are byte-identical
+between the two heads, printed as git blob ids so a reader can re-derive it with `git rev-parse` —
+`ce8cd515302c7f829f4f8fc7490b107015e8db59` (lockfile) and `7a5e6634abbaebd0b20912f7c5f709aabed4fb3a` (manifest), each
+twice in `s18-head-identity-01.log:16-19`.
+
+**The browser tier re-run on canonical bytes, twice in a row.** `q8-logs/s19-browser-finalhead-01.log` (run tag
+`s8ui-mv5jx8qs-1qqv0`) and `q8-logs/s19-browser-finalhead-02.log` (`s8ui-mv5k2gpm-zzlmx`), journeys A→D against
+`dist/` = `ad0ce11f…`, each printing `==> checks 133, measurements 25, findings 0` (`:175`),
+`STAGE 8 BROWSER TIER: PASS` (`:176`), `tier_exit=0` (`:177`), at 17:57:24 and 18:01:13 UTC. What an unchanged total does and does not prove, stated because
+the two files are 23,809 bytes each and a reader is entitled to ask whether that is one run printed twice: `diff`
+separates them on **28** lines and those are the run tag, the side-log path, the minted uuids and short codes, the
+millisecond timings, and the order in which the host's reply list renders the same rows — so they are two runs of one
+harness over one bundle. `133` is that harness's fixed check
+inventory, so matching totals say the re-run covered the same surface and found nothing on it — they would also match
+if the bundle had regressed in a way no check asserts, which is why the prelude's shipped-copy assertions and the
+network lines below are read as measurements rather than inferred from the count. The eight instrument repairs §23
+records were
+about the harness, and they hold on the tracked resolution too. Teardown on both runs:
+`0 weddings, 0 households, 0 scopes, 0 answers, 0 credentials, 0 publications, 0 accounts` (`:171`) and the masking
+account `7 credential(s) registered, 5 appeared in what this run tried to print, 5 write(s) were rewritten, 0 escaped`
+(`:172`). The credential-surface lines `docs/architecture/guest-rsvp-security.md:635-647` says must be re-measured
+rather than inherited from Stage 3 are now measured on these bytes, in the same capture the paragraph cites by number:
+the household credential in that page's own URL by design, both guest verbs carrying it in `x-guest-token`
+(`-02.log:113-114`), each credential's wire locations as `url:path@127.0.0.1:4173` and
+`header:x-guest-token@127.0.0.1:54400` (`:118-119`), the only off-machine destinations being the two font hosts with
+`outside the allowset: none` (`:122`), the first outbound request leaving with an **empty** `Referer` (`:124`), and
+nothing that reaches a host outside this machine carrying this machine's address or a 43-character token (`:125`).
+
+**The HTTP battery needed a re-take too, for a reason §23 did not name.** Stage 8's HTTP suite
+`import { createClient } from '@supabase/supabase-js'` (`supabase/tests/api/stage8_guest_rsvp.test.mjs:88`), so the
+harness that produced §23's 337 was itself resolved from the untracked pnpm lockfile — 2.117.2 in a tree whose tracked
+lockfile says 2.97.0. That is a provenance defect of the *test harness*, not of the artifact under test, but it is not
+something to argue away, so it was re-measured: `q8-logs/s19-http-s8clean-01.log` re-takes `bash supabase/tests/api/run.sh`
+in `s8clean` at `81e498ea…`, printing the client version it will import (`2.97.0`, `:3`), the same
+`project_id=localvivaahvarnam` stack identity block and the same preconditions, then one `node --test` per suite at
+`:33, :92, :171, :241, :300, :422, :486, :582`. Per-suite totals at `:84, :163, :233, :292, :414, :478, :574, :674` =
+**38 + 56 + 28 + 36 + 28 + 34 + 61 + 56 = 337**, each with `pass` equal to `tests` and `fail 0`, every table the battery
+seeds back to `0 rows` (`:686-696`), `==> RESULT: PASS` (`:697`), `run_exit=0` (`:698`). Identical to §23's take, which is the
+finding: the HTTP tier's verdict did not depend on which `supabase-js` the harness happened to resolve. The SQL tier
+needed neither: it runs `psql` against a throwaway cluster, and no Node resolver is anywhere on that path.
+
+**One instrument defect in my own push accounting, recorded because it touched a published claim.** The push that
+published `81e498ea…` was wrapped as `git push … | tail -5; echo "push_exit=$?"`, so the exit code printed there is
+`tail`'s, not `git`'s — a pipeline's `$?` is its last command's status, and no "push exit=0" from that shape is
+publishable. The authority actually used is a two-instrument read-back, re-taken for this section into
+`q8-logs/s19-remote-readback-01.log`: `git ls-remote origin refs/heads/stage8/guest-rsvp` →
+`81e498ea18cadbca03a8e16eb0c584b83534e94d` at `lsremote_exit=0`, and
+`gh api repos/Pavithran-R-A/wedding-invites-pro/git/refs/heads/stage8/guest-rsvp --jq .object.sha` → the same SHA at
+`ghapi_exit=0`, with local `HEAD` identical (`:7-9`). A stale `origin/stage8/guest-rsvp` tracking ref is deliberately
+not consulted: this repository's remote helper pins `origin.fetch` to one branch, so that ref is not evidence of
+anything current.
+
+**What this section still does not claim.** No hosted Supabase project, no GitHub Actions run, no merge, no Stage 9 —
+the head is certified as pushed work awaiting independent review, which is where the brief leaves it. Two limits of
+the browser tier are stated rather than fixed: it observes requests at the CDP network domain and so logs no request
+*bodies*, and it attaches no console listener, so a page that console-errors without failing an assertion would not be
+found by it. One line prints as a measurement rather than a pass and is meant to: `-02.log:150` records the answer
+radios as `aimed 220x44` through their labels, because the visible control is a styled `<label>` over an input the
+product replaces visually — the tap target is the label's, and 44 px is what the check measured, not what the input's
+own box is.
+
+**The gates a Markdown-and-nothing-else edit owes, taken the same way §20 and §24 took them.** This section changes
+two tracked files and no code: this file and the one README bullet that reported §23's digest as the bundle the tier
+ran against (`README.md:348-374`, whose digest sentence is now `:360-365`), which this section falsifies and so must
+point at both pairs. Because the edit touches no
+`src/**`, no `.ts`/`.tsx`, no route, no `src/config/product.ts` value and no `docs/architecture/` or
+`supabase/migrations/` path, the sweep is bounded by what the checker actually reads: `product:check`, its `--self-test`
+and `git diff --check`, each taken in this editing tree (`s5qual`, mixed) so the count a reader gets from the tracked
+bytes plus this tree's two untracked `.yaml` files is `213`, and the clean-tree counterpart is the `211` published
+above. Two takes are in `q8-logs/s20-docs-certification-gates-01.log` and `-02.log`: one on the edited bytes while this
+paragraph was still being rewritten, and one immediately before the commit, on the exact bytes it carries. Take 01 is itself
+an instance of the defect named above: it was first issued as `npm run product:check | tail -3; echo "… exit=$?"`,
+which reports `tail`'s status and not the gate's, and it was then re-taken with no command in the capture piped and
+each `code=$?` adjacent to its own call — the piped shape was overwritten, not kept as evidence, and the sentence a
+reader should carry is that a pipeline's `$?` is its last stage's. `README.md:348-374` is a list item, not a matrix
+row, so no row-shape re-check applies; the readiness matrix is not touched by this section, so its rows keep the
+lengths §24 published.
