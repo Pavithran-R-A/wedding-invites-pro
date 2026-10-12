@@ -1753,7 +1753,9 @@ itself exited **1**, which is the assertion (no non-Markdown path in the delta),
 `git diff --stat eb128f7..HEAD` names them: `README.md`, this file and `docs/product/feature-readiness.md`,
 **374 insertions(+), 8 deletions(-)** across the three. None of those is an input to any tier: the SQL tier reads
 migrations, batteries and `run.sh`; the Node tier reads `src/`, `scripts/` and the package tree. So §16's
-`run.sh all exit=0` and §17's five clean-worktree exits remain the certifications **at this head**, and the method for
+`run.sh all exit=0` and §17's **eight** clean-worktree Node exits (typecheck, lint, `dbtypes:check`, `product:check`,
+self-test, `npm test`, `npm run build`, `npm audit`), plus that section's `git diff --check` line, remain the
+certifications **at this head**, and the method for
 a future docs-only head here stays the delta, not a tier re-run. §20 reasoned this while the files were still
 uncommitted; §21 exists to put the same evidence against the committed bytes, and to record the deviation below. This
 section is itself a Markdown-only edit to a document no gate reads, so it needs no successor — an audit that wrote a
@@ -1778,10 +1780,14 @@ piped each gate into `tail` and printed `$?` after it, so all three exit codes i
 exit code comes from the gate itself, adjacent, never from the last stage of a pipe — and this is a repeat offence
 against it, recorded here rather than left for the next reader to rediscover. The re-take above redirected each gate's
 output to a file and asked `$?` before any other command ran. The piped run was not captured and is not cited for
-anything.
+anything. A second slip in the same direction, caught by re-reading the table rather than by a gate: §21 as first
+committed said "§17's **five** clean-worktree exits", where §17's table lists **eight** Node gates plus a
+`git diff --check` line — a count recalled instead of re-read, which is the exact failure this stage keeps naming. The
+sentence now above carries the eight by name; the wrong number stays recorded here rather than quietly replaced.
 
-**Both commits still carry the same hook noise.** `Can't find lefthook in PATH` printed on `fbb6855` and `f012740`;
-each `git commit` exited 0, no `--no-verify` was passed, and the hooks the repo actually has were not bypassed — the
+**Every commit in this segment carries the same hook noise.** It printed `Can't find lefthook in PATH` on `fbb6855`,
+`f012740`, `1ff100b` and this section's own repair commit; each `git commit` exited 0, no `--no-verify` was passed,
+and the hooks the repo actually has were not bypassed — the
 gap is a tool that is not installed on this host, which §15 already records.
 
 **Engine re-probe: a third probe, the same answer.** `q8-logs/s11-engine-probe-03.log` — `docker info exit=1`,
