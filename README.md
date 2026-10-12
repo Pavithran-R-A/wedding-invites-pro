@@ -6,8 +6,10 @@ edits the invitation's words and styling, freezes an immutable version, publishe
 revises it into a second version and republishes, rotates and revokes the link, and a visitor with no
 account opens that link on a phone — **against a real local Supabase stack** (Kong, PostgREST, GoTrue,
 PostgreSQL 17.6) driven from a browser. Nothing is deployed and no hosted project was used, so no claim
-here is that a customer can do this on a live site today. Guest lists, RSVP collection, payment and
-printing do not exist yet.
+here is that a customer can do this on a live site today. **Guest households and RSVP are a later case:**
+that surface is written, unit-tested and qualified at the SQL layer on this branch, and it has never been
+exercised over HTTP or driven in a browser, so it is listed under *Implemented foundations* below rather
+than under the loop that was exercised. Payment and printing do not exist in any form.
 
 **Brand status: preliminary working brand — not legally cleared.** The name may change before
 launch. Nothing in this repository should be read as a trademark claim, and no trademark search
@@ -343,6 +345,19 @@ through the product's own screens against a **local** Supabase stack (see
   against the same default shape) is resolved by the database and stored inside the frozen snapshot
   with its provenance, so a guest's document is explained by the row it came from rather than by a
   lookup that has to succeed later
+- The guest side of the product (Stage 8): `GuestInvitationPanel` (**783 lines**, mounted at
+  `src/pages/EditProject.tsx:898`) for households, salutations and per-recipient ceremony scopes,
+  `GuestRepliesPanel` (**377 lines**, `:902`) for the host's own manual entries beside the guest's, and
+  `/g/:token` (`src/App.tsx:95`, outside `AuthProvider` and `ProtectedRoute`, shipped as its own lazy
+  chunk) for the guest's door. **No part of this bullet has been exercised over HTTP or driven in a
+  browser.** What has run is its SQL qualification, at head `eb128f7`: `80_guest_invitation_links.sql`
+  **182** and `90_guest_rsvp.sql` **185** assertions with `run.sh all exit=0`
+  (`q8-logs/s9-sql-all-32.log`), on a disposable plain-PostgreSQL 17.10 cluster because the local
+  stack's engine is down — so the HTTP statuses, the `x-guest-token` transport and the rendered page
+  sit outside those numbers, and the repair list they forced is §16 of
+  [`docs/audits/stage-8-guest-rsvp.md`](docs/audits/stage-8-guest-rsvp.md). Unit coverage at the same
+  head: 27 panel + 34 adapter-transport + 45 shape + 30 page + 22 door-transport + 31 replies, inside
+  the 765-test / 42-file run (`q8-logs/s10-clean-test.log`)
 
 No **production** Supabase environment was validated: a deployed project, its gateway configuration
 and its transport security are all still unproven here. What Stage 3 did close is the layer Stages 1
@@ -354,7 +369,7 @@ through Kong and PostgREST rather than inferred. See
 [`docs/audits/stage-3-public-invitation.md`](docs/audits/stage-3-public-invitation.md) §4–§6 for what
 that did and did not buy.
 
-What deliberately does **not** exist yet is a **product surface** for guest lists, RSVP collection,
+What deliberately does **not** exist yet is a **product surface** for
 QR codes, PDF/image export, payment, GST handling, print ordering, and admin tooling. The people,
 venues and ceremonies of a wedding are now edited on screen as rows, so the fixtures behind Stage 3's
 host-to-guest run were entered through the product itself. Stage 2 gives several of the remaining
