@@ -252,14 +252,24 @@ withdrawn-publication all producing those bytes (`20260926130000...:960-964` for
 which is what makes the *count* of households and the *existence* of an event undiscoverable through
 probing.
 
-**Ruling 4.1 — the guest door's answer-shape is separate from its credential-shape.** Invalid *input*
-(a party size above the household's expected size, an event the household was not shown) is an
-actionable problem for the guest and must be distinguishable; invalid *access* is not. So the write
-response has exactly two families: `reason: 'unavailable'` (a single token covering every credential,
-scope and publication state, including a named-but-unscoped event id, so no probe can tell "not yours"
-from "does not exist"), and a bounded vocabulary for correctable answers
-(`'party_size_too_large'`, `'answers_not_accepted'`). The set is closed by CHECK in the body, and the
-battery asserts that no message from the second family can be produced by a credential problem.
+**Ruling 4.1 — the guest door's answer-shape is separate from its credential-shape.** A problem with the
+*answer* (a party size above the household's expected size, an optional answer this invitation is not
+asking for) is actionable for the guest and must be named; a problem with *access* is not, and an event
+the household was not given is an access problem. So the write response has exactly two families:
+`reason: 'unavailable'` (a single token covering every credential, scope and publication state,
+including a named-but-unscoped event id, so no probe can tell "not yours" from "does not exist"), and a
+bounded vocabulary for correctable answers (`'party_size_too_large'`, `'answers_not_accepted'`). The set
+is closed in the function body rather than by a table CHECK — the three answers are `constant jsonb`
+values (`:727-729`) and a refusal never lands in a table — and what the battery measures is the two
+names' *different* relation to the credential, not a single claim about both.
+`party_size_too_large` is compared only after the credential has resolved to a household (`:865-883`), so
+no credential state can produce it: a revoked, expired or absent link that asks to bring 999 is answered
+`unavailable`, which is the arm that keeps this claim from being satisfied by a door that never names a
+ceiling for anybody. `answers_not_accepted` is returned inside the body loop, in front of the credential
+read (`:779-783`, before `:840`), so the same body from a dead link and from no link at all receives that
+one sentence byte for byte — a named refusal is a statement about the request, the same for every
+household of every wedding, and is therefore nothing a probe can read as a fact about a credential. Both
+arms are measured by `supabase/tests/stage8/90_guest_rsvp.sql` group A (`A2`, `A4a`, `A4b`).
 
 **Ruling 4.2 — a malformed *body* is a third thing, and it is refused before the credential is looked at.**
 The paragraph above lists "malformed shape" among the credential problems because that is what it means at
