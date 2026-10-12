@@ -1394,5 +1394,356 @@ lived only in the session — so it is recorded here as a discarded instrument o
 1,048,576 KB floor.
 Starting the engine remains a human action, so the Stage 8 tiers stay labelled authored-not-run and no tier is green.
 
+## 16. The SQL tier finally ran: the substrate it ran on, the four classes of defect it caught, and one census number it had to measure rather than recall
+
+§15's closing paragraph is the previous state of this file's knowledge, and it is now superseded **for the SQL tier
+only**: `bash supabase/tests/stage8/run.sh all` ran to completion at the pushed head, and the capture carries both the
+head it ran at and the runner's own exit — `q8-logs/s9-sql-all-32.log` opens with
+`head=eb128f7bca9dc9e96665fb05b8c02aae9f30200c`, prints `==> Backend: existing cluster (PGHOST=127.0.0.1 PGPORT=55440)`
+as its third line, and ends with `run.sh all exit=0`. The HTTP and browser tiers are unchanged by this section and stay
+labelled not-run (§19).
+
+**The substrate, stated as a set of differences from the stack.** The engine was still down when the tier was reached
+(`q8-logs/s10-engine-probe-01.log`: `docker info exit=1`, with `failed to connect to the docker API at
+npipe:////./pipe/dockerDesktopLinuxEngine` printed by the same command), and starting it is a human action, so the SQL
+tier ran on a disposable cluster this session created instead of waiting: native **PostgreSQL 17.10 on x86_64-windows,
+compiled by msvc-19.44.35227** (read back with `select version()`), its own data directory outside the repository,
+loopback trust auth, port 55440 chosen to collide with nothing. Four differences travel with every number in this
+section, and none of them is repairable by re-running:
+
+| Delta | Measured as | What it costs the claim |
+| --- | --- | --- |
+| 17.10 native, not the stack's `postgres:16-alpine` | `select version()` above | the chain applies and behaves as recorded *on 17*. It is not evidence that 16 agrees, and nothing here was checked for a version-specific behaviour in either direction. |
+| server timezone `Asia/Calcutta`, not UTC | `select current_setting('timezone')` → `tz=Asia/Calcutta logtz=Asia/Calcutta`, and the server log stamps every line `IST` | measured rather than waved: the schema keeps event clock times in `starts_at_local timestamp without time zone` and the wedding's zone in a `timezone text` column defaulting to `'Asia/Kolkata'` (both read off `\d public.wedding_events` on a qualified database), so battery 1's four absolute fixture literals (the `'2026-11-14 07:30'`, `'2026-11-14 18:00'`,
+`'2026-11-15 09:00'` and `'2026-12-02 09:00'` values at `80_guest_invitation_links.sql:360, :365, :369, :373` — the only
+four date-shaped literals in either Stage 8 battery, counted with `grep -c "'202[0-9]-"`, which reports 4 and 0) cannot
+be shifted by a server zone at all, and the expiry and `last_used_at` assertions compare `now()` against instants the same session wrote into `timestamp with time zone` columns. The zone is therefore a display difference on this substrate, and `E4` at `90_guest_rsvp.sql:967-975` asserts the *data* zone, which no server setting can move. |
+| a port and a data dir that are not the stack's | the runner's own backend line in the capture | the databases are named `st8qual_*` and the runner drops each one (`DROP DATABASE IF EXISTS … WITH (FORCE)`) when its chain finishes, so nothing in this section can have read the `localvivaahvarnam` volumes. |
+| one unclean stop, recovered by WAL redo | `q8-logs/s9-pg17-server-restart-03.log`: `database system was not properly shut down; automatic recovery in progress` at 06:52:28, `redo starts at 0/6E701D8`, `redo done at 0/754CC70`, `database system is ready to accept connections` at 06:52:31 | the green run started 08:08, i.e. on the recovered cluster. The recovery is a fact about the *cluster*, not the chain: every suite creates its database inside the run it belongs to. |
+
+What the substrate is *not* remains the boundary the runner itself prints (`supabase/tests/stage8/run.sh:316`, restored
+by §16's first repair below): plain Postgres plus the runner's role/auth shim and a storage-schema fixture. PostgREST,
+Supabase Auth and the Storage API were not executing, so the guest door's HTTP status and body, the
+`x-guest-token`/`x-invitation-token` separation and the rendered invitation are not carried by these numbers.
+
+**The tier had never run, so the batteries had never been compiled.** plpgsql compiles a block the first time it
+executes, which means an authoring defect in a block below the point where a run dies is invisible until the run
+reaches it. Battery 2 had never passed group X. When it did, four distinct classes surfaced; each repair either made a
+claim measurable or replaced one the store does not support, and no expectation was relaxed to obtain a pass.
+
+1. **Same-statement snapshot vacuity — the organising one.** Every expression of one SQL statement sees the snapshot
+   taken when that statement *began*, so an assertion that put a door call and a read of what that door must have
+   written inside one `ARRAY[…]` compared the store's pre-write state with the door's answer. Its "wrote nothing" cells
+   passed whatever the door did, and its "the write landed" cells could never pass. Repaired by hoisting each mutating
+   call into its own statement and reading the store after it: `N6` (the ledger is NULL before the read and stamped by
+   it), and `A0b`, `A2`, `A3`, `A5`, `A7`, `A8`, `A9`.
+2. **Defects that only a first compile can find.** `text[] || 'label'` binds the right operand to
+   `anyarray || anyarray` and aborted `U4` before any door opened (the labels are now `::text`);
+   `array_agg(boolean)` and `array_agg(name)` type-mismatched at `X13` and `U2`; a GUC compared to a `uuid` column
+   without a cast at `A9`; `S1`'s want list ordered `record` before `read`, which no `COLLATE "C"` cluster can produce
+   (`a` = 0x61 precedes `c` = 0x63 at the third differing byte); and `string_agg(DISTINCT proname COLLATE "C", …)` is
+   rejected outright because `proname`/`nspname` are type `name` — the `::text` on both the aggregate argument and the
+   `ORDER BY` in `G6`, `G9` and the closing census is what lets a pinned byte-order comparison run at all.
+3. **A probe whose expected refusal was a syntax error, in two different ways.** Battery 1's `B3` was written
+   `now() - interval ''1 hour''` inside a `$t$…$t$` dollar-quoted string, where no escaping is needed, so the probe
+   could only ever have failed on syntax. Battery 2's `MA1 / 03-top-level-string` carried
+   `quote_literal('"x"')` in a `VALUES` row that the surrounding `INSERT` *already* passes through
+   `quote_literal(q.body)` (`90_guest_rsvp.sql:1657`, the row at `:1664`), so the body reached the door double-quoted,
+   `::jsonb` raised `22P02 invalid input syntax for type json`, and the run logged
+   `FAIL MA1: "03-top-level-string" got [22P02 …] want [23514 / %not in the shape%]` — that line is in
+   `q8-logs/s9-pg17-server-restart-03.log:1177` at 07:07:11, from a guest-chain attempt on the recovered cluster, not
+   from a green capture. The fix removed the redundant inner `quote_literal` only: the want is still `23514` and
+   `%not in the shape%`, and the statement now actually sends a JSON string body, which is the case that group exists
+   to cover. The same block also aliased a `VALUES` column `like` and had to rename it to `want_like`.
+4. **Claims that were true but unmeasured, now measured.** `B18`'s unscoped form ("the stranger sees no households
+   anywhere") is false on this fixture, because `B1`, `B4`, `B7` and `B8` all act against a real household of the
+   stranger's *own* wedding; it now measures both halves — zero rows of the tested wedding, one row of the wedding the
+   caller owns — and the second half is what turns the first from a blanket denial into a policy. `GB`/`GC` expected
+   `permission denied for table access_tokens`, a message no run can produce, because Stage 2's baseline revokes the
+   whole `private` schema from both browser roles (`20260925120000_stage2_privilege_baseline.sql:29`, USAGE to
+   `service_role` only at `:38`), so the engine refuses at the schema; the table grant itself is pinned from the ACL by
+   `G7`. `H10`'s expiry-policy census counted the wedding's public-invitation row in an assertion whose label says
+   *household* links, so it now filters `token_kind = 'guest_invitation'`. `F9` aggregated booleans instead of their
+   text. `G5` excluded the owner's own ACL entry from the grantee census, with the reason in the label: PostgreSQL
+   materialises `postgres=X/postgres` on the first GRANT to any other role, so it names the installer, not a caller.
+   `U3` now ages the household's whole retired history so the panel's `created_at DESC` tie-break is exercised rather
+   than defeated, and reads back both the count and the order; `U6` asserts its refusal by *key absence*; `X9` splits
+   into `X9`/`X9b` so the second tenant's family has a real scope row, which is the only thing that makes `K7`'s
+   absences and `A9`'s misaimed answer measurements rather than a door answering nothing.
+
+**Z4 was a stale number, and the repair is the measurement.** Battery 2's closing census asserted the Pillai household
+at `1/2` credentials (live of all). The run reached that line and measured `1/4`. Before touching it, the store was read
+back on a copy of the chain: the four rows are `X10`'s mint, `U2`'s rotation successor, `N6`'s re-send after `N5`
+withdrew it, and `Qb3`'s post-takedown re-send — and each of those is *independently asserted by the group that made
+it* (`U2` measures the household at two rows, `N6` at three, and `Qb4` identifies the fourth as the row absent from
+`s8u`), while the wedding-level arithmetic in `Z3` closes at 19 = 17 + 2. So the census was the wrong number, not the
+database: the hand-written total predated group N. `1/4` is what those three assertions add up to, the label now names
+the four mints by their groups, and the comment records that the total is counted rather than recalled. The first probe
+capture of that read is defective and kept: `q8-logs/tmp/z4probe-raw.txt` opens with
+`psql: error: unrecognized value "" for "pager"` because `-P pager=` was passed without a value, and a probe of
+battery 2's fixtures cannot run outside `--single-transaction` at all — its `s8c` is `ON COMMIT DROP`, so under
+autocommit the very next statement died with `relation "s8c" does not exist`. The re-taken probe used the runner's own
+transaction shape.
+
+**The floor moved with the splits, and it is arithmetic, not a guess.** 124 direct equalities + 4 `ok` arms + 56
+probe-row assertions = 184 assertions authored below `L1`'s own line, and the run reports 185 with `L1` included, which
+is what the file's closing floor (`IF ran < 184`) and the runner's PASS-line census both agree with.
+
+**Four numbers §12 published about these bytes have moved, and they are re-measured rather than recalled.** §12
+describes the batteries as authored, and its counts were true of those bytes at that time: `80_guest_invitation_links.sql`
+2,027 → **2,048** lines and `90_guest_rsvp.sql` 4,064 → **4,220**, because the repairs in classes 1–3 above hoisted
+writes into statements of their own. The shape instrument was re-run on the current bytes
+(`q8-logs/s10-shape-absolute-01.log`, `RESULT=OK (region balance only)` and `shape exit=0` for each file): its
+`pg_temp_perform_calls` is **163** for battery 1, unchanged from §12, and **153** for battery 2 against §12's **150** —
+the three hoisted calls, and nothing else. Every other region counter in its output (`dollar-tags` 13 and 16,
+`odd=none`, and the `CASE`/`END`/`BEGIN`/`IF`/`LOOP` pairs) is byte-identical to §12's, which is what licenses saying
+the repairs added statements rather than restructuring blocks. The same capture is also the place to record that
+`grep -c 'PERFORM pg_temp'` on these files reports **166** and **156**: that counts *lines matching a substring*,
+including the ones inside comments and assertion labels, so it is a different question, and the instrument's occurrence
+count is what this record publishes. §12's opening byte counts (132,876 and 279,238) were not re-taken and are not
+re-published here.
+
+**Every suite the green run reported, with its own total and counting method** — the list, because a total without one
+is not a scope. Taken verbatim from `q8-logs/s9-sql-all-32.log`; `lines` means the runner counted printed `NOTICE: PASS`
+lines and required the suite's own reported total to equal it, `counter` means the suite keeps an internal counter and
+the printed lines are fewer by design.
+
+| Chain | Suite | Total | Census |
+| --- | --- | --- | --- |
+| guest | `stage 8 80_guest_invitation_links` | 182 | lines observed 182 |
+| guest | `stage 8 90_guest_rsvp` | 185 | lines observed 185 |
+| family | `stage 7 80_family_review` (at Stage 8 head) | 255 | lines 255 |
+| family | `stage 7 90_review_boundary` (at Stage 8 head) | 116 | lines 116 |
+| historic, clean chain | `stage 2 migration outcome` | 42 | lines 42 |
+| | `stage 3 draft invariant` | 46 | counter (9 lines) |
+| | `stage 3 publication boundary` | 284 | counter (231 lines) |
+| | `stage 2 privilege + RLS attacks` | 464 | counter (25 lines) |
+| | `stage 2 catalog conformance` | 103 | lines 103 |
+| | `stage 4 pack documents` | 428 | lines 428 |
+| | `stage 4 §8 fixture tooling` | 57 | lines 57 |
+| | `stage 5 50_review_binding` / `60_definition_vocabulary` / `70_document_resolution` | 122 / 50 / 124 | lines, each matching |
+| | `stage 6 80_asset_registry` / `90_storage_policies` | 90 / 80 | lines, each matching |
+| historic, legacy chain | `stage 2 migration outcome` | 76 | lines 76 |
+| | `stage 3 draft invariant` | 49 | counter (9 lines) |
+| | the other ten suites | as the clean chain, except publication 284 and attacks 464 unchanged | as above |
+
+**These five commits moved no measurement.** A first full-tier run finished at 07:50:53 (`q8-logs/s9-sql-all-31.log`),
+carrying the repaired battery files from the working tree but predating all five commits; the head run above started at
+08:08. `diff` over the two captures' 28 suite-summary lines prints nothing and
+`q8-logs/s9-sql-run31-vs-32-diff.log` records `diff_exit=0`, which is what licenses saying that the comment repair
+(`98512e6`), the two battery repairs (`a7e85c3`, `c93867f`), the runner's quoting fix (`cb5e3f1`) and the architecture
+truth repair (`eb128f7`) changed no suite's total or census. `cb5e3f1` is worth naming on its own: the runner's final
+boundary notice quoted `x-guest-token` and `x-invitation-token` inside a double-quoted `echo`, so the shell executed
+them as commands and every earlier capture printed `command not found` in place of the two header names the notice
+exists to name. A widened `grep -rn 'echo "[^"]*`' --include=*.sh` over every runner in the repository found exactly one
+such line, so the class is closed, not sampled.
+
+## 17. The Node gates at the same head, on a tree this stage installed: the eight exits, and the two numbers that moved because the tree moved
+
+Brief item 7 asks for the final Node and production-build qualification "on a separate clean npm worktree when
+feasible, to verify independence from the mixed npm/pnpm installation". It is feasible, and it was done in the worktree
+this stage created at `../s8clean`, which `git checkout --detach eb128f7` moved from `1ea36a4` to the certified head;
+`git diff --name-only 1ea36a4..eb128f7` lists five files, all SQL or Markdown, so no dependency manifest moved and no
+reinstall was owed. **No installer ran in this worktree during this segment.**
+
+The tree's ownership is claimed only as far as its markers support it. `node_modules/.package-lock.json` exists, and
+`node_modules/.pnpm` does not (`ls -d` → exit 2), and `node_modules/.modules.yaml` does not; `git status --short` is
+empty, so there is no untracked file in the scanned set. Stage 4's rule that §15 cites — that the symlink *form* is the
+discriminator because both marker files can exist at once — does not transfer to a Windows npm tree, and this run
+measured that rather than assuming it: `readlink node_modules/vite` printed an empty string, because npm writes real
+directories here, so the marker pair is the whole of the evidence available and it points one way. `node v24.21.0`,
+`npm 11.19.0`, capture `q8-logs/s10-clean-tree-marker.log`.
+
+| Gate (run in `../s8clean`) | Own exit | What it printed |
+| --- | --- | --- |
+| `npm run typecheck` | `exit=0` | no output (`q8-logs/s10-clean-typecheck.log`) |
+| `npm run lint` | `exit=0` | 0 errors, 9 warnings, all `react-refresh/only-export-components` (`s10-clean-lint.log`) |
+| `npm run dbtypes:check` | `exit=0` | `Database contract OK — 22 migration file(s). schema: 19 public + 10 non-client table(s); client types: 19 table(s); data layer: 45 query column group(s) reconciled, 0 finding(s).` |
+| `npm run product:check` | `exit=0` | `Product contract OK — 211 active file(s) scanned, 0 violation(s).` |
+| `node scripts/check-product-contract.mjs --self-test` | `exit=0` | `Product contract self-test OK — 31 rule(s) verified.` |
+| `npm test` | `exit=0` | **Test Files 42 passed (42) · Tests 765 passed (765)**, 112.02 s (`s10-clean-test.log`) |
+| `npm run build` | `exit=0` | `✓ 2219 modules transformed`, `✓ built in 22.89s` (`s10-clean-build.log`) |
+| `npm audit --omit=dev --audit-level=high` | `exit=0` | `found 0 vulnerabilities` |
+| `git diff --check` | `exit=0` | no output, no CRLF warning — this worktree's copy was written by `git checkout`, not edited |
+
+**Two numbers differ from §15's table, and both differ because of the tree, which is what this section exists to
+establish.**
+
+- *The entry chunk.* §15 measured `index-CFPUdCYd.js` 577.95 kB / 172.44 kB gzip on the pnpm-owned tree. This npm tree
+  prints `index-BHqXuoEV.js` **509.70 kB / 154.74 kB**, and `EditProject-CaPB-X2z.js` 146.72 / 40.27 against 148.98 /
+  40.98. The transform count moves with it: 2219 modules here against 2227 there. The bytes that do *not* depend on the
+  tree are the ones that did not move: `GuestDoor` 10.35 / 4.05, `guestInvitation` 4.01 / 1.41 and
+  `index-Btp1A1On.css` 69.34 / 12.28 are identical in both, hash name included, so the guest door still ships as its own
+  lazy chunk on either tree. Vite's >500 kB warning printed here too, at 509.70; the threshold is deliberately unset and
+  Stage 3's record already settles that the warning printing is not a gate failure. This section does not adjudicate
+  which of the two entry sizes is "the" number — both are recorded, each with its tree.
+- *The scanned-file count.* 211 here against 213 in §15, and the two are the untracked `pnpm-lock.yaml` and
+  `pnpm-workspace.yaml` that sit in the *other* working tree: `git status --porcelain | grep '^??'` in `s5qual` lists
+  exactly those two `.yaml` files, `s8clean` lists none, and `npm run product:check` was re-taken in the mixed tree at
+  this head to confirm the pair (`exit=0`, `Product contract OK — 213 active file(s) scanned`). The checker counts files
+  on disk, which is the behaviour Stage 3's instrument note already records.
+
+`npm test`'s totals are identical to §15's (42 / 765), and the known nondeterminism (Stage 3's
+`editInvitationPage.test.tsx` racing a shared heading) did not appear: this run passed whole on its first attempt, which
+is reported as what happened, not as a property of the suite.
+
+## 18. Secret and credential scan at the head: the pattern set, the one it missed, and a history item already settled
+
+Three captures, at `eb128f7`, over the **46** files this branch added or changed
+(`git diff --name-only 333803f..eb128f7` → `q8-logs/tmp/s8-branch-files.txt`; 15 under `supabase/tests`, 9 under
+`src/test`, 4 `src/integrations`, 3 each `src/pages`/`src/lib`/`src/components`, 2 `docs/architecture`, and one each
+`supabase/migrations`, `src/App.tsx`, the two `scripts/` contract files, `docs/product`, `docs/audits`, `README.md`).
+
+`q8-logs/s10-secret-scan-01.log` is kept and **its own masking is a defect**: it piped every match through
+`s/[A-Za-z0-9_-]{43}/MASKED43/g`, because 43 is this stage's credential length, and migration and ADR basenames happen
+to be exactly that long too — so the capture mangled the very paths it was quoting. `s10-secret-scan-02.log` re-runs
+the same pattern set verbatim and masks nothing, and it is the one cited below.
+
+| Pattern (both passes: the 46 files as they sit on disk, then only the 19,696 lines the branch's commits added) | Files | Added lines |
+| --- | --- | --- |
+| JWT shape `eyJ…\.eyJ` | **0** | **0** |
+| `sb_secret\|SUPABASE_SERVICE\|service_role_key\|anon_key\|supabase_url_key` | 3 | 1 |
+| AWS / Anthropic / GitHub / Slack key shapes | **0** | **0** |
+| `BEGIN … PRIVATE KEY` | **0** | **0** |
+| assignment-shaped `password\|secret\|api_key\|token = <12+ chars>` | 16 | 4 |
+| any 43-character run | 334 | 145 |
+
+Every non-zero row is accounted for by name, not by verdict. The key-name matches are one sentence of the Stage 8 audit
+quoting an earlier grep, and two copies of the checker's own deliberately-bad fixture (`VITE_SUPABASE_SERVICE_ROLE_KEY`
+inside `scripts/check-product-contract.mjs:646` and its test at `:50`) — a rule needs the string it detects. The
+assignment matches are variables (`const token = path.slice(GUEST_PATH_PREFIX.length)`), inert test placeholders
+(`'a-host-access-token'`), and the API suites reading a minted token back off a published path. The 43-character runs
+collapse to **17 distinct strings**, and PASS 3 of `s10-secret-scan-02.log` prints all seventeen classified: 13 are migration basenames truncated
+at the identifier limit, 3 are foreign-key constraint names (`access_tokens_wedding_id_publication_id_fke`,
+`household_event_scopes_wedding_id_event_id_`, `rsvp_responses_wedding_id_household_id_fkey`), and 1 is a run of dashes
+in a comment rule. **No secret material was found in either pass.**
+
+**The pattern the first pass did not cover, and the addendum that covers it.** A 43-character run and an assignment
+literal are the wrong shapes for this stage's actual secret material, because the batteries *mint real credentials* from
+hard-coded passphrases. `q8-logs/s10-secret-scan-03.log` therefore greps the minting call sites themselves: 14
+`digest(convert_to(…))` sites in `80_guest_invitation_links.sql` and 4 in `90_guest_rsvp.sql`, over 9 distinct fixture
+preimages (`s8-g-hostwrite`, `s8-s-control`, `s8-s-guest-nohousehold`, `s8-s-guest-request`, `s8-s-guest-version`,
+`s8-s-public-household`, `s8-s-rsvp-version`, `s8-w-double-mint`, `s8-w-rsvp-kind`), zero fixed 64-hex digests committed,
+and zero fixture labels or `convert_to(` calls anywhere under `src/` — measured twice, because the addendum's first
+`src_rc=0` came from a piped `head` and is its own repeat of this stage's recorded exit-code mistake; the re-taken,
+unpiped `grep -rl` returns **1** for both questions. These preimages are this repository's own test words, which is why
+they are printed rather than masked; they are not project credentials, and the shipped code cannot reach them.
+
+**Env handling, including the one history item.** `git ls-files` shows `.env.example` and nothing else env-shaped; its
+three values are the placeholders `your-project-ref`, `https://your-project-ref.supabase.co` and `public-anon-key`, and
+its header states in words that these are browser-public settings and that a `service_role` or database password must
+never be placed in one. On-disk `.env` and `.env.local` are ignored by `.gitignore:16` and `:17` (with `!.env.example`
+at `:18`), and only variable *names* were printed from `.env.local` — six `SUPABASE_LOCAL_*` entries and two
+`VITE_*` ones, values never read into a capture. `git log --all --diff-filter=A -- .env .env.local` returns exactly one
+commit, the scaffold's `c037e92`, and Stage 0's whole-history scan already settled it: its only hit was `.env`, whose JWT
+decodes to `"role":"anon"`
+(`docs/audits/stage-0-truth-security.md:67-73`), it was removed by `68dbeed`, and
+`git ls-tree -r HEAD --name-only | grep -xE '\.env|\.env\.local'` exits **1** — the head carries neither. Nothing here
+adds to Stage 0's conclusion; it re-derives it at this head.
+
+## 19. What is measured now, what is still not, and the one thing this stage cannot do by itself
+
+Measured at `eb128f7`, each with its own exit: the whole SQL tier (§16) — Stage 8's two batteries at 182 and 185 on a
+chain that ran nothing else, Stage 7's pair at 255 and 116, and the Stage 2–6 historical suites on both the clean and the
+legacy chain — and the Node gates plus the production build (§17) on an npm-only tree. §15's sentence that "no tier is
+green" held for the SQL tier no longer; it holds for everything else.
+
+Still not run, and not weakened into a claim: `supabase/tests/api/run.sh` with Stage 8's 53 authored HTTP cases and the
+before/after residue checks; the host and guest browser journeys against the live stack, including household creation,
+detail edits, ceremony scoping, issue/copy/rotate/revoke, the personalised invitation, RSVP submit, manual replies, and
+the host response lists read back against the database; the attack pass at the transport layer (cross-account,
+cross-household leakage, revoked/expired/forged links, malformed payloads, duplicate answers, party-size ceilings,
+credential transport); and the mobile, keyboard, loading/error, network-privacy and `/g/:token`
+URL/referrer/logging boundary observations. Every one of those needs PostgREST, Supabase Auth and the Storage API
+running, and the engine is down: `docker info exit=1` with the `dockerDesktopLinuxEngine` pipe missing, captured at
+`q8-logs/s10-engine-probe-01.log`. **Starting Docker Desktop is a human action on this machine, so the remaining tiers
+need you to start it** — after which the HTTP tier runs against the existing `localvivaahvarnam` stack through
+`supabase db push` (a forward reconcile, never a reset of the shared database), and the browser tier against the bundle
+§17 built.
+
+## 20. The live documents corrected to the tier that ran: two false claims outside the matrix, one instrument note, and the gates a Markdown edit owes
+
+A tier moving is only qualification if the documents a reader actually consults move with it, so this section records
+what the SQL run made stale *elsewhere* and what was changed, with the gate outputs the edits owe.
+
+**The readiness matrix, five rows.** `docs/product/feature-readiness.md:222-226` each carried the parenthetical
+"never exercised — no SQL, HTTP or browser tier has run" (or a per-row variant of it), and after §16 that is false in
+its first half and true in its second. Each row now states the split rather than a single status: the SQL tier ran
+(182 + 185 assertions at `eb128f7`, `q8-logs/s9-sql-all-32.log`, `run.sh all exit=0`) on a disposable plain-PostgreSQL
+17.10 cluster *because the engine was down*, and **no HTTP case and no browser journey against the local
+`localvivaahvarnam` stack has run**. The `FOUNDATION` token is deliberately unchanged — the matrix reserves
+`IMPLEMENTED (local stack only)` for surfaces that were exercised against the stack, and promoting five rows on the
+strength of a plain-Postgres run would be exactly the kind of claim this stage's brief forbids. Row 225's closing
+sentence ("the batteries … are authored and static-checked, not run") was replaced with the run itself, and row 226's
+"no reply count here has been produced by a real submission yet" was corrected: replies are now written and read back
+by executed door calls in SQL (`rsvp_responses` is named on 122 lines of battery 2), still none over HTTP or in a
+browser.
+
+**Two false claims the matrix sweep did not reach, found by searching for the surfaces instead of for the excuse.**
+§12's rule that a checker only covers its own wording applies to truth searches too. Grepping every tracked `.md` for
+`never exercised|no stack or browser tier` found the five matrix rows, two lines in *earlier* audits (Stage 1 `:726`,
+about the scaffold's `projects` insert, and Stage 5 `:1815`, about the CLI's `--db-url-env` route — both records of
+their own eras, untouched), and nothing else in a live document. Widening to
+`not run|never run|unrun|authored and static-checked|no tier|has not been run` reaches ten files — this audit and the
+Stage 5, 6, 3, 2 and 4 audits, `feature-readiness.md`, two architecture files and README — and still only **one**
+README line: `:734`, "`db reset --linked` … are never run", a workflow statement, not a status claim. No count is
+published for that search, deliberately: this section's own sentences sit inside the set it searches, so the number
+moves as the paragraph is written — the same effect Stage 7 recorded when a doc commit inside its scan's tracked set
+moved that scan's counts. What is stable is the file set and the README's single hit.
+That is the point: the two stale README sentences are not phrased as "not run" at all, so no run-claim pattern can
+reach them. They say guest lists and RSVP collection "do not exist yet", which is a *product-claim* sentence, and what
+found them was searching the live documents for the surfaces by name (`grep -n "guest\|RSVP" README.md`). The first is
+the opening **Status: Preview** block (then line 10, now lines 9–10 with its replacement); the second is the paragraph
+before *Target V1* that lists the surfaces which "deliberately do **not** exist yet" (then `:357`, now `:372` because
+this section's own insertion above it shifted it — cited by heading rather than by number for that reason). Both are
+simply false since Stage 8 wrote the panels, the door and the adapter. `Status: Preview` now says the guest/RSVP
+surface is written, unit-tested and SQL-qualified but has never been exercised over HTTP or driven in a browser, and
+points at *Implemented foundations* instead of counting it among the non-existent; that list keeps its remaining items
+with the two removed, and gained a Stage 8 bullet carrying the same split (783-line panel at `EditProject.tsx:898`,
+377-line replies panel at `:902`, `/g/:token` at `App.tsx:95` as its own lazy chunk, the two battery totals and what
+they do **not** cover). Historical audit sections that say "the browser tier has not run yet" (Stage 6 `:2420`,
+`:2445`; this file's §4, §5 and §12–§15) were left exactly as written: they are records of the state of knowledge at
+their time, and §16 supersedes the live ones.
+
+**Citations re-derived before any of this was published, and one instrument note.** The five rows cite the substrate
+by line number, so each was re-read rather than trusted: `20261009120000_stage8_guest_invitations_rsvp.sql` at
+`:249-251` (the once-legible-credential comment), `:449`, `:506`, `:578`, `:630`, `:689`, `:692`, `:822`, `:827` and
+`:1229` (the door's own contract sentence) all still name what the rows say they name, and the six adapter entry points
+(`guestInvitations.ts:263, :276, :296, :325, :350, :374, :415, :439, :474`) still open on the functions the rows name.
+The per-file unit counts (27 / 34 / 45 / 30 / 22 / 31) were re-read from the §17 capture, and that needed an instrument
+repair first: `grep -aoE "src/test/guest[A-Za-z]+\.test\.tsx? \([0-9]+ tests\)"` returns **nothing** against
+`q8-logs/s10-clean-test.log`, because vitest interleaves ANSI sequences inside the line
+(`^[[32m✓^[[39m src/test/…tsx ^[[2m(^[[22m^[[2m31 tests^[[22m…`), so the pattern cannot cross them. Stripping the
+escapes with `awk '{gsub(/\033\[[0-9;]*m/,""); print}'` first returns all six lines with their counts, and the totals
+(42 files / 765 tests) match §17. A capture that cannot be grepped is not a capture that says nothing — it is the
+instrument's problem, recorded here so the next reader does not re-derive it.
+
+**Engine re-probe.** §19's human ask was still open when this section was written: `docker info exit=1`, again with
+the `dockerDesktopLinuxEngine` named pipe missing (`q8-logs/s10-engine-probe-02.log`). Nothing in this section changes
+what is blocked; it changes what is *claimed* about what has run.
+
+**The gates a Markdown-only edit owes, each with its own exit.** Three takes, in the mixed tree at `eb128f7` with these
+three files modified: as the edits were made (`q8-logs/s10-docs-gates-01.log`), after §20 itself was written
+(`s10-docs-gates-02.log`) and after §20's own citation repairs (`s10-docs-gates-03.log`). All three print the same
+lines: `npm run product:check`
+→ `Product contract OK — 213 active file(s) scanned, 0 violation(s)`, `product:check exit=0`;
+`node scripts/check-product-contract.mjs --self-test` → `Product contract self-test OK — 31 rule(s) verified`,
+`selftest exit=0`; `git diff --check` → `diffcheck exit=0`, printing two `LF will be replaced by CRLF` **warnings** for
+`README.md` and this file — the host's checkout configuration, the same noise §15 records, not a whitespace defect and
+not treated as one; and the matrix's five changed rows re-checked for shape, each one physical line with exactly four
+pipes (`pipes=4` × 5), because a row that breaks onto a second line silently drops out of the table. `213` is the
+mixed-tree count and matches §17's re-take; the two untracked `.yaml` files are still untracked, still unstaged, and
+`git status --short` beside them lists exactly the three documents this section changed. Node gates that read no
+Markdown (typecheck, lint, build, test) are not re-run for a `.md` edit and §17's exits stand for the code they
+certify; the SQL tier's inputs (migrations, batteries, runner) are untouched by this section, so §16's
+`run.sh all exit=0` remains the tier's certification at this head.
+
+**One inaccuracy this pass found and deliberately left alone.** The README's opening sentence still says "**One loop**
+is complete and was exercised end to end", and Stage 7's reviewer loop — documented under the README's own
+`## Verified in Stage 7` heading, cited by heading because this section's insertions moved its line number, and
+browser-verified at 104 checks — makes that an undercount. It understates rather than overclaims, it is Stage 7's
+sentence to correct, and no Stage 8 measurement bears on it, so it is recorded here instead of being silently edited
+into this stage's commit.
+
 
 
