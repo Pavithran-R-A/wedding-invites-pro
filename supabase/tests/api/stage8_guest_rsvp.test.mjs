@@ -190,6 +190,20 @@ const NOT_RECORDED = { recorded: false, reason: 'unavailable' };
 const TOO_LARGE = { recorded: false, reason: 'party_size_too_large' };
 const NOT_ASKED = { recorded: false, reason: 'answers_not_accepted' };
 
+/** The bytes a `jsonb` refusal object reaches the client as, read from the database's own renderer.
+ *  PostgREST returns a `jsonb` scalar in `jsonb_out`'s spelling — a space after every colon, and keys in
+ *  jsonb's own order (shorter key first, then collation) — which is not what `JSON.stringify` of the same
+ *  object produces. Measured on this stack 2026-10-12: an unknown-but-well-formed household credential
+ *  answered `{"reason": "unavailable", "recorded": false}` at the write door and `{"available": false}` at
+ *  the read door, byte-identical to the two `::text` renders below. So a byte claim about a refusal body
+ *  is a claim about *this verb's body and nothing else in it*, which is what the parsed `deepEqual` at each
+ *  call site cannot say; comparing it to a client-side serialisation would have been a claim about two
+ *  different serializers, and it fails on every stack rather than on a defect. */
+const wireUnavailable = () => cell(
+  `select jsonb_build_object('available', false)::text`, 'the read door\'s declared refusal bytes');
+const wireNotRecorded = () => cell(`select jsonb_build_object('recorded', false, 'reason', 'unavailable')::text`,
+  'the write door\'s declared refusal bytes');
+
 /** Every sentence the Stage 8 bodies raise, with the line that raises it. Transcribed from the migration
  *  rather than from a probe log, because no probe log exists for this head yet — which is exactly the
  *  weakness the first run is here to test. */
@@ -374,6 +388,34 @@ const tokenCell = (householdId, columns) => cell(`
     from private.access_tokens
    where household_id = '${householdId}'::uuid and token_kind = 'guest_invitation'`,
   `the ${columns} of ${householdId}'s credentials`);
+
+/** The census helpers live at module scope because two suites read the same store: §6's coupling cases and
+ *  `Z-03`, whose claim is that host A's publication work left host B's credential rows exactly where they
+ *  were. (`Z-03` first ran against a `storeFacts` that was defined inside the other suite's `describe`,
+ *  and a `ReferenceError` is not a measurement.) */
+const kindGuarded = (kind) => {
+  assert.ok(['guest_invitation', 'public_invitation'].includes(kind),
+    `refusing to interpolate ${shown(kind)} into a credential census`);
+  return kind;
+};
+
+/** Every credential row of one kind that one wedding owns, as one comparable string. Compared before and
+ *  after each verb: the claim is about not moving, so the arithmetic is the run's own. */
+const storeFacts = (kind, wedding = weddingOf('hostA')) => cell(`
+    select 'total=' || count(*)::text
+      || ' live=' || coalesce(sum(case when revoked_at is null then 1 else 0 end), 0)::text
+      from private.access_tokens
+     where wedding_id = '${wedding}'::uuid and token_kind = '${kindGuarded(kind)}'`,
+  `the ${kind} credential store`);
+
+/** A checksum over the digests of those rows, so "no secret changed" is one comparison instead of a
+ *  dump of hashes. Ordered by the digest itself, which makes the string independent of insertion order.
+ *  Nothing raw reaches SQL here: the column is already a hex digest, and its md5 is what is printed. */
+const storeDigest = (kind, wedding = weddingOf('hostA')) => cell(`
+    select md5(coalesce(string_agg(token_hash, ';' order by token_hash), '-'))
+      from private.access_tokens
+     where wedding_id = '${wedding}'::uuid and token_kind = '${kindGuarded(kind)}'`,
+  `the ${kind} digest checksum`);
 
 /** The "has this family read the invitation" stamp, for the one row `one_live_guest_token_per_household`
  *  (`…sql:103-107`) guarantees is live. `tokenCell` cannot be used for this: it aggregates the household's
@@ -817,9 +859,15 @@ describe('S8 TRANSPORT', () => {
   });
 
   test('T-05 the header name is case-folded by the router, and the wedding door is not this door', async () => {
-    const upper = await gopen(foreign(), { headers: { 'X-Guest-Token': foreign() } });
+    // One spelling per request, and the credential never sent twice. Measured on this stack 2026-10-12:
+    // a Node `fetch` given the same header name in two casings puts **one** header on the wire whose value
+    // is the two joined with `", "` (43 + 2 + 43 = 88 octets), and §4's shape gate at `…sql:586` refuses
+    // any value that is not exactly 43 octets — so sending both spellings at once measures the gate, not
+    // the router. Stage 7's equivalent case sends one spelling per request for the same reason
+    // (`stage7_family_approval.test.mjs:495-501`), and `gopen(undefined, …)` is the spelling that does so.
+    const upper = await gopen(undefined, { headers: { 'X-Guest-Token': foreign() } });
     assert.equal(upper.body.available, true, 'a capitalised header did not open a live link');
-    const shout = await gopen(foreign(), { headers: { 'X-GUEST-TOKEN': foreign() } });
+    const shout = await gopen(undefined, { headers: { 'X-GUEST-TOKEN': foreign() } });
     assert.equal(shout.body.available, true, 'an all-caps header did not open a live link');
 
     // Stage 3's wedding credential is a real, live secret in this run, and this door must not accept it:
@@ -1075,7 +1123,7 @@ describe('S8 SURFACE AND PRIVILEGES', () => {
       'the anonymous grants on the guest stores'), 'noanon=true.true.true.true',
       'the anonymous web gained a table privilege on a guest store');
 
-    assert.equal(cell(`select 'policies='||count(*)::text||' names='||coalesce(string_agg(polname, '+' order by polname), '-')
+    assert.equal(cell(`select 'policies='||count(*)::text||' names='||coalesce(string_agg(policyname, '+' order by policyname), '-')
         from pg_policies where schemaname = 'public' and tablename = 'rsvp_responses'`,
       'the reply policies'),
       'policies=4 names=owners_delete_rsvps+owners_read_rsvps+owners_record_manual_rsvps+owners_update_manual_rsvps',
@@ -1794,10 +1842,20 @@ describe('S8 THE HOUSEHOLD DOOR', () => {
       `the Raman-family door carried host B's identifier ${shown(id)}`);
     for (const id of hostAIds) assert.equal(theirs.text.includes(id), false,
       `host B's door carried host A's identifier ${shown(id)}`);
-    // `Vadhyam` is host B's other event, and host B's one household is scoped to `Sangadham` only: an
-    // unsoped event of the *same* wedding must not appear either, or the scope rows are decoration.
-    assert.equal(theirs.text.includes('Vadhyam'), false,
+    // `Vadhyam` is host B's other event, and host B's one household is scoped to `Sangadham` only, so it
+    // must not be a card this family can answer — which is a claim about the *household object*, and is
+    // measured there. It is not a claim about the whole response: the document above the cards is the
+    // couple's published wedding, drawn through the guest's own renderer (Ruling 5.1), and it names every
+    // enabled event of that wedding. D-04 pins the same property from the other end — a household with no
+    // scope rows at all still reads `['Muhurtham', 'Reception']` in `invitation.events`
+    // (`…:1740`) — while D-03 shows the arm that *is* whole-text: an event the couple took out of the
+    // running is absent from the frozen document itself, so its name appears nowhere in the response.
+    assert.equal(JSON.stringify(theirs.body.guest).includes('Vadhyam'), false,
       'the door listed an event of this wedding that this household was never invited to');
+    assert.equal(theirs.body.guest.events.some((c) => c.event_id === eventOf('hostB', 'vadhyam')), false,
+      'an unscoped event of this wedding reached this household as a card to answer');
+    assert.deepEqual(theirs.body.invitation.events.map((e) => e.display_name), ['Sangadham', 'Vadhyam'],
+      'the published document this family was given is no longer the whole wedding');
     assert.equal((await panelRow('hostB', hh('foreign'))).scoped_event_count, 1);
   });
 
@@ -1970,28 +2028,38 @@ describe('S8 THE HOUSEHOLD ANSWER', () => {
     assert.equal(answerCell('reissue', 'muhurtham'), 'declined/0/guest/true',
       'the guest upsert did not take the source, the headcount or the answers slot');
 
-    // The reverse direction is blocked by the inherited Stage 2 WITH CHECK (`:285-294` of that file), and
-    // this is the HTTP translation of it. PREDICTED: the code and the sentence are measured precedents
-    // (`stage3_security.test.mjs:727-734`, which is a policy WITH CHECK refusal on a table), but the
-    // status number for a *table PATCH* has no precedent measurement in this repository, so the number is
-    // recorded by the run rather than claimed by this file.
-    const relabel = await call('PATCH', `/rest/v1/rsvp_responses?household_id=eq.${hh('reissue')}`
-      + `&event_id=eq.${muhurtham}`, { bearer: tokenOf('hostA'), body: { response_source: 'host_manual' } });
-    assert.equal(relabel.body.code, '42501', `the relabel answered ${shown(JSON.stringify(relabel.body))}`);
-    assert.match(relabel.body.message, /new row violates row-level security policy for table "rsvp_responses"/);
-    assert.equal(relabel.status >= 400, true, `a host relabelled a guest's answer as its own: ${shown(relabel.text)}`);
-    console.log(`    R-02 measure: an RLS WITH CHECK refusal on a table PATCH answered HTTP ${relabel.status}`);
-    assert.equal(answerCell('reissue', 'muhurtham'), 'declined/0/guest/true', 'the refused relabel still moved the row');
-
-    // The same policy blocks an edit that only touches the headcount, because the *new row* still says
-    // 'guest'. This is the consequence the design doc accepts (`guest-rsvp-security.md` §7): a host who
-    // must correct a family's answer does it by deleting and re-recording, which is the next two calls.
+    // What the inherited Stage 2 WITH CHECK (`:285-294` of that file) actually blocks, measured on this
+    // stack 2026-10-12 rather than predicted: an edit whose *new row still says* `'guest'`. A PATCH of
+    // `party_size` leaves `response_source` untouched, so the new row is a client-written `'guest'` row,
+    // which the policy refuses with `42501`. This is the guard that keeps the column meaning something —
+    // a host cannot take over the family's own submission and leave it labelled as the family's.
     const headcount = await call('PATCH', `/rest/v1/rsvp_responses?household_id=eq.${hh('reissue')}`
       + `&event_id=eq.${muhurtham}`, { bearer: tokenOf('hostA'), body: { party_size: 2 } });
     assert.equal(headcount.body.code, '42501', `the host edited a guest row: ${shown(headcount.text)}`);
+    assert.match(headcount.body.message, /new row violates row-level security policy for table "rsvp_responses"/);
+    assert.equal(headcount.status >= 400, true, `a WITH CHECK refusal on a table PATCH answered ${headcount.status}`);
+    console.log(`    R-02 measure: an RLS WITH CHECK refusal on a table PATCH answered HTTP ${headcount.status}`);
     assert.equal(answerCell('reissue', 'muhurtham'), 'declined/0/guest/true',
       'a refused headcount edit still changed the row');
 
+    // The other direction is *not* blocked, and this file used to claim it was. Setting
+    // `response_source = 'host_manual'` is exactly what that WITH CHECK asks for, so the relabel is
+    // accepted: a host can re-attribute the family's own answer as a transcription of a phone call.
+    // Recorded as a measurement, not as a pass: the row keeps its content and the guest's `responded_at`
+    // under the host's label, which is the state `guest-rsvp-security.md` §7 now states in those words.
+    // It is not a forgery in the dangerous direction — no client can write or keep a `'guest'` row, and
+    // the same final content is reachable anyway by the delete-and-re-record route below, which the host
+    // screen offers in preference to a silent overwrite (`src/components/invitation/GuestRepliesPanel.tsx`,
+    // and no product code path PATCHes this table: `src/integrations/supabase/guestInvitations.ts:417-483`).
+    const relabel = await call('PATCH', `/rest/v1/rsvp_responses?household_id=eq.${hh('reissue')}`
+      + `&event_id=eq.${muhurtham}`, { bearer: tokenOf('hostA'), body: { response_source: 'host_manual' } });
+    console.log(`    R-02 measure: a host's guest -> host_manual relabel PATCH answered HTTP ${relabel.status}`);
+    assert.equal(relabel.status >= 400, false,
+      `the relabel was refused after all, which would make §7's correction wrong: ${shown(relabel.text)}`);
+    assert.equal(answerCell('reissue', 'muhurtham'), 'declined/0/host_manual/true',
+      'the relabel did not reach the state the policy permits');
+
+    // The honest correction route is still open from that state, which is what the host screen uses.
     const removed = await call('DELETE', `/rest/v1/rsvp_responses?household_id=eq.${hh('reissue')}`
       + `&event_id=eq.${muhurtham}`, { bearer: tokenOf('hostA') });
     assert.equal(removed.status, 204, `the owner's delete of its own reply failed: ${shown(removed.text)}`);
@@ -2228,7 +2296,7 @@ describe('S8 THE HOUSEHOLD ANSWER', () => {
     }
     // One indistinguishable body across all five, and identical to the dead-credential bodies R-06 took.
     assert.equal(bodies.size, 1, `the write door distinguishes its access failures across ${bodies.size} bodies`);
-    assert.equal(bodies.has(JSON.stringify(NOT_RECORDED)), true,
+    assert.equal(bodies.has(wireNotRecorded()), true,
       'the access refusal is no longer the bytes §5 declares at `:727`');
 
     // All-or-nothing in the other direction too: a body whose first item is legal and whose second names
@@ -2289,8 +2357,14 @@ describe('S8 THE HOUSEHOLD ANSWER', () => {
   });
 
   test('R-09 the host reads its own answers, and a stranger reads nothing at all', async () => {
+    // The owner's own session, not `call()`'s default bearer: the default is the publishable key, and the
+    // anon role holds no table grant on `rsvp_responses` at all, so a read sent without a token answers
+    // 401 `permission denied` — which is the *bottom* half of this case, taken deliberately at `anon`
+    // below. Measured on this stack 2026-10-12: `has_table_privilege('anon','public.rsvp_responses',
+    // 'select')` is false and the SELECT policy is `TO authenticated`.
     const mine = await call('GET', `/rest/v1/rsvp_responses?wedding_id=eq.${weddingOf('hostA')}`
-      + '&household_id=eq.' + hh('ramam') + '&select=attending,party_size,response_source,answers');
+      + '&household_id=eq.' + hh('ramam') + '&select=attending,party_size,response_source,answers',
+    { bearer: tokenOf('hostA') });
     assert.equal(mine.status, 200, `the owner could not read its own household's answers: ${shown(mine.text)}`);
     assert.equal(mine.body.length, 2, `the panel's source of truth is ${shown(JSON.stringify(mine.body))}`);
     assert.deepEqual(mine.body.map((r) => r.response_source).sort(), ['guest', 'guest'],
@@ -2350,30 +2424,6 @@ describe('S8 PUBLICATION COUPLING', () => {
   const ropen = (cred) => rpc('resolve_public_invitation', {}, {
     headers: { 'x-invitation-token': cred } });
 
-  const kindGuarded = (kind) => {
-    assert.ok(['guest_invitation', 'public_invitation'].includes(kind),
-      `refusing to interpolate ${shown(kind)} into a credential census`);
-    return kind;
-  };
-
-  /** Every credential row of one kind that this run's wedding owns, as one comparable string. Compared
-   *  before and after each verb: the claim is about not moving, so the arithmetic is the run's own. */
-  const storeFacts = (kind, wedding = WEDDING()) => cell(`
-    select 'total=' || count(*)::text
-      || ' live=' || coalesce(sum(case when revoked_at is null then 1 else 0 end), 0)::text
-      from private.access_tokens
-     where wedding_id = '${wedding}'::uuid and token_kind = '${kindGuarded(kind)}'`,
-    `the ${kind} credential store`);
-
-  /** A checksum over the digests of those rows, so "no secret changed" is one comparison instead of a
-   *  dump of hashes. Ordered by the digest itself, which makes the string independent of insertion order.
-   *  Nothing raw reaches SQL here: the column is already a hex digest, and its md5 is what is printed. */
-  const storeDigest = (kind, wedding = WEDDING()) => cell(`
-    select md5(coalesce(string_agg(token_hash, ';' order by token_hash), '-'))
-      from private.access_tokens
-     where wedding_id = '${wedding}'::uuid and token_kind = '${kindGuarded(kind)}'`,
-    `the ${kind} digest checksum`);
-
   /** The same two facts for the rows pinned to one publication. §6's whole claim lives in this read: a
    *  retarget moves `publication_id` and nothing else. */
   const pinFacts = (publicationId, kind) => cell(`
@@ -2396,7 +2446,11 @@ describe('S8 PUBLICATION COUPLING', () => {
      where household_id = '${hh(slug)}'::uuid and token_kind = 'guest_invitation'
        and revoked_at is null`, `${slug}'s live deadline`);
 
-  const slugOf = Object.fromEntries(Object.entries(HH).map(([s, u]) => [u, s]));
+  // Looked up at call time, never snapshotted: a `describe` body runs during collection, while `HH` is
+  // filled by the root `before()` that runs after every body has been collected. Measured on this stack
+  // 2026-10-12 — an `Object.fromEntries(Object.entries(HH))` taken here saw an empty map and so refused
+  // the run on the first live credential it met, naming a household that *was* a fixture.
+  const slugOf = (id) => Object.entries(HH).find(([, uuid]) => uuid === id)?.[0];
   /** The households whose link is live *and in date* right now, as fixtures rather than as a hardcoded
    *  list. The liveness test is §4's own (`:605-606`), so a case that opens "every live family" opens the
    *  set the door would agree with, and the set the panel and the store both describe. */
@@ -2405,7 +2459,7 @@ describe('S8 PUBLICATION COUPLING', () => {
      where wedding_id = '${WEDDING()}'::uuid and token_kind = 'guest_invitation'
        and revoked_at is null and (expires_at is null or expires_at > now()) order by 1`)
     .map((id) => {
-      const slug = slugOf[id];
+      const slug = slugOf(id);
       assert.ok(slug, `refusing to run: a live credential belongs to ${id}, which is not a fixture`);
       return slug;
     });
@@ -2673,8 +2727,10 @@ describe('S8 PUBLICATION COUPLING', () => {
     }
     assert.equal(readBodies.size, 1, 'the read door distinguishes which family asked after a takedown');
     assert.equal(writeBodies.size, 1, 'the write door distinguishes which family asked after a takedown');
-    assert.equal(readBodies.has(JSON.stringify(UNAVAILABLE)), true);
-    assert.equal(writeBodies.has(JSON.stringify(NOT_RECORDED)), true);
+    assert.equal(readBodies.has(wireUnavailable()), true,
+      'the read door\'s takedown body is not the bytes §4 declares');
+    assert.equal(writeBodies.has(wireNotRecorded()), true,
+      'the write door\'s takedown body is not the bytes §5 declares at `:727`');
     assert.deepEqual((await ropen(people.hostA.publicToken)).body, UNAVAILABLE,
       'the wedding link outlived the publication it belongs to');
 
@@ -2872,6 +2928,7 @@ describe('S8 RESIDUE', () => {
         where wedding_id = '${people.hostA.weddingU}'::uuid`, 'the never-published wedding\'s publications'), '0');
     assert.equal(cell(`select count(*)::text from public.rsvp_responses
         where wedding_id = '${people.hostA.weddingU}'::uuid`, 'its answers'), '0');
-    assert.equal(householdsFor(people.hostA.weddingU), '1');
+    assert.equal(cell(`select count(*)::text from public.guest_households
+        where wedding_id = '${people.hostA.weddingU}'::uuid`, 'its households'), '1');
   });
 });

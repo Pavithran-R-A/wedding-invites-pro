@@ -656,7 +656,14 @@ describe('S7 ASK', () => {
           where t.approval_request_id = r.id) - r.requested_at)::text
         from public.approval_requests r where r.id = '${ask.requestId}'::uuid`, 'the default lifetime');
     assert.equal(span, '14 days', `the default link lifetime is ${span}, not the documented fortnight`);
-    const stored = cell(`select (extract(epoch from expires_at) * 1000)::bigint::text
+    // Both sides must truncate the sub-millisecond microseconds or this compares two renderings of one
+    // instant with two different rules. `now()` carries microsecond precision here, and a bare
+    // `(extract(epoch …) * 1000)::bigint` *rounds* a numeric (measured on this stack 2026-10-12:
+    // `.621678` → `…622`, `.621178` → `…621`) while `Date.parse` truncates both to `…621`, so the cast
+    // disagreed with the client about half of all mints (1042 of 2000 clock samples land in `.500`–`.999`).
+    // `floor` is the client's rule: a real one-millisecond drift still shows up, as `…622678` answers
+    // `…622` on both sides.
+    const stored = cell(`select floor(extract(epoch from expires_at) * 1000)::bigint::text
         from private.access_tokens where approval_request_id = '${ask.requestId}'::uuid`, 'the expiry');
     assert.equal(stored, String(Date.parse(ask.expiresAt)),
       'the expires_at the host was told is not the instant stored on the credential');
