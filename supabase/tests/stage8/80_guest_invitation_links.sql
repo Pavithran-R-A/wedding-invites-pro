@@ -526,7 +526,7 @@ BEGIN
   PERFORM pg_temp.s8f_eq('F9 the tested wedding has an active publication and exactly one, pinned to '
     'the first version — a household credential is pinned to this row by its own CHECK, so the '
     'fixture has to have one before anything mints',
-    (SELECT array_agg(p.version_id = current_setting('s8f.v1')::uuid)::text
+    (SELECT array_agg((p.version_id = current_setting('s8f.v1')::uuid)::text)
        FROM public.publications p WHERE p.wedding_id = s.wed_a AND p.status = 'active'),
     '{true}');
   PERFORM pg_temp.s8f_eq('F10 and publishing left the two families'' own state alone: no household of '
@@ -608,7 +608,8 @@ BEGIN
   PERFORM pg_temp.s8f_eq('H10 with no expiry asked for, the policy says so rather than leaving a NULL '
     'to be interpreted — `expires_at IS NULL` is always a declared policy in this schema',
     (SELECT array_agg(t.expiry_policy ORDER BY t.household_id::text)
-       FROM private.access_tokens t WHERE t.wedding_id = s.wed_a),
+       FROM private.access_tokens t
+      WHERE t.wedding_id = s.wed_a AND t.token_kind = 'guest_invitation'),
     ARRAY['no_expiry', 'no_expiry']);
   PERFORM pg_temp.s8f_eq('H11 the answer''s `expires_at` reports the same NULL the rows carry, so a host '
     'screen cannot show a deadline the database does not',
@@ -731,7 +732,7 @@ INSERT INTO probes (grp, label, stmt, want_state, want_like) VALUES
    '23514', '%two hundred households is the most one request may carry%'),
   ('B3', 'a deadline in the past is refused — a link born dead is a bug dressed as a feature',
    $t$SELECT api.issue_guest_invitations(current_setting('s8f.wed_a')::uuid,
-        ARRAY[current_setting('s8f.hh_chenna')::uuid], now() - interval ''1 hour'')$t$,
+        ARRAY[current_setting('s8f.hh_chenna')::uuid], now() - interval '1 hour')$t$,
    '23514', '%a household link must be given a time in the future%'),
   ('B4', 'a wedding the caller does not own cannot be sent links, even with a household of that '
     'wedding named honestly',
@@ -870,10 +871,18 @@ BEGIN
     'wedding row either — the verb and RLS give the same answer',
     pg_temp.s8f_visible('authenticated', s.owner_a,
       'SELECT * FROM public.weddings WHERE id = ' || quote_literal(s.wed_b::text)), 0::bigint);
-  PERFORM pg_temp.s8f_eq('B18 and the stranger sees none of this battery''s households — the host verbs '
-    'are not the only wall, RLS is',
-    pg_temp.s8f_visible('authenticated', s.owner_b,
-      'SELECT * FROM public.guest_households'), 0::bigint);
+  PERFORM pg_temp.s8f_eq('B18 and the stranger sees none of the tested wedding''s households, while still '
+    'seeing the one household of the wedding they do own — the host verbs are not the only wall, RLS is, '
+    'and the second half is what proves the first is a policy rather than a blanket denial. The unscoped '
+    'form of this claim could not be true: groups B1, B4, B7 and B8 all refuse against a real household '
+    'of the stranger''s own wedding, so that row exists to be read by its host',
+    ARRAY[pg_temp.s8f_visible('authenticated', s.owner_b,
+      'SELECT * FROM public.guest_households WHERE wedding_id = '
+      || quote_literal(s.wed_a::text))::text,
+      pg_temp.s8f_visible('authenticated', s.owner_b,
+      'SELECT * FROM public.guest_households WHERE wedding_id = '
+      || quote_literal(s.wed_b::text))::text]::text[],
+    ARRAY['0', '1']::text[]);
   -- `<= 0`, not `= -1`: a relation-level privilege refusal and an RLS-denied empty read are both
   -- invisibility, and which of the two a given role gets is a fact about the grant inventory that
   -- group G pins by name. What would be a defect is a positive count, so that is what is refused here.
@@ -1661,19 +1670,23 @@ INSERT INTO probes (grp, label, stmt, want_state, want_like) VALUES
    $t$SELECT internal_api.get_guest_invitation_state(current_setting('s8f.wed_a')::uuid)$t$,
    '42501', '%permission denied for function get_guest_invitation_state%'),
   ('GB', '§I8 / Ruling 8.2: a host cannot write the credential store directly. This is the probe that '
-    'tells B19''s `-1` or `0` apart from a polite empty read — the table itself refuses the role, which '
-    'is why the host''s link state has to travel as an RPC answer',
+    'tells B19''s `-1` or `0` apart from a polite empty read — Stage 2''s baseline revokes the whole '
+    '`private` schema from both browser roles (`20260925120000_stage2_privilege_baseline.sql:29`, '
+    'USAGE to `service_role` only at `:38`), so the engine refuses at the schema before the table is '
+    'reached; the table grant itself is pinned by G7, which is the assertion that reads the ACL rather '
+    'than the message. Either way the write cannot land, which is why the host''s link state has to '
+    'travel as an RPC answer',
    $t$INSERT INTO private.access_tokens (token_hash, token_kind, wedding_id, expiry_policy)
      SELECT encode(extensions.digest(convert_to('s8-g-hostwrite', 'UTF8'), 'sha256'), 'hex'),
             'guest_invitation', current_setting('s8f.wed_a')::uuid, 'no_expiry'$t$,
-   '42501', '%permission denied for table access_tokens%'),
+   '42501', '%permission denied for schema private%'),
   ('GC', 'and a guest cannot delete their own credential, which is the only way this schema could be '
     'made to forget a family rather than retire them — the whole audit trail is one UPDATE away and not '
     'one DELETE',
    $t$DELETE FROM private.access_tokens
      WHERE wedding_id = current_setting('s8f.wed_a')::uuid
        AND token_kind = 'guest_invitation'$t$,
-   '42501', '%permission denied for table access_tokens%');
+   '42501', '%permission denied for schema private%');
 
 DO $G$
 DECLARE s s8r%ROWTYPE; names text[]; scan constant text := '(tamil|malayalam|telugu|kannada|brahmin|'
@@ -1771,13 +1784,18 @@ BEGIN
 
   PERFORM pg_temp.s8f_eq('G5 §9: and the arithmetic of Ruling 8.2 in one line — the only grantees '
     'anywhere on those twelve are the two browser roles, and nothing at all is granted to PUBLIC, which '
-    'is the grant a `REVOKE ALL FROM PUBLIC`-less migration would have left behind',
+    'is the grant a `REVOKE ALL FROM PUBLIC`-less migration would have left behind. The owner''s own '
+    'ACL row is excluded because it is not a grant to anyone: PostgreSQL materialises '
+    '`postgres=X/postgres` on the first GRANT to any other role, so it is present on every function this '
+    'product''s migrations create and names the installer rather than a caller. Every other grantee '
+    'still appears here, so a migration that opened one of these verbs to a third role would move this '
+    'line rather than hide behind that exclusion',
     ARRAY[(SELECT coalesce(string_agg(DISTINCT r.rolname, ',' ORDER BY r.rolname), '-')
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              CROSS JOIN LATERAL aclexplode(p.proacl) acl
              JOIN pg_roles r ON r.oid = acl.grantee
             WHERE n.nspname IN ('api', 'internal_api') AND p.proname = ANY(names)
-              AND acl.privilege_type = 'EXECUTE'),
+              AND acl.privilege_type = 'EXECUTE' AND acl.grantee <> p.proowner),
           (SELECT count(*) FROM pg_proc p
              JOIN pg_namespace n ON n.oid = p.pronamespace
              CROSS JOIN LATERAL aclexplode(p.proacl) acl
@@ -1785,16 +1803,19 @@ BEGIN
               AND acl.privilege_type = 'EXECUTE' AND acl.grantee = 0)::bigint::text]::text[],
     ARRAY['anon,authenticated', '0']::text[]);
 
+  -- `::text` on both sides is load-bearing, not noise: `proname`/`nspname` are type `name`, and a
+  -- `COLLATE "C"` applied to a `name` expression stops matching the `DISTINCT` argument, which the
+  -- engine then rejects before running any of it.
   PERFORM pg_temp.s8f_eq('G6 §9: the posture is written where a reader of the catalog will find it — '
     'all six privileged bodies carry a comment, and among the mirrors exactly the two anonymous doors '
     'do, which are the two a caller who is not the host''s own screen has to reason about. A reviewer '
     'who checks this by reading the migration instead has to re-read 1205-1226; this says the same '
     'thing from the live catalog',
-    ARRAY[(SELECT coalesce(string_agg(DISTINCT p.proname, ',' ORDER BY p.proname COLLATE "C"), '-')
+    ARRAY[(SELECT coalesce(string_agg(DISTINCT p.proname::text COLLATE "C", ',' ORDER BY p.proname::text COLLATE "C"), '-')
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'internal_api' AND p.proname = ANY(names)
               AND obj_description(p.oid) IS NOT NULL),
-          (SELECT coalesce(string_agg(DISTINCT p.proname, ',' ORDER BY p.proname COLLATE "C"), '-')
+          (SELECT coalesce(string_agg(DISTINCT p.proname::text COLLATE "C", ',' ORDER BY p.proname::text COLLATE "C"), '-')
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'api' AND p.proname = ANY(names)
               AND obj_description(p.oid) IS NOT NULL)]::text[],
@@ -1842,7 +1863,7 @@ BEGIN
     'There is no third place a guest credential verb could be reached from, and nothing was added to '
     '`private` — where Stage 2 put the triggers and the helpers every client can call through their '
     'own table''s policy',
-    (SELECT coalesce(string_agg(DISTINCT n.nspname, ',' ORDER BY n.nspname COLLATE "C"), '-')
+    (SELECT coalesce(string_agg(DISTINCT n.nspname::text COLLATE "C", ',' ORDER BY n.nspname::text COLLATE "C"), '-')
        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE p.proname = ANY(names)),
     'api,internal_api');
@@ -1900,7 +1921,7 @@ BEGIN
                           (SELECT count(*) FROM private.access_tokens t
                             WHERE t.household_id = s.hh_chenna AND t.revoked_at IS NULL)::text AS live,
                           (SELECT count(*) FROM private.access_tokens t
-                            WHERE t.household_id = s.hh_chenna)::text AS all_)
+                            WHERE t.household_id = s.hh_chenna)::text AS all_
              UNION ALL
              SELECT 'baby',
                     (SELECT count(*) FROM private.access_tokens t
@@ -1939,7 +1960,7 @@ BEGIN
     'one — so battery 2''s override test has a previous answer to override and this file''s '
     '"only the secret dies" has a reply that outlived a withdrawal',
     ARRAY[(SELECT count(*)::text FROM public.rsvp_responses),
-          (SELECT coalesce(string_agg(DISTINCT response_source, ',' ORDER BY response_source COLLATE "C"), '-')
+          (SELECT coalesce(string_agg(DISTINCT response_source COLLATE "C", ',' ORDER BY response_source COLLATE "C"), '-')
              FROM public.rsvp_responses),
           (SELECT count(*)::text FROM public.rsvp_responses r
              WHERE r.household_id IN (s.hh_nair, s.hh_raman))]::text[],
