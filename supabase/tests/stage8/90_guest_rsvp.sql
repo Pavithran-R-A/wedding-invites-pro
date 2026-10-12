@@ -586,6 +586,25 @@ BEGIN
               AND q.event_id = s.ev_farewell)]::text[],
     ARRAY['2', '1', '1']::text[]);
 
+  -- The other wedding's family needs a scoped event of its own, or the cross-tenant assertions below are
+  -- satisfied by a door that answers nothing: K9 is the positive half of K7's absences, E3 counts its card
+  -- in the census, and A9 has to be able to aim a real answer at `ev_haldi`. Written by its own owner
+  -- through client DML under `owners_manage_scopes`, the same shape X9 used, so nothing here reaches
+  -- across the tenant boundary to invent the fact it is meant to prove.
+  n := pg_temp.s8b_host_write(s.owner_b::text,
+    'INSERT INTO public.household_event_scopes (wedding_id, household_id, event_id) VALUES ('
+    || quote_literal(s.wed_b::text) || '::uuid, '
+    || quote_literal(s.hh_stranger::text) || '::uuid, '
+    || quote_literal(s.ev_haldi::text) || '::uuid)');
+  PERFORM pg_temp.s8b_eq('X9b the second tenant''s family is scoped to the one event of its own wedding — '
+    'the write is measured by row count and read back from the scope table, because a household with no '
+    'scope cannot demonstrate that the door confined it rather than ignored it',
+    ARRAY[n::text,
+          (SELECT count(*)::text FROM public.household_event_scopes q
+            WHERE q.household_id = s.hh_stranger AND q.wedding_id = s.wed_b
+              AND q.event_id = s.ev_haldi)]::text[],
+    ARRAY['1', '1']::text[]);
+
   -- The mints. One call per shape, because a deadline is a property of the call rather than of the
   -- family, and because reading each raw back out of the answer by its own `household_id` — not by a
   -- position in the array — is what keeps this file honest about which secret belongs to whom.
@@ -656,7 +675,7 @@ BEGIN
     ARRAY[(v ->> 'already_live'), (v ->> 'issued'),
           (SELECT array_agg(t.expiry_policy || '|' || (t.expires_at > now())::text)
              FROM private.access_tokens t
-            WHERE t.household_id = s.hh_raman AND t.revoked_at IS NULL),
+            WHERE t.household_id = s.hh_raman AND t.revoked_at IS NULL)::text,
           (SELECT count(*)::text FROM private.access_tokens t
             WHERE t.household_id = s.hh_raman)]::text[],
     ARRAY['1', '0', '{fixed|true}', '3']::text[]);
@@ -1230,7 +1249,7 @@ BEGIN
             WHERE t.household_id = current_setting('s8b.hh_pillai')::uuid),
           (SELECT count(*)::text FROM private.access_tokens t
             WHERE t.household_id = current_setting('s8b.hh_pillai')::uuid AND t.revoked_at IS NULL),
-          (SELECT array_agg(t.expiry_policy) FROM private.access_tokens t
+          (SELECT array_agg(t.expiry_policy)::text FROM private.access_tokens t
             WHERE t.household_id = current_setting('s8b.hh_pillai')::uuid
               AND t.revoked_at IS NULL)]::text[],
     ARRAY['46', 'string', '2', '1', '{no_expiry}']::text[]);
@@ -1242,29 +1261,56 @@ BEGIN
    WHERE household_id = s.hh_raman AND token_kind = 'guest_invitation'
      AND revoked_at IS NULL;
   GET DIAGNOSTICS n = ROW_COUNT;
-  PERFORM pg_temp.s8b_eq('U3 the expired state is reachable without waiting for a calendar: one row aged by '
-    'hand, still unrevoked, now fixed and in the past, and the ageing moved `created_at` with it so the '
-    'table''s own pairing and ordering constraints accepted the write rather than aborting the battery',
+  -- The other half of the ageing. `now()` is frozen at the transaction start, so the live row this battery
+  -- minted at X13 shared an instant with every row the battery touched, and moving only its `created_at`
+  -- 40 days back made it the *oldest* credential the family ever had. The panel's reader takes the
+  -- household's newest row (`20261009120000_stage8_guest_invitations_rsvp.sql:527-537`: the liveness flag,
+  -- then `c.created_at DESC`) and so reported `revoked` — correct behaviour for a product that can only
+  -- ever mint a successor after its predecessor, and an ordering no real rotation can produce. Rotation
+  -- puts the newest secret last, so the aged row is aged with its family's whole history behind it. `n`
+  -- still counts the live-row write; the history write is measured by its own cell below.
+  UPDATE private.access_tokens
+     SET created_at = created_at - interval '41 days'
+   WHERE household_id = s.hh_raman AND token_kind = 'guest_invitation'
+     AND revoked_at IS NOT NULL;
+  PERFORM pg_temp.s8b_eq('U3 the expired state is reachable without waiting for a calendar: one live row '
+    'aged by hand, still unrevoked, now fixed and in the past, and the ageing moved `created_at` with it so '
+    'the table''s own pairing and ordering constraints accepted the write rather than aborting the battery. '
+    'The last two cells measure the same write from the panel''s side: the family''s revoked history is '
+    'three rows, the count X13 fixed by reporting four rows with one live among them, and the aged row now '
+    'holds the newest `created_at` among that household''s invitation credentials — which is the property '
+    'U6 reads as `expired` rather than `revoked`, and the only ordering rotation could have produced',
     ARRAY[n::text,
           (SELECT count(*)::text FROM private.access_tokens t
             WHERE t.household_id = s.hh_raman AND t.revoked_at IS NULL
-              AND t.expiry_policy = 'fixed' AND t.expires_at <= now())]::text[],
-    ARRAY['1', '1']::text[]);
+              AND t.expiry_policy = 'fixed' AND t.expires_at <= now()),
+          (SELECT count(*)::text FROM private.access_tokens t
+            WHERE t.household_id = s.hh_raman AND t.token_kind = 'guest_invitation'
+              AND t.revoked_at IS NOT NULL),
+          (SELECT (t.created_at = (SELECT max(x.created_at) FROM private.access_tokens x
+                     WHERE x.household_id = s.hh_raman
+                       AND x.token_kind = 'guest_invitation'))::text
+             FROM private.access_tokens t
+            WHERE t.household_id = s.hh_raman AND t.revoked_at IS NULL)]::text[],
+    ARRAY['1', '1', '3', 'true']::text[]);
 
   -- The twelve refusals, collected before any of them is asserted, so the assertion below is about the set.
-  res := res || pg_temp.s8b_door(NULL);                                  fam := fam || 'no-header';
-  res := res || pg_temp.s8b_door('');                                    fam := fam || 'empty-header';
-  res := res || pg_temp.s8b_door(repeat('a', 42));                       fam := fam || '42-chars';
-  res := res || pg_temp.s8b_door(repeat('b', 44));                       fam := fam || '44-chars';
-  res := res || pg_temp.s8b_door(repeat('c', 41) || '+/');               fam := fam || 'off-alphabet';
-  res := res || pg_temp.s8b_door(repeat('0', 64));                       fam := fam || 'stored-digest-shape';
-  res := res || pg_temp.s8b_door(rpad('zzforged', 43, 'z'));             fam := fam || 'forged-unknown';
-  res := res || pg_temp.s8b_door(current_setting('s8b.raw_chenna'));     fam := fam || 'revoked';
-  res := res || pg_temp.s8b_door(old_pillai);                             fam := fam || 'rotated-away';
-  res := res || pg_temp.s8b_door(current_setting('s8b.raw_raman'));      fam := fam || 'expired';
-  res := res || pg_temp.s8b_door(current_setting('s8b.raw_wedb_pub'));   fam := fam || 'wedding-secret-at-household-door';
-  res := res || pg_temp.s8b_public_door(rpad('zzforged', 43, 'z'));      fam := fam || 'forged-at-wedding-door';
-  res := res || pg_temp.s8b_public_door(current_setting('s8b.raw_baby'));fam := fam || 'household-secret-at-wedding-door';
+  -- Each `fam` label carries `::text` for a reason: `text[] || 'literal'` binds the right operand to the
+  -- `anyarray || anyarray` operator, so the engine tries to parse the label as an array literal and aborts
+  -- the block before any door is opened. The cast selects `anyarray || anyelement`, which appends it.
+  res := res || pg_temp.s8b_door(NULL);                                  fam := fam || 'no-header'::text;
+  res := res || pg_temp.s8b_door('');                                    fam := fam || 'empty-header'::text;
+  res := res || pg_temp.s8b_door(repeat('a', 42));                       fam := fam || '42-chars'::text;
+  res := res || pg_temp.s8b_door(repeat('b', 44));                       fam := fam || '44-chars'::text;
+  res := res || pg_temp.s8b_door(repeat('c', 41) || '+/');               fam := fam || 'off-alphabet'::text;
+  res := res || pg_temp.s8b_door(repeat('0', 64));                       fam := fam || 'stored-digest-shape'::text;
+  res := res || pg_temp.s8b_door(rpad('zzforged', 43, 'z'));             fam := fam || 'forged-unknown'::text;
+  res := res || pg_temp.s8b_door(current_setting('s8b.raw_chenna'));     fam := fam || 'revoked'::text;
+  res := res || pg_temp.s8b_door(old_pillai);                            fam := fam || 'rotated-away'::text;
+  res := res || pg_temp.s8b_door(current_setting('s8b.raw_raman'));      fam := fam || 'expired'::text;
+  res := res || pg_temp.s8b_door(current_setting('s8b.raw_wedb_pub'));   fam := fam || 'wedding-secret-at-household-door'::text;
+  res := res || pg_temp.s8b_public_door(rpad('zzforged', 43, 'z'));      fam := fam || 'forged-at-wedding-door'::text;
+  res := res || pg_temp.s8b_public_door(current_setting('s8b.raw_baby'));fam := fam || 'household-secret-at-wedding-door'::text;
 
   PERFORM pg_temp.s8b_eq('U4 §4.1 measured as one answer, not thirteen: the thirteen refusals above — six '
     'shapes that were never credentials, one replay of the stored-digest form, one unknown-but-well-formed '
@@ -1280,12 +1326,16 @@ BEGIN
   PERFORM pg_temp.s8b_eq('U5 and the door is not broken: the household secret the wedding door refused is '
     'the secret the household door opens, the wedding secret the household door refused is the secret the '
     'wedding door opens, and a live family link still opens after all thirteen refusals above — so U4''s '
-    'single answer is a policy about indistinguishability and not a door that answers false to everything',
+    'single answer is a policy about indistinguishability and not a door that answers false to everything. '
+    'The fourth cell is measured as key absence rather than as the type of a value, because the refusal the '
+    'product publishes is the one-name answer `{"available": false}` (`:567`) and never carries an '
+    '`invitation` name at all: an answer with `"invitation": null` would fail here, which is the stronger '
+    'claim this label makes',
     ARRAY[(pg_temp.s8b_door(current_setting('s8b.raw_baby')) ->> 'available'),
           (pg_temp.s8b_public_door(current_setting('s8b.raw_wedb_pub')) ->> 'available'),
           (pg_temp.s8b_door(current_setting('s8b.raw_pillai')) ->> 'available'),
-          jsonb_typeof(pg_temp.s8b_public_door(current_setting('s8b.raw_baby')) -> 'invitation')]::text[],
-    ARRAY['true', 'true', 'true', 'null']::text[]);
+          (pg_temp.s8b_public_door(current_setting('s8b.raw_baby')) ? 'invitation')::text]::text[],
+    ARRAY['true', 'true', 'true', 'false']::text[]);
 
   st := pg_temp.s8b_auth(current_setting('s8b.owner_a'),
     'SELECT api.get_guest_invitation_state(' || quote_literal(s.wed_a::text) || '::uuid)');
@@ -1346,7 +1396,8 @@ LANGUAGE sql STABLE AS $fn$
      AND t.token_kind = 'guest_invitation' $fn$;
 
 DO $N$
-DECLARE s s8c%ROWTYPE; v jsonb; st jsonb; old_lu timestamptz; lu_then timestamptz;
+DECLARE s s8c%ROWTYPE; v jsonb; st jsonb; d jsonb; fresh_lu timestamptz;
+        old_lu timestamptz; lu_then timestamptz;
         snap jsonb; snap2 jsonb; snap3 jsonb; storm jsonb[] := '{}'::jsonb[];
         raw2 text; tid text; live_then bigint;
 BEGIN
@@ -1367,7 +1418,7 @@ BEGIN
     'known about it), the family holds two credential rows with one live among them, and the deadline the '
     'host never set is carried across as `no_expiry` rather than silently given a date',
     ARRAY[octet_length(v ->> 'path')::text,
-          (SELECT jsonb_typeof(t.last_used_at)::text FROM private.access_tokens t
+          (SELECT coalesce(t.last_used_at::text, 'null') FROM private.access_tokens t
             WHERE t.household_id = s.hh_nair AND t.revoked_at IS NULL),
           (SELECT (coalesce(t.last_used_at, 'epoch'::timestamptz)
                  = coalesce(old_lu, 'epoch'::timestamptz))::text
@@ -1379,7 +1430,7 @@ BEGIN
             WHERE t.household_id = s.hh_nair AND t.revoked_at IS NULL),
           (SELECT array_agg(t.expiry_policy)::text FROM private.access_tokens t
             WHERE t.household_id = s.hh_nair AND t.revoked_at IS NULL),
-          jsonb_typeof(v -> 'household_id')]::text[],
+          v ->> 'household_id']::text[],
     ARRAY['46', 'null', 'true', '2', '1', '{no_expiry}',
           current_setting('s8b.hh_nair')]::text[]);
 
@@ -1403,7 +1454,7 @@ BEGIN
           (SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham
               AND r.response_source = 'guest' AND r.party_size = 3),
-          (SELECT jsonb_typeof(t.last_used_at)::text FROM private.access_tokens t
+          (SELECT coalesce(t.last_used_at::text, 'null') FROM private.access_tokens t
             WHERE t.household_id = s.hh_nair AND t.revoked_at IS NULL),
           (SELECT e ->> 'link_state' FROM jsonb_array_elements(st) e
             WHERE (e ->> 'household_id')::uuid = s.hh_nair),
@@ -1487,7 +1538,7 @@ BEGIN
              JOIN jsonb_each(snap2) b ON b.key = a.key
             WHERE a.value IS DISTINCT FROM b.value),
           tid,
-          (cardinality(SELECT jsonb_object_keys(snap3)))::text]::text[],
+          cardinality(pg_temp.s8b_top_keys(snap3))::text]::text[],
     ARRAY['8', 'true', '0', '1', tid, tid,
           (SELECT count(*)::text FROM private.access_tokens t
             WHERE t.wedding_id = s.wed_a AND t.token_kind = 'guest_invitation')]::text[]);
@@ -1526,18 +1577,26 @@ BEGIN
   PERFORM set_config('s8b.raw_pillai',
     (SELECT substr(i ->> 'path', 4) FROM jsonb_array_elements(v -> 'invitations') i
       WHERE (i ->> 'household_id')::uuid = current_setting('s8b.hh_pillai')::uuid), false);
+  SELECT t.last_used_at INTO fresh_lu FROM private.access_tokens t
+    WHERE t.household_id = current_setting('s8b.hh_pillai')::uuid
+      AND t.revoked_at IS NULL;
+  d := pg_temp.s8b_door(current_setting('s8b.raw_pillai'));
   PERFORM pg_temp.s8b_eq('N6 and a withdrawn family is not poisoned: the send that answered `already_live` '
-    'for a live link answers `issued` now the slot is empty, the new secret opens the door, and it opens it '
-    'unopened — three credential rows for the household, one live, the fresh one''s ledger NULL, which is '
-    'what makes it usable as the never-read instrument for A''s ordering claims',
+    'for a live link answers `issued` now the slot is empty, the new secret is unopened when it arrives and '
+    'opens the door — three credential rows for the household, one live, its ledger NULL before the read and '
+    'stamped by it. The two ledger readings sit on opposite sides of the door call because every expression '
+    'of one SQL statement sees the snapshot taken when that statement began, so a door and a reading of '
+    'what the door touched, inside the same `ARRAY[…]`, would compare against the pre-door state whatever '
+    'the door did',
     ARRAY[(v ->> 'issued'),
-          (pg_temp.s8b_door(current_setting('s8b.raw_pillai')) ->> 'available'),
+          (fresh_lu IS NULL)::text,
           (SELECT count(*)::text FROM private.access_tokens t
             WHERE t.household_id = current_setting('s8b.hh_pillai')::uuid),
-          (SELECT jsonb_typeof(t.last_used_at)::text FROM private.access_tokens t
+          (d ->> 'available'),
+          (SELECT (t.last_used_at IS NOT NULL)::text FROM private.access_tokens t
             WHERE t.household_id = current_setting('s8b.hh_pillai')::uuid
               AND t.revoked_at IS NULL)]::text[],
-    ARRAY['1', 'true', '3', 'null']::text[]);
+    ARRAY['1', 'true', '3', 'true', 'true']::text[]);
 END $N$;
 
 -- --------------------------------------------------------------------------- A: the answer door
@@ -1553,19 +1612,32 @@ END $N$;
 -- what a real guest's browser sends) and with no header at all (which is what a probe sends). If the
 -- credential were read first, the second column would answer `unavailable` instead of raising.
 --
--- Two refusals sit between the families — `party_size_too_large` and `answers_not_accepted` — and both are
--- returned after the credential resolves, which is why this file can also prove their converse: no dead
--- credential, however wrong its body, is ever told anything about its own headcount.
+-- Two refusals sit between the families — `party_size_too_large` and `answers_not_accepted` — and they
+-- divide along the code's own ordering: the ceiling is read from the household the credential resolves to
+-- (`:865-883`, after the lookup at `:840`), while the unasked-question answer is returned inside the body
+-- loop (`:779-783`), before it. This group proves both halves: no dead credential is ever told anything
+-- about its own headcount, and the one answer a dead link does receive is byte-identical to the answer the
+-- same body receives from a caller holding no link at all.
 DO $A$
 DECLARE s s8c%ROWTYPE; v jsonb; w jsonb; st jsonb; muuid text; ruuid text; fuid text;
-        g text; n_before bigint; n_after bigint; raw_live text;
+        g text; n_before bigint; n_after bigint; raw_live text; asked jsonb;
+        refused jsonb; accepted jsonb; mis_event jsonb; uncapped jsonb;
         p_before integer; p_after integer; n_a integer; n_b integer; n_labels integer;
+        live_ok jsonb; c999 jsonb; r999 jsonb; n999 jsonb; cask jsonb; iask jsonb; nask jsonb;
+        q3a jsonb; q3b jsonb; q3c jsonb; q5a jsonb; q5b jsonb; q5c jsonb;
+        rev6 jsonb; door6 jsonb; two7 jsonb; mix8 jsonb; sz8 text;
+        mis9 jsonb; own9 jsonb; cnt9 bigint;
 BEGIN
   SELECT * INTO s FROM s8c;
   muuid := current_setting('s8b.ev_muurtham');
   ruuid := current_setting('s8b.ev_reception');
   fuid  := current_setting('s8b.ev_farewell');
   raw_live := current_setting('s8b.raw_nair2');
+  -- One body, sent three ways below: a well-formed answer that also tries to reply to a question this
+  -- door never asks.
+  asked := jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+    'event_id', muuid, 'attending', 'attending', 'party_size', 1,
+    'answers', jsonb_build_object('meal', 'none'))));
 
   -- The storm's own bookkeeping, read before and after rather than asserted from what this file hopes it
   -- inserted: the counter is the harness's, and the row count is the product's.
@@ -1583,13 +1655,13 @@ BEGIN
     SELECT g, q.label,
            CASE WHEN q.body IS NULL THEN 'SELECT api.submit_guest_rsvp(NULL)'
                 ELSE 'SELECT api.submit_guest_rsvp(' || quote_literal(q.body) || '::jsonb)' END,
-           q.state, q.like
+           q.state, q.want_like
       FROM (VALUES
         ('01-null-argument', NULL,
          '23514', '%not in the shape%'),
         ('02-top-level-array', jsonb_build_array(1, 2)::text,
          '23514', '%not in the shape%'),
-        ('03-top-level-string', quote_literal('"x"'),
+        ('03-top-level-string', '"x"',
          '23514', '%not in the shape%'),
         ('04-empty-object', '{}'::jsonb::text,
          '23514', '%not in the shape%'),
@@ -1664,7 +1736,7 @@ BEGIN
          jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
            'event_id', muuid, 'attending', 'attending', 'party_size', NULL)))::text,
          '23514', '%not in the shape%')
-      ) q(label, body, state, like);
+      ) q(label, body, state, want_like);
 
     PERFORM pg_temp.s8b_run(g, 'anon', NULL);
   END LOOP;
@@ -1692,14 +1764,18 @@ BEGIN
   -- The positive control for the column that carried a header. Without it, MA1 would be consistent with
   -- "the probes were run against a dead credential and every body happens to refuse first", which is a
   -- different claim and a weaker test.
+  live_ok := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 1))));
   PERFORM pg_temp.s8b_eq('A0b the header MA1 used was live, measured by the door itself and not asserted: '
     'one well-formed body sent with the same header immediately after the storm is recorded, and it is '
     'recorded against the one event this family was scoped to (`80_guest_invitation_links.sql:422-423`), '
     'which upserts rather than adds — so the forty-four refusals above are refusals of the bodies and not '
-    'of a credential that would have refused them anyway, and the family still holds one answer row',
-    ARRAY[(pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1)))) ->> 'recorded'),
+    'of a credential that would have refused them anyway, and the family still holds one answer row. The '
+    'count is read after the submission statement, not beside it: in one SQL statement every expression '
+    'sees that statement''s starting snapshot, so a read next to the write it is meant to check would see '
+    'the household as it was before the door ran',
+    ARRAY[live_ok ->> 'recorded',
           (SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair)]::text[],
     ARRAY['true', '1']::text[]);
@@ -1730,140 +1806,193 @@ BEGIN
     ARRAY['true', 'true', '{reason=unavailable,recorded=false}',
           '{reason,recorded}', 'true', 'string']::text[]);
 
-  -- The converse of Ruling 4.1, which is the half that a family with a dead link is protected by.
-  PERFORM pg_temp.s8b_eq('A2 no credential state can produce either correctable answer: the withdrawn '
-    'family''s link asked to bring 999 (its host''s expectation is four, so a working link would have been '
-    'told `party_size_too_large`), and the same dead link asked an optional question (a working link would '
-    'have been told `answers_not_accepted`) — both answer with the generic refusal, because the credential '
-    'is resolved at `:840-863` before the cap loop at `:877`, and a stranger holding an old address is not '
-    'entitled to learn the family''s headcount ceiling',
-    ARRAY[(pg_temp.s8b_answer(current_setting('s8b.raw_chenna'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 999)))) = v)::text,
-          (pg_temp.s8b_answer(current_setting('s8b.raw_chenna'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1,
-          'answers', jsonb_build_object('meal', 'none'))))) = v)::text,
-          (pg_temp.s8b_answer(current_setting('s8b.raw_raman'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 999)))) = v)::text,
-          (pg_temp.s8b_answer(current_setting('s8b.raw_idaveli'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1,
-          'answers', jsonb_build_object('meal', 'none'))))) = v)::text,
+  -- The converse of Ruling 4.1, which is the half that a family with a dead link is protected by. The six
+  -- sends are each their own statement and the store is read afterwards, so the last cell measures what
+  -- the five refusals left behind instead of reading the state they all start from.
+  c999 := pg_temp.s8b_answer(current_setting('s8b.raw_chenna'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 999))));
+  r999 := pg_temp.s8b_answer(current_setting('s8b.raw_raman'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 999))));
+  n999 := pg_temp.s8b_answer(NULL,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 999))));
+  cask := pg_temp.s8b_answer(current_setting('s8b.raw_chenna'), asked);
+  iask := pg_temp.s8b_answer(current_setting('s8b.raw_idaveli'), asked);
+  nask := pg_temp.s8b_answer(NULL, asked);
+  PERFORM pg_temp.s8b_eq('A2 a dead credential is told nothing about the household behind it, and is told '
+    'no more than a stranger with no credential: the withdrawn family''s link asked to bring 999 and the '
+    'expired family''s link asked the same, and both got the generic refusal (a working link would have '
+    'been told `party_size_too_large`, because the ceiling comes from the household row the credential '
+    'resolves to at `:865-883`) — and so does a caller with no header at all, which is the third cell, '
+    'without which the first two would also be satisfied by a door that never names a ceiling for '
+    'anybody. The same two dead links sending an optional-question answer instead receive, byte for byte, '
+    'the answer that body receives with no credential whatsoever (`:779-783`, inside the body loop, in '
+    'front of the lookup at `:840`) — a sentence about the request, the same for every household of every '
+    'wedding, so holding a dead secret buys no information that holding nothing does not. The reason cell '
+    'proves that equality is not two refusals matching by accident: the shared answer is named, not '
+    '`unavailable`. And none of the five wrote an answer row',
+    ARRAY[(c999 = v)::text, (r999 = v)::text, (n999 = v)::text,
+          (cask = nask)::text,
+          (iask = nask)::text,
+          nask ->> 'reason',
           (n_after = (SELECT count(*) FROM public.rsvp_responses
                        WHERE wedding_id = s.wed_a))::text]::text[],
-    ARRAY['true', 'true', 'true', 'true', 'true']::text[]);
+    ARRAY['true', 'true', 'true', 'true', 'true', 'answers_not_accepted', 'true']::text[]);
 
   -- The optional-question refusal, and the ordering that only a crafted body can show.
+  q3a := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 1,
+      'answers', jsonb_build_object('meal', 'no nuts')))));
+  q3b := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 1,
+      'answers', jsonb_build_object('meal', 'no nuts'), 'notes', 'x'))));
+  q3c := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 1,
+      'answers', '{}'::jsonb))));
   PERFORM pg_temp.s8b_eq('A3 §4.2: a live family that tried to answer a question this invitation never '
     'asked is told so specifically — and the same body with an unknown key *also* on it is still told '
     '`answers_not_accepted` rather than being called malformed, because the answers test at `:780` is '
     'written before the unknown-key test at `:787`. An implementation that swapped those two lines would '
     'answer this family with 23514, and this assertion is what notices. The empty object is the other edge: '
-    '`answers: {}` is a family that opened the optional panel and filled in nothing, and it is accepted',
-    ARRAY[(pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1,
-          'answers', jsonb_build_object('meal', 'no nuts')))))
-        ->> 'reason'),
-          pg_temp.s8b_pairs(pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1,
-          'answers', jsonb_build_object('meal', 'no nuts'), 'notes', 'x'))))::text),
-          jsonb_typeof(pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1,
-          'answers', '{}'::jsonb))))-> 'recorded'),
+    '`answers: {}` is a family that opened the optional panel and filled in nothing, and it is accepted — '
+    'and the count, read after the three statements above, is the proof that the accepted one revised the '
+    'family''s single event row rather than adding a second one',
+    ARRAY[q3a ->> 'reason',
+          pg_temp.s8b_pairs(q3b)::text,
+          q3c ->> 'recorded',
           (SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair)]::text[],
     ARRAY['answers_not_accepted',
           '{reason=answers_not_accepted,recorded=false}', 'true', '1']::text[]);
 
-  -- The cap, its ceiling, its skip, and its position in front of the scope test.
-  PERFORM pg_temp.s8b_eq('A4 §7''s headcount rule at the guest door: a family the host sized at two is '
-    'refused three with the ceiling named in the answer, nothing is written for it, and two is accepted; a '
-    'family the host left unmeasured is allowed seven, because `:879` skips the comparison when the '
-    'expectation is NULL rather than reading it as zero — the difference between "the host set no ceiling" '
-    'and "nobody may come". Pillai, scoped to one live event and one switched-off one, is also the family '
-    'that shows the cap loop runs first: a three-person answer for an event that is not its own is refused '
-    'for its headcount, not for its access, and the order is visible only because the two loops disagree '
-    'about which answer to give',
-    ARRAY[pg_temp.s8b_pairs(pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 3))))::text),
+  -- The cap, its ceiling, its skip, and its position in front of the scope test. Each answer is sent by
+  -- its own statement, and the store is read only afterwards. That separation is not tidiness: every
+  -- expression of one SQL statement sees the snapshot taken when that statement began, so a submission
+  -- and a count of what it wrote, sitting in the same `ARRAY[…]`, compare against the *pre-write* state
+  -- no matter what the door did — the 'nothing is written for the refused answer' cell would have been
+  -- green even against a door that wrote it, and the 'seven is stored' cell failed here for exactly that
+  -- reason. Measured on this cluster: `ARRAY[write_returning_1(), read_count()]` answers `{1,0}`.
+  refused := pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 3))));
+  PERFORM pg_temp.s8b_eq('A4a §7''s ceiling is named and nothing is stored: the family the host sized at '
+    'two asked to bring three, and the answer carries `party_size_too_large` with no second name, while '
+    'the household''s whole answer store is still the empty set it was before the call',
+    ARRAY[pg_temp.s8b_pairs(refused)::text,
           (SELECT count(*)::text FROM public.rsvp_responses r
-            WHERE r.household_id = current_setting('s8b.hh_pillai')::uuid),
-          (pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 2)))) ->> 'recorded'),
-          pg_temp.s8b_pairs(pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', ruuid, 'attending', 'attending', 'party_size', 3))))::text),
-          (pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 7)))) ->> 'recorded'),
+            WHERE r.household_id = current_setting('s8b.hh_pillai')::uuid)]::text[],
+    ARRAY['{reason=party_size_too_large,recorded=false}', '0']::text[]);
+
+  accepted := pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 2))));
+  mis_event := pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', ruuid, 'attending', 'attending', 'party_size', 3))));
+  uncapped := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 7))));
+  PERFORM pg_temp.s8b_eq('A4b the ceiling accepts its own value, runs before the scope test, and is '
+    'skipped when the host set none: two is recorded for Pillai and reads back as two; the same family''s '
+    'three-person answer for an event that is not its own is refused for its headcount and not for its '
+    'access, which is visible only because the cap loop at `:877` and the scope loop at `:889-900` '
+    'disagree about which answer to give; and Nair, whose host left the expectation blank, is allowed '
+    'seven because `:879` skips the comparison rather than reading NULL as zero — the difference between '
+    '"the host set no ceiling" and "nobody may come", and the stored headcount is the proof it was '
+    'accepted rather than a return value that says so',
+    ARRAY[accepted ->> 'recorded',
+          (SELECT r.party_size::text FROM public.rsvp_responses r
+            WHERE r.household_id = current_setting('s8b.hh_pillai')::uuid
+              AND r.event_id = s.ev_muurtham),
+          pg_temp.s8b_pairs(mis_event)::text,
+          uncapped ->> 'recorded',
           (SELECT r.party_size::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham)]::text[],
-    ARRAY['{reason=party_size_too_large,recorded=false}', '0', 'true',
-          '{reason=party_size_too_large,recorded=false}', 'true', '7']::text[]);
+    ARRAY['true', '2', '{reason=party_size_too_large,recorded=false}', 'true', '7']::text[]);
 
   -- The event the household was given but the couple stopped running. This is the assertion that the
   -- `enabled` half of the scope test at `:894-897` exists: Pillai holds a real scope row for Farewell, so
   -- a door that checked only the scope would have written an answer for a ceremony that is not happening.
+  q5a := pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', fuid, 'attending', 'declined', 'party_size', 0))));
+  q5b := pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', fuid, 'attending', 'declined', 'party_size', 0))));
+  q5c := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', fuid, 'attending', 'declined', 'party_size', 0))));
   PERFORM pg_temp.s8b_eq('A5 a family scoped to a switched-off ceremony cannot answer it, and is not told '
     'that this is why: Pillai''s own scope row for Farewell is what makes this a measurement of the '
     '`enabled` test rather than of the scope test, and the answer it gets is byte-identical to A1''s dead '
     'credentials — "not invited to that" and "that is not happening" and "your link is dead" are one '
-    'sentence, which is the point of Ruling 4.1 at a door whose reader is a guest',
-    ARRAY[pg_temp.s8b_pairs(pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', fuid, 'attending', 'declined', 'party_size', 0))))::text),
-          (pg_temp.s8b_answer(current_setting('s8b.raw_pillai'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', fuid, 'attending', 'declined', 'party_size', 0)))) = v)::text,
-          (pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', fuid, 'attending', 'declined', 'party_size', 0)))) = v)::text,
+    'sentence, which is the point of Ruling 4.1 at a door whose reader is a guest. The farewell count is '
+    'read after the three sends above, so it is a measurement of their writing nothing rather than the '
+    'state they all start from',
+    ARRAY[pg_temp.s8b_pairs(q5a)::text,
+          (q5b = v)::text,
+          (q5c = v)::text,
           (SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.event_id = s.ev_farewell)]::text[],
     ARRAY['{reason=unavailable,recorded=false}', 'true', 'true', '0']::text[]);
 
-  -- One family, its whole answer, twice.
-  PERFORM pg_temp.s8b_eq('A6 a family that changes its mind overwrites rather than accumulates: one row per '
-    'event survives two submissions, the second one''s position is the one on the table, its `answers` '
-    'object is reset to empty by the same statement that writes it (`:922`), its source is still `guest`, '
-    'and the door now shows the family the revision it made — a returning household sees what it last said, '
-    'not what it said first',
+  -- One family, its whole answer, twice. The before-state and the after-state cannot share one statement
+  -- with the revision: every expression of a SQL statement reads that statement's starting snapshot, so the
+  -- row the revision rewrites looks unchanged to the reads sitting beside it. Two assertions, three
+  -- statements, and the claims each one makes are the ones its own position can measure.
+  PERFORM pg_temp.s8b_eq('A6a the family''s position before it changes its mind: one row for the ceremony it '
+    'answered, and it is the headcount A4b accepted, carrying the empty optional answers A3 accepted, with '
+    'the guest as its source. This is the state A6b''s revision is measured against',
     ARRAY[(SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham),
           (SELECT (r.attending || '|' || r.party_size::text || '|' || r.response_source)::text
              FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham),
           (SELECT (r.answers = '{}'::jsonb)::text FROM public.rsvp_responses r
+            WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham)]::text[],
+    ARRAY['1', 'attending|7|guest', 'true']::text[]);
+
+  rev6 := pg_temp.s8b_answer(raw_live,
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'declined', 'party_size', 0))));
+  door6 := pg_temp.s8b_door(raw_live);
+  PERFORM pg_temp.s8b_eq('A6b a family that changes its mind overwrites rather than accumulates: the '
+    'revision records one event and still leaves one row for it, the second submission''s position is the '
+    'one on the table, its `answers` object is reset to empty by the same statement that writes it (`:922`), '
+    'its source is still `guest`, and the door now shows the family the revision it made — a returning '
+    'household sees what it last said, not what it said first',
+    ARRAY[rev6 ->> 'events_recorded',
+          (SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham),
-          (pg_temp.s8b_answer(raw_live,
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'declined', 'party_size', 0)))) ->> 'events_recorded'),
           (SELECT r.attending FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham),
-          (pg_temp.s8b_door(raw_live) -> 'guest' -> 'events' -> 0 ->> 'attending'),
-          ((pg_temp.s8b_door(raw_live) -> 'guest' -> 'events' -> 0
-              ->> 'responded_at')::timestamptz = now())::text]::text[],
-    ARRAY['1', 'attending|7|guest', 'true', '1', 'declined', 'declined', 'true']::text[]);
+          (SELECT (r.answers = '{}'::jsonb)::text FROM public.rsvp_responses r
+            WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham),
+          (SELECT r.response_source FROM public.rsvp_responses r
+            WHERE r.household_id = s.hh_nair AND r.event_id = s.ev_muurtham),
+          (door6 -> 'guest' -> 'events' -> 0 ->> 'attending'),
+          ((door6 -> 'guest' -> 'events' -> 0 ->> 'responded_at')::timestamptz = now())::text]::text[],
+    ARRAY['1', '1', 'declined', 'true', 'guest', 'declined', 'true']::text[]);
 
-  -- The two-event submission, and the host's transcription it erases.
+  -- The two-event submission, and the host's transcription it erases. The submission is its own statement
+  -- and the four store readings follow it, because a read beside the write sees the row before the door
+  -- touched it — including the flipped source and the erased marker, which is the whole of this claim.
+  two7 := pg_temp.s8b_answer(current_setting('s8b.raw_baby'),
+    jsonb_build_object('events', jsonb_build_array(
+      jsonb_build_object('event_id', muuid, 'attending', 'attending', 'party_size', 2),
+      jsonb_build_object('event_id', ruuid, 'attending', 'attending', 'party_size', 2))));
   PERFORM pg_temp.s8b_eq('A7 one submission, both of a family''s events: two rows written in one call, and '
     'the reception row that X17 planted as the host''s transcription of a phone call is now the '
     'family''s own answer — `response_source` flipped to `guest` and the host''s optional `meal` value '
     'erased, because the DO UPDATE resets `answers` unconditionally. That is a real consequence of the '
     'rule rather than a side effect to apologize for: the household''s latest word outranks the host''s '
     'note of an earlier one, and this battery records it as measured, not as intended-by-accident',
-    ARRAY[(pg_temp.s8b_answer(current_setting('s8b.raw_baby'),
-        jsonb_build_object('events', jsonb_build_array(
-          jsonb_build_object('event_id', muuid, 'attending', 'attending', 'party_size', 2),
-          jsonb_build_object('event_id', ruuid, 'attending', 'attending', 'party_size', 2)))))
-        ->> 'events_recorded'),
+    ARRAY[two7 ->> 'events_recorded',
           (SELECT count(*)::text FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_baby AND r.response_source = 'guest'),
           (SELECT (r.attending || '|' || r.party_size::text)::text FROM public.rsvp_responses r
@@ -1874,20 +2003,24 @@ BEGIN
             WHERE r.answers ->> 'meal' = current_setting('s8b.mk_other_answer'))]::text[],
     ARRAY['2', '2', 'attending|2', 'false', '0']::text[]);
 
-  -- All-or-nothing, measured by what did not move.
+  -- All-or-nothing, measured by what did not move. The before-state is read into a variable in its own
+  -- statement, the mixed submission runs, and the after-state is read in the assertion — otherwise the
+  -- second reading would be the first one again, and the arm that shows the family was not half-replaced
+  -- would be satisfied by any door, including one that wrote the wrong event.
+  SELECT array_agg(r.party_size::text ORDER BY r.event_id)::text INTO sz8
+    FROM public.rsvp_responses r WHERE r.household_id = s.hh_baby;
+  mix8 := pg_temp.s8b_answer(current_setting('s8b.raw_baby'),
+    jsonb_build_object('events', jsonb_build_array(
+      jsonb_build_object('event_id', muuid, 'attending', 'attending', 'party_size', 1),
+      jsonb_build_object('event_id', fuid, 'attending', 'declined', 'party_size', 0))));
   PERFORM pg_temp.s8b_eq('A8 §5''s "all-or-nothing" is a shape claim about the write loop, and it is '
     'measured: a submission that gets one event right and one event wrong writes neither — the validation '
     'loops at `:877-900` run to completion before the first INSERT at `:910`, so the family''s earlier '
     'answers keep the headcount they had rather than being half-replaced. The positive half of the same '
     'arm is that both rows really were the two-event submission''s, so the equality is not comparing '
     'nothing',
-    ARRAY[(SELECT array_agg(r.party_size::text ORDER BY r.event_id)::text
-             FROM public.rsvp_responses r
-            WHERE r.household_id = s.hh_baby),
-          pg_temp.s8b_pairs(pg_temp.s8b_answer(current_setting('s8b.raw_baby'),
-        jsonb_build_object('events', jsonb_build_array(
-          jsonb_build_object('event_id', muuid, 'attending', 'attending', 'party_size', 1),
-          jsonb_build_object('event_id', fuid, 'attending', 'declined', 'party_size', 0)))))::text,
+    ARRAY[sz8,
+          pg_temp.s8b_pairs(mix8)::text,
           (SELECT array_agg(r.party_size::text ORDER BY r.event_id)::text
              FROM public.rsvp_responses r
             WHERE r.household_id = s.hh_baby),
@@ -1895,26 +2028,31 @@ BEGIN
             WHERE r.household_id = s.hh_baby)]::text[],
     ARRAY['{2,2}', '{reason=unavailable,recorded=false}', '{2,2}', '2']::text[]);
 
-  -- The cross-tenant aim: a real credential of the other wedding, pointed at this wedding's event.
+  -- The cross-tenant aim: a real credential of the other wedding, pointed at this wedding's event. The
+  -- refusal and its residue are read in the statements after it, so "writes nothing here" is a measurement
+  -- rather than the state every expression in the same statement already saw.
+  mis9 := pg_temp.s8b_answer(current_setting('s8b.raw_stranger'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', muuid, 'attending', 'attending', 'party_size', 1))));
+  cnt9 := (SELECT count(*) FROM public.rsvp_responses r
+            WHERE r.wedding_id = s.wed_a
+              AND r.household_id = current_setting('s8b.hh_stranger')::uuid);
+  own9 := pg_temp.s8b_answer(current_setting('s8b.raw_stranger'),
+    jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
+      'event_id', current_setting('s8b.ev_haldi'),
+      'attending', 'attending', 'party_size', 1))));
   PERFORM pg_temp.s8b_eq('A9 a credential cannot aim a write at another tenant: the cousin family''s own '
     'working link, offered this wedding''s ceremony, is refused with the generic answer and writes nothing '
     'here; offered its own wedding''s single event it is accepted, and the row it writes carries the other '
     'wedding''s id and its own household — because the function derives `wedding_id` from the credential '
     '(`:847-867`) and never from the body',
-    ARRAY[(pg_temp.s8b_answer(current_setting('s8b.raw_stranger'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', muuid, 'attending', 'attending', 'party_size', 1)))) = v)::text,
-          (SELECT count(*)::text FROM public.rsvp_responses r
-            WHERE r.wedding_id = s.wed_a
-              AND r.household_id = current_setting('s8b.hh_stranger')::uuid),
-          (pg_temp.s8b_answer(current_setting('s8b.raw_stranger'),
-        jsonb_build_object('events', jsonb_build_array(jsonb_build_object(
-          'event_id', current_setting('s8b.ev_haldi'),
-          'attending', 'attending', 'party_size', 1)))) ->> 'household_id'),
+    ARRAY[(mis9 = v)::text,
+          cnt9::text,
+          own9 ->> 'household_id',
           (SELECT (r.wedding_id = s.wed_b)::text FROM public.rsvp_responses r
-            WHERE r.household_id = current_setting('s8b.hh_stranger')),
+            WHERE r.household_id = current_setting('s8b.hh_stranger')::uuid),
           (SELECT r.response_source FROM public.rsvp_responses r
-            WHERE r.household_id = current_setting('s8b.hh_stranger'))]::text[],
+            WHERE r.household_id = current_setting('s8b.hh_stranger')::uuid)]::text[],
     ARRAY['true', '0', current_setting('s8b.hh_stranger'), 'true', 'guest']::text[]);
 
   PERFORM pg_temp.s8b_send(NULL);
@@ -2212,8 +2350,13 @@ BEGIN
     'handed `anon` the table',
     (SELECT array_agg(p.polname || '=' || p.polcmd::text ORDER BY p.polname COLLATE "C")
        FROM pg_policy p WHERE p.polrelid = 'public.rsvp_responses'::regclass),
-    ARRAY['owners_delete_rsvps=d', 'owners_record_manual_rsvps=a',
-          'owners_read_rsvps=r', 'owners_update_manual_rsvps=w']::text[]);
+    -- The want list is in the order the pinned `COLLATE "C"` produces, which byte order fixes: `read`
+    -- precedes `record` because the third differing character is `a` (0x61) against `c` (0x63). The set of
+    -- four names and their four command letters is the claim; the draft of this line carried them in the
+    -- order a reader would say them, which no collation sorts to, and the assertion could not have passed
+    -- on any cluster.
+    ARRAY['owners_delete_rsvps=d', 'owners_read_rsvps=r',
+          'owners_record_manual_rsvps=a', 'owners_update_manual_rsvps=w']::text[]);
 
   -- Which half of each policy is populated, read per command instead of counted: the INSERT policy is
   -- `WITH CHECK` only, so its `polqual` is NULL (that file's `:279`), and a count of non-null USING clauses
@@ -3834,9 +3977,17 @@ BEGIN
   -- Z4 the same population named family by family, which is the statement a live-link count cannot make.
   -- Baby and Pillai each hold a working link among more rows than that, because a withdrawal is a timestamp
   -- and not a deletion; the four families whose links this file closed hold none.
+  --
+  -- Pillai's four are counted, not recalled, and each is pinned by the group that made it: X10's mint,
+  -- U2's rotation (which measured the household at two rows with one live), N6's re-send after N5 withdrew
+  -- it (three rows, one live) and Qb3's post-takedown re-send, whose new row Qb4 identified as the one not
+  -- in `s8u`. The qualification run that first reached this line measured `1/4` and the probe read the two
+  -- newest digests back against `s8b.raw_pillai` and `s8b.raw_pillai4`, so the fourth row is Qb3's and not a
+  -- mint nobody called; the hand total `1/2` predated group N and was the stale half of this assertion.
   PERFORM pg_temp.s8b_eq('Z4 the credentials named family by family, live-of-all: Chennakrishna Iyer none of '
     'its two, Baby one of five, Idaveli none of its two, Nair none of its two after group N rotated it, '
-    'Pillai one of the two this file minted for it, Raman none of its four — and the other wedding is '
+    'Pillai one of the four this file minted for it (X''s, U2''s successor, N6''s re-send and Qb3''s), Raman '
+    'none of its four — and the other wedding is '
     'untouched by every mint, publish, takedown and re-send in this file, in both its total and its live '
     'count, against the pair group Q measured before any of it',
     ARRAY[(SELECT coalesce(string_agg(f.dn || ':' || f.lv || '/' || f.all_, ' '
@@ -3859,7 +4010,7 @@ BEGIN
               AND t.token_kind = 'guest_invitation'
               AND t.household_id NOT IN (s.hh_baby, current_setting('s8b.hh_pillai')::uuid))]::text[],
     ARRAY['Chennakrishna Iyer:0/2 The Baby family:1/5 The Idaveli household:0/2 '
-          || 'The Nair family:0/2 The Pillai household:1/2 The Raman family:0/4',
+          || 'The Nair family:0/2 The Pillai household:1/4 The Raman family:0/4',
           'true', 'true', '0']::text[]);
 
   -- Z5 the answers, and whose they are. Group Qb7's submission overwrote the Pillai row group A wrote
@@ -4017,14 +4168,19 @@ END $Z$;
 -- a `DO` block that never ran, a probe group whose rows were deleted — cannot read as a pass, and the
 -- assertion is made *through* the counter so the printed total and the observed PASS lines cannot drift apart.
 --
--- 181 is the number of assertions this file declares before the floor line itself, counted mechanically
--- rather than estimated, against the file as it stands at this head. The instrument has to be anchored to the
--- start of a statement rather than a plain substring search: a substring search also matches prose that
--- quotes the call, so the count would move every time someone explained it. Anchored, a comment line can
--- never match, and the numbers below can be re-taken and are expected to reproduce:
+-- 184 is the number of assertions this file declares before the floor line itself, counted mechanically
+-- rather than estimated, against the file as it stands at this head — the three splits this qualification
+-- introduced (X9 into X9 and X9b, A4 into A4a and A4b, A6 into A6a and A6b) each add one to the 181 that
+-- was authored with the file. The reason for those splits is stated once at A4 and re-used below: every
+-- expression of one SQL statement sees the snapshot taken when that statement began, so an assertion that
+-- puts a table-writing door call and a reading of what that call must have left together measures the
+-- pre-call state for the reading, whatever the door did. The instrument has to be anchored to the start of
+-- a statement rather than a plain substring search: a substring search also matches prose that quotes the
+-- call, so the count would move every time someone explained it. Anchored, a comment line can never match,
+-- and the numbers below can be re-taken and are expected to reproduce:
 --
---   grep -cE '^[[:space:]]*PERFORM pg_temp\.s8b_eq\('        -> 122, of which one is the call inside
---                                                             `pg_temp.s8b_has_keys`'s own body, so 121
+--   grep -cE '^[[:space:]]*PERFORM pg_temp\.s8b_eq\('        -> 125, of which one is the call inside
+--                                                             `pg_temp.s8b_has_keys`'s own body, so 124
 --                                                             direct equalities
 --   grep -cE '^[[:space:]]*PERFORM pg_temp\.s8b_has_keys\('  ->   4, each incrementing once through that
 --                                                             inner call
@@ -4045,7 +4201,7 @@ END $Z$;
 -- rows, distributed MA1:22 MA2:22 MR1:2 MR2:1 MR3:1 MR4:3 QB:2 QF:3, which sums to the same 56. Each of the
 -- seven `run()` groups counts one assertion per probe row it runs.
 --
--- 121 + 4 + 56 = 181, and this L1 pass is the 182nd assertion the closing line reports. The arithmetic is
+-- 124 + 4 + 56 = 184, and this L1 pass is the 185th assertion the closing line reports. The arithmetic is
 -- written out because a bare number in a floor would have to be re-derived by hand anyway; the first run
 -- prints its own total one line below, and if the two disagree the difference is a group that did not run —
 -- the repair is to find that group, not to move this number.
@@ -4053,8 +4209,8 @@ DO $L$
 DECLARE ran integer;
 BEGIN
   ran := coalesce(nullif(current_setting('s8b.passed', true), ''), '0')::int;
-  IF ran < 181 THEN
-    RAISE EXCEPTION 'FAIL: only % Stage 8 RSVP assertions ran — the authored floor is 181 (the closing line '
+  IF ran < 184 THEN
+    RAISE EXCEPTION 'FAIL: only % Stage 8 RSVP assertions ran — the authored floor is 184 (the closing line '
       'reports one more, this L1 assertion itself)', ran;
   END IF;
   PERFORM pg_temp.s8b_ok('L1 the counter, the fixtures and the floor all moved together ('
