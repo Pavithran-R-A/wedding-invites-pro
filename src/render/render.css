@@ -42,6 +42,31 @@ body {
   display: block;
 }
 
+/* No element on an export canvas animates.
+ *
+ * Measured, not assumed: headless Chromium reports `prefers-reduced-motion: reduce`, so the base
+ * stylesheet's accommodation block (`transition-duration: .01ms !important` on `*`, in
+ * `src/index.css`) is active here, and because `transition-property`'s initial value is `all` every
+ * property change on a live node becomes a transition. A same-task `getComputedStyle` or
+ * `getBoundingClientRect` read then returns the *previous* value: a page mounted at 24 px and
+ * remounted at 44 px reported a computed size of 24 px and the 24 px layout height, and only caught
+ * up after two frames. The worker's fit ladder writes the article's lead size on a page it reuses
+ * for every artefact, so without this rule each rung measured the rung before it — a teaser planned
+ * against numbers that describe a different document, and an artefact whose recorded derivation is
+ * untrue about its own pixels.
+ *
+ * The base rule wins on `transition-duration` with `!important`; this one targets
+ * `transition-property`, which nothing declares importantly, so the override holds without a
+ * competition to win. Killing the duration instead would leave a `!important` loser.
+ *
+ * It is scoped to the canvas rather than to `*` because a guest's page is allowed to animate — this
+ * file is never loaded there — and to a printed artefact a transition is only a way for the same
+ * DTO to produce two different files. */
+[data-render-surface],
+[data-render-surface] * {
+  transition-property: none;
+}
+
 /* The card affordances in the renderer's own classes — a rounded corner, a hairline gold border and
    a one-pixel shadow — exist because a guest's article sits on a page beside other page furniture.
    On a canvas the article *is* the image, so those pixels would be an artefact's edge falling away
