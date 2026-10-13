@@ -28,7 +28,7 @@
 // for a word this parser has not seen would turn a forward-compatible addition into a blank
 // page for the one reader who cannot be updated — the visitor holding a link.
 
-import { asObject, booleanValue, isBooleanValue, isNumberValue, isText, numberValue, text } from './jsonShape';
+import { asObject, booleanValue, isBooleanValue, isNumberValue, isText, numberValue, text } from './jsonShape.ts';
 
 const ALIGNMENTS = ['left', 'center', 'right'] as const;
 
