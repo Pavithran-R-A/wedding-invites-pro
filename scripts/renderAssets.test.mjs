@@ -408,6 +408,38 @@ describe("render-asset audit", () => {
     ]);
   });
 
+  it("fails a product file naming a CDN host and discloses a test fixture that names one", () => {
+    // The split carries one claim: a file the test runner includes is run under vitest and imported
+    // by no entry, so naming the CDN hosts inside a hostile-input fixture cannot put a remote font
+    // request into a bundle. Proved in both directions — a product file still fails, and a name the
+    // runner's `include` glob does *not* match (`src/lib/sneaky.test.js`) still fails, so the
+    // widening cannot quietly become a place to hide a request.
+    const withFile = (path) => () => {
+      const { files } = healthyTree();
+      files.set(path, "const h = 'fonts.gstatic.com';\n");
+      return auditRenderAssets(memoryView(files));
+    };
+
+    const product = withFile("src/render/remoteFontRequest.ts")();
+    expect(product.findings.map((f) => f.rule)).toEqual(["font-cdn-reference"]);
+    expect(product.findings[0].path).toBe("src/render/remoteFontRequest.ts");
+
+    const unrun = withFile("src/lib/sneaky.test.js")();
+    expect(unrun.findings.map((f) => f.rule)).toEqual(["font-cdn-reference"]);
+
+    const { files } = healthyTree();
+    files.set("src/render/renderRequest.test.ts", "const a = 'fonts.googleapis.com';\n");
+    files.set("src/test/invitationFixture.ts", "const b = 'fonts.gstatic.com';\n");
+    const report = auditRenderAssets(memoryView(files));
+    expect(report.findings).toEqual([]);
+    const productFacing = report.measures.find((m) => m.includes("in product-facing text"));
+    const disclosed = report.measures.find((m) => m.includes("in test fixtures only"));
+    expect(productFacing).toContain("0 reference(s)");
+    expect(disclosed).toContain("2 reference(s)");
+    expect(disclosed).toContain("src/render/renderRequest.test.ts");
+    expect(disclosed).toContain("src/test/invitationFixture.ts");
+  });
+
   it("is satisfied by the tree this repository actually carries", () => {
     // The fixtures prove the rules fire; this proves they are satisfied by what really ships, so a
     // rule cannot be tuned until an imaginary tree passes while the real one is quietly wrong.

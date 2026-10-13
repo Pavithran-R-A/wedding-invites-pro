@@ -57,8 +57,12 @@ const OFL_MARKER = "SIL Open Font License, Version 1.1";
 /** Hosts the app must not ask for typography from, whatever the reason given for asking. */
 const FONT_CDN_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
-/** Product-facing text surfaces the CDN needle sweep reads. `scripts/` is excluded: it holds this file. */
-const NEEDLE_ROOTS = ["index.html", "src"];
+/** Product-facing text surfaces the CDN needle sweep reads. `scripts/` is excluded: it holds this file.
+ *
+ *  Stage 9 adds `render.html`: the render harness is a second browser-loaded document, it links the
+ *  same self-hosted stylesheet, and a CDN `<link>` restored there would put a third-party font
+ *  request into every exported artefact while the guest page stayed clean. */
+const NEEDLE_ROOTS = ["index.html", "render.html", "src"];
 const NEEDLE_EXTENSIONS = new Set([".html", ".css", ".ts", ".tsx", ".js", ".jsx", ".json", ".txt", ".md"]);
 
 /**
@@ -127,6 +131,24 @@ function collectNeedleFiles(view, rel) {
   if (rootEntries.length === 0 && isScannable(rel.split("/").pop())) return [rel];
   walk(rel);
   return out;
+}
+
+/**
+ * Is this path part of the declared test surface rather than something a browser can load?
+ *
+ * Two forms, and both are read from `vitest.config.ts` rather than invented here: a file whose name
+ * matches the `include` glob (at any depth under `src/`, a name ending `.test.ts`, `.test.tsx`,
+ * `.spec.ts` or `.spec.tsx`) and a file under `src/test/`, the directory the vitest `setupFiles`
+ * lives in and which no product module imports. The first cannot be bundled because no entry names
+ * it; the second cannot be bundled because the only things that import it are the first kind.
+ *
+ * Deliberately narrower than "has `test` in the path": a `.test.js` under `src/` is *not* matched by
+ * the include glob, so treating it as test-only would give a CDN reference a way to ship while
+ * looking audited. A name the test runner does not run is a name this rule still reads as product.
+ */
+function isTestOnlyPath(rel) {
+  const name = rel.split("/").pop();
+  return rel.startsWith("src/test/") || /^[^/]+\.(test|spec)\.(ts|tsx)$/.test(name);
 }
 
 /**
@@ -349,11 +371,22 @@ export function auditRenderAssets(view) {
   }
 
   // ---- nothing in the product's own text asks a remote host for a font
+  //
+  // Two classes of hit, because the rule is about what a browser can be made to request. A test
+  // file that names a CDN host inside a hostile-input fixture is describing the thing this gate
+  // removes — the same reason `scripts/` is out of scope below — and it cannot reach a bundle,
+  // because no entry imports it. Those hits are therefore measured and disclosed rather than
+  // deleted from the scan: a future font request that *does* ship still fails the gate, and a
+  // future test fixture that names the hosts stays visible in the report instead of vanishing.
   const hits = findNeedles(view, FONT_CDN_HOSTS);
-  for (const hit of hits) {
+  const productHits = hits.filter((hit) => !isTestOnlyPath(hit.path));
+  const testHits = hits.filter((hit) => isTestOnlyPath(hit.path));
+  for (const hit of productHits) {
     add("font-cdn-reference", hit.path, `line ${hit.line} still names ${hit.needle}; the guest page must load typography from this origin`);
   }
-  measures.push(`${FONT_CDN_HOSTS.join(" and ")}: ${hits.length} reference(s) in product-facing text`);
+  measures.push(`${FONT_CDN_HOSTS.join(" and ")}: ${productHits.length} reference(s) in product-facing text`);
+  measures.push(`${FONT_CDN_HOSTS.join(" and ")}: ${testHits.length} reference(s) in test fixtures only `
+    + `(${[...new Set(testHits.map((hit) => hit.path))].join(", ") || "none"}) — never bundled`);
 
   measures.push(`${manifest.families.length} famil${manifest.families.length === 1 ? "y" : "ies"}, `
     + `${manifest.families.reduce((n, f) => n + f.faces.length, 0)} face(s), `
