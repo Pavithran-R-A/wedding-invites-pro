@@ -2359,3 +2359,118 @@ each `code=$?` adjacent to its own call — the piped shape was overwritten, not
 reader should carry is that a pipeline's `$?` is its last stage's. `README.md:348-374` is a list item, not a matrix
 row, so no row-shape re-check applies; the readiness matrix is not touched by this section, so its rows keep the
 lengths §24 published.
+
+## 26. The last owned process stopped and the shared stack re-read afterwards: what the cleanup actually had to remove, the two schema names this stage had to stop inventing, and what a zero-row census proves about a reset that did not happen
+
+Brief item (9) is *"Remove only confirmed Stage 8 scratch resources once they are no longer needed. Preserve shared
+Docker volumes, existing databases and other projects."* The whole of it is in `q8-logs/s20-cleanup-01.log`, 176 lines
+in blocks `[1]`–`[27]`, and its finding is that **one** resource was still live when this step began: PID 28296,
+identified as this task's by its own command line — `node …\s8clean\node_modules\…\vite.js preview --host 127.0.0.1
+--port 4173 --strictPort` (`:10`) — and nothing else. `Stop-Process` on that single PID printed `stopped` at
+`stop_exit=0` (`:30-31`), and the three reads that show the tree is quiet afterwards are `post_4173_listeners=0`
+(`:33`), `post_pid_28296_count=0` (`:36`) and `post_stage8_node_count=0` (`:39`), the last of these a command-line
+match on `s8clean|s5qual|stage8`, so it would have caught a leftover harness or CDP driver too. Everything else the
+cleanup might have done was measured to be already unnecessary: no listener on the tier's CDP port 9431 (`:19-20`), no
+Chrome carrying that port (`:22-23`), and no `stage8-ui-*` directory in `C:\Users\PAVITH~1\AppData\Local\Temp` before
+the stop (`:27-28`) or after it (`:42-43`) — because the browser harness builds that directory at
+`scripts/stage8-browser-guest.mjs:98` and tears it down itself. So the honest statement of this step's scope is one
+process stopped, **0** containers, volumes, networks, images, databases, files or directories removed, and no kill
+issued by pattern.
+
+**What was preserved, counted rather than asserted.** `containers_total=19` = 6 `supabase_*_localvivaahvarnam` + 12
+`supabase_*_dueweave` + 1 `p3c-rest-v16` (`:137`), and Stage 8 created 0 of the 19. After the stop the six
+`localvivaahvarnam` containers are all still `State=running` (`:136-138`, matching the pre-stop listing at `:48`,
+`:59-63`) and the thirteen others keep the `Exited` states they had before this stage (`:45-47`, `:49-58`). The five
+shared volumes are enumerated at `:69-74` and never addressed by a delete; `:153-155` is the block that lists the
+destructive verbs this step did not use — `db reset`, `DROP`, `TRUNCATE`, `DELETE`, `docker rm`, `docker volume rm`,
+`system prune`, `rm -rf` — and the greppable consequence of that claim is that the only mutating command executed
+anywhere in the capture is the `Stop-Process` at `:29-31`. A reader should treat `:153-155` as an assertion about the
+log rather than as the log's own evidence: the log is the evidence, and it is short enough to read whole. The stack
+answered after the
+removal: gateway `127.0.0.1:54400` with 2 listeners and HTTP 200 from `/rest/v1/` (`:86-89`), database `127.0.0.1:54401`
+with 2 listeners (`:81-82`). One number here is a port-identity lesson rather than a result: `listeners_54321=0`
+(`:83`) is not an outage — 54321 is the CLI's own api default, and `supabase/config.toml:7-12` exists precisely to say
+that this project moved every port off those defaults, because this machine already runs an unrelated complete Supabase
+stack on them. The repo's ground truth is `config.toml:24` (`port = 54400`) and `:37` (`port = 54401`), which is what
+`:86` and `:81` then measured. The 200 on `/rest/v1/` is a liveness read only; authorisation on that surface is what
+the HTTP battery holds, and this section borrows none of its findings.
+
+**A zero-row census instead of a promise.** "I did not reset the shared database" is worth nothing unless it is
+measured, and the measurement the battery itself already publishes is the one to compare against, because it is the
+same list computed the same way: `s19-http-s8clean-01.log:690` reports `access_tokens` back to 0 rows and `:694-696`
+report `guest_households`, `household_event_scopes` and `rsvp_responses` doing the same at the end of the run.
+Re-read here, `SELECT` only, at head
+`c82fe82…`: `guest_households=0` (`:116`), `household_event_scopes=0` (`:118`), `rsvp_responses=0` (`:120`),
+`access_tokens_all=0 guest_kind=0` (`:122`), each with its own `census_*_exit=0`, and the migration ledger still tops
+out at `20261009120000` with `20261008120000` and `20261006120000` beneath it (`:125-128`). What that equality does
+prove: no rows appeared after the battery finished, and this step wrote nothing. What it does not prove: that these
+tables were never populated — the battery seeded and cleared them within its own run, and 0 here is agreement with the
+runner's post-state, not a statement about the run's internals. The staged tree is likewise unmoved by the cleanup:
+`s8clean_porcelain=[]` at its `c82fe82…` HEAD (`:130-134`), and `s5qual` still carries exactly its two untracked
+`.yaml` files and nothing else (`:132`).
+
+**The naming finding a reviewer will otherwise trip on.** The residue block quoted above prints
+`guest_invitation_tokens back to 0 rows` (`s19-http-s8clean-01.log:691`) among lines that name real tables, and there is
+no such table. Querying `information_schema` for the names that residue block prints resolves four of them to relations
+— `private.access_tokens`, `public.guest_households`, `public.household_event_scopes`, `public.rsvp_responses`
+(`:106-110`) — and the fifth, `guest_invitation_tokens`, to nothing, because it is a *derived* census line:
+`supabase/tests/api/run.sh:109` counts rows of `private.access_tokens` where `token_kind = 'guest_invitation'`. Anyone
+who queries the residue list as a table list gets `relation … does not exist` and will reasonably report a stack defect;
+this section nearly did, and `:94-97` is that mis-query printed in full, with its correction stated at `:99-103` rather
+than removed. The same reading corrects a second thing: this stage's migration creates no tables at all.
+`grep -iE "create table"` over
+`supabase/migrations/20261009120000_stage8_guest_invitations_rsvp.sql` exits 1, and its DDL anchors are
+`ALTER TABLE private.access_tokens` at `:66` and `:68` and `ALTER TABLE public.rsvp_responses` at `:135` and `:137`
+(verified in the clean tree; the file is 1253 lines at `wc -l`). That is the live-schema confirmation of Ruling 8.2 as this document states it in §3, at lines 135-136 above
+(`:135-136` of `git show HEAD:` for the committed bytes) — Stage 8 adds no new table, no new table privilege and no new
+grant to any browser role — checked against the running database rather than against the prose. It also disposes of a filename trap, and the
+count here was re-taken after a first attempt reported the wrong thing: in the committed version of this file
+(`c82fe82…`, exported with `git show HEAD:docs/audits/stage-8-guest-rsvp.md`), `guest_invitation_links` occurs 7 times
+and all 7 are inside the battery path `80_guest_invitation_links.sql` (`:579, :980, :1385, :1418, :1493, :1513,
+:1624`); no line of it calls that name a relation, and `guest_invitation_tokens` occurs 0 times in it and 0 times in
+`README.md`. So no published claim depends on either name being a table. §3 already records the design correctly at
+lines 133-134 above — "the `guest_invitation`/`rsvp` members of the `token_kind` vocabulary with `household_id` and its
+composite FK already on `private.access_tokens`" — so the trap is in how the runner's residue output *reads*, not in
+the design record.
+
+**Three instrument defects in my own capture, recorded because they are mine.** (1) `:66` runs `supabase status
+--local`, which is not on this shell's PATH, so it printed `command not found`, and `:67` printed
+`supa_status_exit=0` beside it because the capture was piped through `head` — the same shape §25 names for the push
+wrapper, and it makes `:67` unpublishable. Superseded by `:81-88`, which pipe nothing and put each exit next to its own
+call; the correction is stated at `:76-79`. (2) `:94-97` queries `app.guest_invitation_links`, a name invented from a
+filename, and its census filtered `table_schema in ('app','public')`, which could only ever have seen two of the four
+relations. `row_count_exit=1` there is a query defect, not a stack defect; `:99-110` says so and `:116-123` re-takes
+it with resolved names. (3) The numbers `[21]`–`[23]` are absent from the log, and that absence is the trace of a whole batch that never
+reached it: a quoting error made the shell fail to parse the brace group, so nothing partial was written and the
+surviving blocks resume at `[24]` and run to `[27]`. The capture's own note on this (`:170-172`) names only `[22]` and
+`[23]`, understating the dead range by one; the nit is inside a capture rather than in a measurement, and the capture
+is left as written instead of edited after the fact. The re-take of a `grep | head` exit while drafting this section was the same defect recurring in real time: the first
+answer's exit code belonged to `head`, and only the unpiped `grep -c` re-take established the 0-in-this-file and
+0-in-`README.md` for `guest_invitation_tokens` cited above, and made me notice that the `guest_invitation_links` count
+is 7 rather than 0 — all seven of them the battery path.
+
+**The gates this edit owes, and why no tier was re-run for it.** One tracked file changes: this one, growing from 2361
+to 2476 lines with §26 occupying 2363-2476, and `q8-logs/s21-docs-cleanup-gates-02.log:22` shows exactly the pair the commit carries —
+`M docs/audits/stage-8-guest-rsvp.md` plus the two untracked `.yaml` files, which stay untracked and unstaged as they
+must. No `src/**`, no `.ts`/`.tsx`, no route, no `src/config/product.ts` value, no `docs/architecture/` path, no
+`supabase/migrations/` file, no battery and no harness script — so the sweep is the Markdown set: `product:check`, its
+`--self-test` and `git diff --check`, each with an adjacent, unpiped exit — `213 active file(s) scanned, 0 violation(s)`
+at `:10-11`, `31 rule(s) verified` at `:16-17`, `diff_check_exit=0` at `:20` — taken in this mixed tree, whose two
+installer markers take 01 prints at `s21-docs-cleanup-gates-01.log:8-9`. Three takes exist because this section kept being rewritten after its own gate run:
+`-01.log` measures a first draft, `-02.log` a second, and `-03.log` is the take on the exact bytes this commit carries.
+The line numbers quoted in this paragraph are `-02`'s, because that is the take whose internal lines were read back and
+checked; `-03` runs on the committed bytes and reproduces the same three results with the same exits, and it is the take
+whose verdict the commit is entitled to rest on. All three files are kept rather than overwritten. `:19` is worth a
+sentence because it is the only non-green-looking line in a green gate: `git diff --check` emits a CRLF-conversion
+*warning* naming this file and still exits 0 — line-ending normalisation on a working copy, not trailing whitespace,
+and this section does not restate it as a pass of a different kind. The count stays **213** in this tree; the **211**
+of §25 belongs to the npm-only `s8clean` tree at `c82fe82…` and is *not* re-measured here, because a Markdown-only edit
+moves no file into or out of the checker's scope — that is what an unchanged count does and does not prove, and the
+`0 violation(s)` at `-02.log:10` is the clause that actually covers this section's prose. The browser, HTTP and SQL tiers and
+the 765-test unit run carry from §25 by the input-delta rule, unchanged in every tier input since `c82fe82…`; this
+section exists because it carries content — the cleanup verdict and the naming finding — and not because a head moved,
+which is the distinction that keeps head certification from becoming a section-writing regress. **Still not claimed,
+and unchanged by this section:** no hosted Supabase project, no GitHub Actions run, no merge, no Stage 9. The local
+stack is left running on purpose, because the brief says to preserve it and the next reviewer will want it; re-serving
+the certified bundle is `npx vite preview --host 127.0.0.1 --port 4173 --strictPort` from a tree at `c82fe82…`, the
+exact command line `s20-cleanup-01.log:10` records.
