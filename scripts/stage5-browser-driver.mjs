@@ -123,6 +123,20 @@ export async function openBrowser({ cdpPort = 9411 } = {}) {
 
   const open = [];
   return {
+    /** The browser-level CDP door, for the calls that are not bound to a page session.
+     *  Stage 9's capability probe needs it: §11.4 caps live browser contexts at one on this shared
+     *  host, so the probe creates a context and disposes it *before* any page exists, which only the
+     *  browser socket can do. */
+    cdp: (method, params = {}) => send(method, params),
+    /** The `/json/version` payload Chrome answered with, verbatim — the raster tier's `answered-keys`
+     *  row prints it every run. Chrome 155.0.8059.40 on this host answers `Browser`, `Protocol-Version`,
+     *  `User-Agent`, `V8-Version`, `WebKit-Version` and `webSocketDebuggerUrl`, and answers no `Version`
+     *  or `Revision` key at all. Exposed because Stage 9's render worker refuses to draw an artefact on an
+     *  unrecorded browser major
+     *  (`specs/2026-10-13-stage9-render-exports-design.md` §6.4) and puts that string into
+     *  `render_config_hash`; re-fetching it from a second place would be a second opinion about the
+     *  same process. */
+    version,
     async newPage(name) {
       const context = await send('Target.createBrowserContext', { disposeOnDetach: true });
       const target = await send('Target.createTarget', {
@@ -328,6 +342,17 @@ function makePage(name, targetId, s, session, requests, open) {
       await sleep(150);
     },
     evaluate,
+
+    /** The raw session-bound CDP door.
+     *
+     *  It exists because the Stage 9 render worker needs two calls no journey ever needed:
+     *  `Page.captureScreenshot` with an exact `clip` (returning bytes in memory rather than writing a
+     *  file through `screenshot()`, which has no clip and no format choice) and `Page.printToPDF`.
+     *  Adding those as named methods would put export geometry into a maintenance instrument whose
+     *  owner is the journeys; the worker owns its own geometry and asserts its own results, and this
+     *  is the one door it needs. The `sessionId` binding is the point: a caller cannot reach another
+     *  page's target through it, and §11.3's isolation claim stays a property of `newPage`. */
+    cdp: (method, params = {}) => s(method, params),
 
     async currentUrl() { return evaluate('window.location.href'); },
     async reload() { await s('Page.reload', {}); await sleep(400); },
