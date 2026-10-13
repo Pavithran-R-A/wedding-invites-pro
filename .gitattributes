@@ -1,0 +1,19 @@
+# Every path whose bytes `npm run render:check` hashes, pinned against end-of-line conversion.
+#
+# The font manifest records a SHA-256 for `public/fonts/fonts.css` and for each licence text, and
+# the gate re-hashes what is on disk against it. Git for Windows ships `core.autocrlf=true` in its
+# *system* config (`C:/Program Files/Git/etc/gitconfig`, measured with `git config --list
+# --show-origin`), so a fresh checkout writes those text files with CRLF while the repository
+# stores them with LF. On a clean worktree of 0a86e89 `fonts.css` came out 29,364 bytes with 724 CR
+# bytes against this tree's 28,640 and none, and the gate reported 13 findings (six licence digest
+# pairs plus the stylesheet) — while the same manifest and the same committed blobs were green.
+#
+# That makes the signed provenance record true only on a machine that happened to already hold the
+# files, which is the opposite of what a digest is for. The three rules below describe the digested
+# set exactly: what the gate hashes is what cannot be re-written at checkout.
+#
+# Scoped to `public/fonts/` on purpose. A repository-wide line-ending policy would re-normalise text
+# committed with CRLF elsewhere, which is a different and far larger decision than this repair.
+public/fonts/fonts.css text eol=lf
+public/fonts/licences/*.txt text eol=lf
+public/fonts/files/*.woff2 binary
