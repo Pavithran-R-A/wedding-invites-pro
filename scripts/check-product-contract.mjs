@@ -268,7 +268,11 @@ export const RULES = [
     pattern: /SERVICE_ROLE_KEY/g,
     message: "names the service-role key inside browser code",
     fix: "no browser file may reference it; the local key exists only in .env.local for the test runners",
-    scope: ["src/", "index.html"],
+    // Stage 9 §11.5: the render harness is the second browser-loaded document at the repository
+    // root, and it is the one file whose whole purpose is to be handed a value by a privileged
+    // local process. `scripts/` stays out of scope on purpose — the worker is where the local key
+    // is legitimately read, and it never ships to a browser.
+    scope: ["src/", "index.html", "render.html"],
   },
   // ---------------------------------------------------------------------------
   // Stage 4 §24 and §25 — application code must not know any tradition.
@@ -940,6 +944,9 @@ export function selfTest() {
   const scopeExpectations = {
     "src/pages/Index.tsx": true,
     "index.html": true,
+    // Stage 9's second browser document. Listed beside `index.html` so the self-test refuses if a
+    // later edit drops the harness out of scope and a key reference becomes invisible.
+    "render.html": true,
     "package.json": true,
     "README.md": true,
     "docs/product/brand-clearance.md": true,

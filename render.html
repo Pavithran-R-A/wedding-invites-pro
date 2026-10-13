@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- A render harness, not a product page. It is the only document in this repository that is
+         loaded by a browser and *never* by a person: a local operator's worker opens it in an
+         isolated Chromium context, hands it one already-validated invitation as a value, and takes
+         a screenshot or a PDF out of the pixels (§4, §11). It carries no invitation content of its
+         own — `dist/render.html` served to nobody shows an empty, `waiting` shell — so the threat
+         model for this file is not "what does it reveal" but "what can it be made to draw".
+
+         The policy below is §11.2's, verbatim, and it is the reason that question has a cheap
+         answer: with no `connect-src`, no remote `script-src`, no `style-src` beyond this origin and
+         no `img-src` beyond this origin and data URIs, a document whose one job is to paint
+         somebody's wedding cannot be *given* a thing to fetch. A hostile style value, an off-origin
+         asset or an injected script fails by policy rather than by review.
+
+         Two limits of this tag, recorded rather than glossed. It is a `<meta>` policy, so it cannot
+         carry `frame-ancestors` or a report URI, and it does not reach anything the *server* does —
+         the serving adapter's own headers are checked in the Stage 9 output tier. And a meta tag
+         only governs this document; the product page it deliberately shares code with keeps its own
+         header in `index.html`. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self' data:; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'none'"
+    />
+
+    <!-- Same reasoning as `index.html:6-20`, and the same measured caveat: the harness reads its
+         stylesheet and faces from this origin, and a stylesheet's subresources name the stylesheet.
+         Nothing here is addressed to another machine, and the output tier asserts that. -->
+    <meta name="referrer" content="no-referrer" />
+
+    <title>VivaahVarnam render harness</title>
+
+    <!-- The faces the product uses, from this origin, exactly as the guest page loads them
+         (`index.html:26`). Loaded here rather than bundled so a rendered artefact and a guest's
+         screen resolve the same pinned woff2 bytes — §6.2's reproducibility argument is about the
+         file, not about the page that asked for it. `render:check` is the gate that keeps this
+         stylesheet honest about which bytes are in the tree. -->
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+  </head>
+
+  <body>
+    <!-- The one element this document owns. `data-render-state` is the harness's only outward
+         contract and is read from the DOM, so an instrument needs no debugger to tell whether a
+         render happened: `booting` (script not evaluated yet), `waiting` (mounted, no request
+         handed), `ready` (committed and faces loaded — safe to capture), `refused` (a request
+         arrived that this document will not draw). `src/render/main.tsx` is the only writer.
+
+         There is deliberately no inline script and no query-parameter reader here. A request reaches
+         this page only as a value handed to `window.__vivaahvarnamRender.mount(...)` by a session
+         that is already an authenticated wedding member, which is what §11.1's "no such parameter in
+         its interface" means in practice: the URL of this document carries no meaning, so it cannot
+         carry a credential, a path or a template name. -->
+    <div id="render-root" data-render-state="booting"></div>
+    <script type="module" src="/src/render/main.tsx"></script>
+  </body>
+</html>

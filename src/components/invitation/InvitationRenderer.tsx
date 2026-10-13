@@ -43,7 +43,8 @@
 // `prefers-reduced-motion` block flattens that one to 0.01ms.
 
 import type { PublicInvitation, InvitationEvent, InvitationPerson } from '@/lib/publicInvitation';
-import type { RenderSection } from '@/lib/invitationSections';
+import type { RenderRegion, RenderSection, RenderSectionKind } from '@/lib/invitationSections';
+import type { RenderSurface } from '@/lib/renderSurfaces';
 import { normalizeInvitationSections } from '@/lib/invitationSections';
 import { formatDate, formatTime } from '@/lib/wallClock';
 
@@ -117,7 +118,7 @@ const hasEventContent = (event: InvitationEvent): boolean =>
   event.endsAtLocal !== null ||
   event.venue !== null;
 
-const EventBlock = ({ event }: { event: InvitationEvent }) => {
+const EventBlock = ({ event, stamp }: { event: InvitationEvent; stamp?: EventStamp }) => {
   const day = event.startsAtLocal !== null ? formatDate(event.startsAtLocal) : null;
   const from = event.startsAtLocal !== null ? formatTime(event.startsAtLocal) : null;
   const to = event.endsAtLocal !== null ? formatTime(event.endsAtLocal) : null;
@@ -129,7 +130,7 @@ const EventBlock = ({ event }: { event: InvitationEvent }) => {
   if (!hasEventContent(event)) return null;
 
   return (
-    <section className="border-t border-gold/40 pt-3" aria-label={title ?? 'Ceremony'}>
+    <section className="border-t border-gold/40 pt-3" aria-label={title ?? 'Ceremony'} {...stamp}>
       {title !== null ? <h3 className="font-display text-[1.05em] font-semibold">{title}</h3> : null}
       <div className="mt-1 space-y-0.5 text-[0.95em]">
         {day !== null ? (
@@ -164,19 +165,57 @@ const EventBlock = ({ event }: { event: InvitationEvent }) => {
 
 export interface InvitationRendererProps {
   invitation: PublicInvitation;
+  /**
+   * Which export canvas this document is being drawn for. Absent means "a person is reading it":
+   * a guest's page, the host's preview and a family reviewer's view all leave this unset, and this
+   * file then writes **no `data-render-*` attribute at all** (asserted in
+   * `src/test/invitationRenderSurfaces.test.tsx`).
+   *
+   * The value is only a hook. It selects nothing, drops nothing and sizes nothing — it stamps the
+   * article so `src/render/render.css`, a stylesheet that exists only in the harness document, can
+   * address the same JSX at three different boxes. A live browser never loads that file, which is
+   * the whole reason the design allows one renderer and three artefacts (§6.1).
+   */
+  surface?: RenderSurface;
 }
+
+/** What a render surface's stylesheet needs in order to address a drawn section without naming
+ *  where in the DOM it happened to land: a structural selector like `article > section:nth-of-type(2)`
+ *  changes meaning the moment a release reorders its own section list, and an artefact that quietly
+ *  drops a different line than last week is the failure this table prevents.
+ *
+ *  Both values come from the frozen document's own vocabulary (`kind` and `region`), so this adds no
+ *  fact — it re-states, as an attribute, one the renderer already used to choose a component. */
+type SurfaceStamp = {
+  'data-render-kind': RenderSectionKind;
+  'data-render-region': RenderRegion;
+};
+
+/** Where a drawn event sits among the events this document draws, 1-based. A teaser shows the first
+ *  ceremony and no other, and "first" has to mean *first drawn* — an event with nothing on it is not
+ *  on the page, so a positional guess from the snapshot's array would drop the wrong one. */
+type EventStamp = {
+  'data-render-event-position': number;
+};
+
+/** The stamp, or nothing: no surface means no attributes, which is what keeps a guest's DOM the
+ *  document Stage 3 certified. */
+const stampFor = (section: RenderSection, surface: RenderSurface | undefined): SurfaceStamp | undefined =>
+  surface === undefined
+    ? undefined
+    : { 'data-render-kind': section.kind, 'data-render-region': section.region };
 
 const PROSE = 'whitespace-pre-line break-words';
 
-const Paragraph = ({ children }: { children: string }) => (
-  <p className={`${PROSE} text-[1em] leading-relaxed`}>{children}</p>
+const Paragraph = ({ children, stamp }: { children: string; stamp?: SurfaceStamp }) => (
+  <p className={`${PROSE} text-[1em] leading-relaxed`} {...stamp}>{children}</p>
 );
 
 /** A section's heading: the release's label for that slot, or the platform's own neutral word
  *  for a document drawn with no pack. Nothing here decides which tradition a heading
  *  belongs to — the string arrived in the frozen document. */
-const SectionHeading = ({ children }: { children: string }) => (
-  <h2 className="font-display text-[1.2em] font-semibold">{children}</h2>
+const SectionHeading = ({ children, stamp }: { children: string; stamp?: SurfaceStamp }) => (
+  <h2 className="font-display text-[1.2em] font-semibold" {...stamp}>{children}</h2>
 );
 
 /**
@@ -203,9 +242,11 @@ const sectionDrawsSomething = (section: RenderSection, invitation: PublicInvitat
 const RosterSection = ({
   section,
   invitation,
+  stamp,
 }: {
   section: RenderSection;
   invitation: PublicInvitation;
+  stamp?: SurfaceStamp;
 }) => {
   const groupedPeople = invitation.people.reduce<Record<string, InvitationPerson[]>>((groups, person) => {
     const key = hostText(person.groupKey) ?? hostText(person.groupLabel) ?? '';
@@ -217,7 +258,7 @@ const RosterSection = ({
   const groups = Object.entries(groupedPeople);
 
   return (
-    <section className="pt-7" aria-label={section.heading ?? 'Family and blessings'}>
+    <section className="pt-7" aria-label={section.heading ?? 'Family and blessings'} {...stamp}>
       {section.heading !== null ? <SectionHeading>{section.heading}</SectionHeading> : null}
       {groups.map(([bucket, members]) => {
         const label = members.reduce<string | null>(
@@ -247,9 +288,11 @@ const RosterSection = ({
 const CeremonySection = ({
   section,
   invitation,
+  stamp,
 }: {
   section: RenderSection;
   invitation: PublicInvitation;
+  stamp?: SurfaceStamp;
 }) => {
   // Index in the key, not the name: two events can be called the same thing, and a list
   // keyed by a display name would silently merge or reorder them.
@@ -258,11 +301,19 @@ const CeremonySection = ({
     .filter(({ event }) => hasEventContent(event));
 
   return (
-    <section className="pt-4" aria-label={section.heading ?? 'Ceremonies'}>
+    <section className="pt-4" aria-label={section.heading ?? 'Ceremonies'} {...stamp}>
       {section.heading !== null ? <SectionHeading>{section.heading}</SectionHeading> : null}
       <div className="mt-3 space-y-4">
-        {events.map(({ event, index }) => (
-          <EventBlock key={`${event.eventKey ?? 'event'}-${index}`} event={event} />
+        {events.map(({ event, index }, drawnPosition) => (
+          <EventBlock
+            key={`${event.eventKey ?? 'event'}-${index}`}
+            event={event}
+            stamp={
+              stamp === undefined
+                ? undefined
+                : { 'data-render-event-position': drawnPosition + 1 }
+            }
+          />
         ))}
       </div>
     </section>
@@ -275,25 +326,37 @@ const CeremonySection = ({
 const SectionBlock = ({
   section,
   invitation,
+  surface,
 }: {
   section: RenderSection;
   invitation: PublicInvitation;
+  surface?: RenderSurface;
 }) => {
   const bare = section.region !== 'body';
+  const stamp = stampFor(section, surface);
   switch (section.kind) {
     case 'text': {
+      // A section in the header or the footer has no wrapper of its own — `header.space-y-3`
+      // already spaces its children, so opening a `div` here would move the air between a heading
+      // and its body on a guest's page. The stamp therefore lands on the two elements this section
+      // actually draws, and a body-section wrapper carries it instead. Either way it is exactly one
+      // addressable element per drawn line, and nothing about the layout is a render artifact.
       const content = (
         <>
-          {section.heading !== null ? <SectionHeading>{section.heading}</SectionHeading> : null}
-          {section.content !== null ? <Paragraph>{section.content}</Paragraph> : null}
+          {section.heading !== null ? (
+            <SectionHeading stamp={bare ? stamp : undefined}>{section.heading}</SectionHeading>
+          ) : null}
+          {section.content !== null ? (
+            <Paragraph stamp={bare ? stamp : undefined}>{section.content}</Paragraph>
+          ) : null}
         </>
       );
-      return bare ? content : <div className="pt-7">{content}</div>;
+      return bare ? content : <div className="pt-7" {...stamp}>{content}</div>;
     }
     case 'people_list':
-      return <RosterSection section={section} invitation={invitation} />;
+      return <RosterSection section={section} invitation={invitation} stamp={stamp} />;
     case 'event_list':
-      return <CeremonySection section={section} invitation={invitation} />;
+      return <CeremonySection section={section} invitation={invitation} stamp={stamp} />;
   }
 };
 
@@ -314,8 +377,15 @@ const SectionBlock = ({
  * the host's own editor can say so; a guest's document prints no reviewer label, no release
  * number and no "edited" marker, because §12's honesty is about what the platform records,
  * not about annotating someone's invitation.
+ *
+ * The `surface` prop is the one exception to "no artefact knows about artefacts", and it is
+ * drawn as attributes rather than as markup or classes: the same elements, the same text, the
+ * same geometry, each one labelled with the decision this file already made about it. What a
+ * canvas drops or reflows is decided in `src/render/render.css` against those labels, so a
+ * teaser can never disagree with a guest page about what a section *is* — only about whether
+ * this particular box has room to show it.
  */
-export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
+export const InvitationRenderer = ({ invitation, surface }: InvitationRendererProps) => {
   const size = leadSize(invitation.style.fontSize);
   const color = safeColor(invitation.style.color);
   const fontFamily = safeFont(invitation.style.font);
@@ -335,6 +405,7 @@ export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
     <article
       lang={invitation.language.primary ?? undefined}
       aria-label={`${invitation.title} — wedding invitation`}
+      {...(surface === undefined ? {} : { 'data-render-surface': surface })}
       // `break-words` here reaches the title, the names and the address lines by
       // inheritance — `overflow-wrap` is an inherited property, and host text carries no
       // break point of its own. Measured, not assumed: a 400-character unbroken title
@@ -357,18 +428,33 @@ export const InvitationRenderer = ({ invitation }: InvitationRendererProps) => {
       <header className="space-y-3">
         <h1 className="font-display text-[1.6em] font-semibold leading-tight">{invitation.title}</h1>
         {opening.map((section, index) => (
-          <SectionBlock key={keyFor(section, index)} section={section} invitation={invitation} />
+          <SectionBlock
+            key={keyFor(section, index)}
+            section={section}
+            invitation={invitation}
+            surface={surface}
+          />
         ))}
       </header>
 
       {body.map((section, index) => (
-        <SectionBlock key={keyFor(section, index)} section={section} invitation={invitation} />
+        <SectionBlock
+          key={keyFor(section, index)}
+          section={section}
+          invitation={invitation}
+          surface={surface}
+        />
       ))}
 
       {closing.length > 0 ? (
         <footer className="pt-7">
           {closing.map((section, index) => (
-            <SectionBlock key={keyFor(section, index)} section={section} invitation={invitation} />
+            <SectionBlock
+              key={keyFor(section, index)}
+              section={section}
+              invitation={invitation}
+              surface={surface}
+            />
           ))}
         </footer>
       ) : null}

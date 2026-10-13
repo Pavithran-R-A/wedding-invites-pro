@@ -1,0 +1,86 @@
+/* Canvas geometry for the three export surfaces, and nothing else.
+ *
+ * This stylesheet is loaded by exactly one document — `render.html` — which a person never opens.
+ * That is the whole of §6.1's bargain: `InvitationRenderer` stays the one renderer of an
+ * invitation, and what differs between a guest's page and an exported artefact is expressed here as
+ * CSS against the `data-render-*` labels the renderer already had to compute anyway. A guest's DOM
+ * never sees a rule in this file, so a teaser can never quietly become the layout a family reads.
+ *
+ * What may live here, per §6.1: the box a document is drawn into, the margins around it, which
+ * parts of it a raster has no use for, and where a page may break. What may not: a colour, a type
+ * size or a spacing the tokens in `src/index.css` already govern. The lead size is the sharpest case
+ * — the renderer sets it from the *host's* choice through an inline style, so a rule here would have
+ * to beat an inline declaration to change it. It will not try: a canvas that fits content to a box
+ * scales the host's size or drops whole lines in a stated order (§5), and both of those decisions
+ * need a measured content height, which is why they are absent from this file and present in the
+ * worker that has one.
+ *
+ * Deliberately absent, with the reason:
+ *   * No `@page`. §5 gives A4 and US Letter as the PDF boxes, but whether the paper size wins from
+ *     `Page.printToPDF`'s own `paperWidth`/`paperHeight` or from an `@page` block (and what
+ *     `preferCSSPageSize` then does to the margin boxes) is a Chromium behaviour to be measured in
+ *     S9-6, not assumed here. Writing an `@page` rule before that measurement would put a second,
+ *     unverified source of geometry into the pipeline — the exact thing §13's reproducibility
+ *     ladder exists to catch.
+ *   * No fixed pixel heights. The capture box comes from `Emulation.setDeviceMetricsOverride`; a
+ *     height here would be a second opinion about the same page.
+ *   * No `overflow: hidden`. A canvas that clips silently loses a ceremony while the manifest still
+ *     describes a complete export (§5's "never cropped"); the designed answer for too-long content
+ *     is a second page, which is a decision, not a clip.
+ */
+
+/* The harness document has no application shell: no sidebar, no top bar, no centred reading column.
+   The article is the document, and the paper token is what surrounds it — a raster of a patrika
+   floating in a browser viewport would show as white margin in a chat preview. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+#render-root {
+  display: block;
+}
+
+/* The card affordances in the renderer's own classes — a rounded corner, a hairline gold border and
+   a one-pixel shadow — exist because a guest's article sits on a page beside other page furniture.
+   On a canvas the article *is* the image, so those pixels would be an artefact's edge falling away
+   into transparency. Removing them is a crop decision, not a restyling: the ceremonial double rule
+   inside the article is drawn by the component and stays on every surface. */
+[data-render-surface] {
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+/* A PNG has nothing to click. The "Open the venue map" box is a control, and on a teaser or a share
+   image it reads as a broken button in a printed photograph. The renderer still prints it — hiding
+   it is this file's job, not the component's (test 7 of
+   `src/test/invitationRenderSurfaces.test.tsx` is what keeps that division honest).
+
+   The paragraph is the selector rather than the anchor because the anchor is the paragraph: leaving
+   an empty `pt-1` block behind would put a gap where a button used to be. `h2`/`p` element names are
+   safe to address here in a way classes and `nth-child` are not — the heading level is part of the
+   renderer's accessibility contract and is asserted elsewhere, so a release reordering its sections
+   cannot move it. */
+[data-render-surface='og'] p:has(> a),
+[data-render-surface='share'] p:has(> a) {
+  display: none;
+}
+
+/* Pagination, PDF only. A ceremony's row stays whole across a break — a muhurtham time orphaned onto
+   the next sheet is a guest reading the wrong day against the wrong hall — and a section heading
+   never separates from the line it introduces. Both rules name a *stamped* element, because
+   `data-render-event-position` counts the events that were drawn, not the array the snapshot
+   carried: the block that has nothing on it is not on the page and must not consume a break. */
+[data-render-surface='pdf'] [data-render-event-position] {
+  break-inside: avoid;
+}
+
+[data-render-surface='pdf'] h2 {
+  break-after: avoid;
+  break-inside: avoid;
+}
