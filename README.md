@@ -367,8 +367,8 @@ through the product's own screens against a **local** Supabase stack (see
   **185** assertions with `run.sh all exit=0` (`q8-logs/s9-sql-all-32.log`), on a disposable
   plain-PostgreSQL 17.10 cluster because the local stack's engine was down then. Still unproven is a
   **hosted** project: every number above is local-stack-only, and §23 of
-  [`docs/audits/stage-8-guest-rsvp.md`](docs/audits/stage-8-guest-rsvp.md) records the eight
-  instrument defects those two tiers found and how each was repaired. Unit coverage at the `eb128f7`
+  [`docs/audits/stage-8-guest-rsvp.md`](docs/audits/stage-8-guest-rsvp.md) records the eight instrument defects those
+  two tiers found; §26 adds three more and §27 a fourth, and §27 re-takes all nine Node gates at the pushed head. Unit coverage at the `eb128f7`
   head: 27 panel + 34 adapter-transport + 45 shape + 30 page + 22 door-transport + 31 replies, inside
   the 765-test / 42-file run (`q8-logs/s10-clean-test.log`), and re-taken at the certified head with the same
   42 files / 765 tests at exit 0 (`q8-logs/s18-gates-test-01.log:12-17`)

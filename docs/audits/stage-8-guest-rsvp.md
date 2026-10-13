@@ -2474,3 +2474,105 @@ and unchanged by this section:** no hosted Supabase project, no GitHub Actions r
 stack is left running on purpose, because the brief says to preserve it and the next reviewer will want it; re-serving
 the certified bundle is `npx vite preview --host 127.0.0.1 --port 4173 --strictPort` from a tree at `c82fe82…`, the
 exact command line `s20-cleanup-01.log:10` records.
+
+## 27. The pushed head measured instead of carried: a strict `npm ci` that item (7) had deferred for disk, a bundle digest that repeats, and the three green gates my own scratch directory turned red
+
+**What this section certifies, and how the remote was read.** §26's edit is commit
+`9364a3f7c7f492e38c1f18868fc7f8b7f4864e9f`, pushed to the branch tip with the explicit refspec
+`refs/heads/stage8/guest-rsvp:refs/heads/stage8/guest-rsvp` (`q8-logs/s22-push-9364a3f-01.log:3-5`, `push_exit=0` at `:5`) and read
+back by two instruments that consult no local tracking ref: `git ls-remote origin refs/heads/stage8/guest-rsvp` prints
+the 40-hex value at `:6` with its own exit 0 at `:7`, `gh api repos/Pavithran-R-A/wedding-invites-pro/git/refs/heads/stage8/guest-rsvp --jq .object.sha`
+prints the same value at `:8` with exit 0 at `:9`, and the local HEAD agrees at `:10-11`. The delta between the
+certified head and this one is one file in one direction — the numstat line `115  0  docs/audits/stage-8-guest-rsvp.md`
+(`:13`, `diff_exit=0`) — and a scoped `git diff --name-only c82fe82..9364a3f` over `src`, `public`, `index.html`,
+`package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `supabase` and `scripts` prints nothing at all
+(`:15`, whose label puts the exit next to the emptiness it is claiming).
+
+**Why the input-delta rule was not allowed to do the work here.** §25 carried the tiers into §26 on exactly that rule,
+and a reader who has just been shown three instrument defects in §26 is entitled to distrust a carry when the run is
+cheap. So the nine gates were re-taken at `9364a3f`, first in the npm-only `s8clean` tree as it already stood:
+`q8-logs/s23-finalhead-gates-01.log` prints `typecheck exit=0` at `:20`, `9 problems (0 errors, 9 warnings)` at `:23`
+with `lint exit=0` at `:26`, the database contract at `:32-34` (**22** migration files, **19** public + **10** non-client
+tables, **19** client tables, **45** query column groups reconciled, **0** findings) with its exit at `:35`,
+`Product contract OK — 211 active file(s) scanned, 0 violation(s)` at `:41-42`, `31 rule(s) verified` at `:44-45`, and
+`diffcheck exit=0` at `:47`; the same capture's `:13-14` record that tree's installer markers as npm-only.
+`s23-finalhead-gates-02.log` adds the slow three — **42** files / **765** tests passed (`:12-13`) with exit 0 (`:18`), a
+production build (`:25`, `build exit=0` at `:27`), and `npm audit --omit=dev` printing `found 0 vulnerabilities`
+(`:34-35`) — and its `:30-31` carry the line that matters most in this section: `dist_files=38` and
+`dist_manifest_sha256=ad0ce11fff294b4c2f836fba6ed7118e4b4d4c4a72e57e14e98ee20da594a73d`, the fingerprint method being
+`q8-logs/s16-dist-fingerprint.cjs` (exit 0 at `:32`). That digest is **identical to the one §25 published for the bundle
+both green browser runs drove** (`s20-gates-test-build-01.log:12-13`), and it is what converts "the tiers carry by
+input-delta" from an argument into a measurement: the final head rebuilds the certified 38-file bundle from the tracked
+lockfile, so the browser tier's input at `9364a3f` is the same bundle it was at `c82fe82`. The `-02` capture has a defect
+of its own, stated at `:36-40` rather than edited out: `[7]` and `[8]` were each issued twice — once piped to `tail` so
+the readable summary is in the log, once unpiped to `/dev/null` so the printed exit belongs to the gate — and the audit
+line is the one pipeline whose exit is taken as the first stage's own status.
+
+**Item (7)'s deferred condition, executed.** §24 recorded that a genuinely clean npm install was *not* attempted because
+the volume read 100% full with **1.7 G** free, and left it there. The same `df` line now reads **9.7 G** free
+(`q8-logs/s24-clean-npm-ci-01.log:6`), so the condition was re-tested instead of re-cited: the existing `node_modules`
+was **moved** aside rather than deleted (`:10`, its install path then measured absent at `:11-12`), and `npm ci` — the
+strict command that installs exactly what the tracked `package-lock.json` names — printed `added 507 packages in 1m`
+(`:16`) and, from its own unpiped second run over the tree the first had just built, `npm_ci exit=0` (`:23`); that
+second exit is the whole idempotency claim, the second run's package count having gone to `/dev/null` behind the note
+at `:22`. No tracked file changed (`:25`, whose only entry is my own scratch directory — see the label defect in the
+next paragraph), the fresh tree carries `node_modules/.package-lock.json` (`:29`) and **no**
+`node_modules/.modules.yaml` (`:30-31`), so that tree's provenance is npm-only by measurement rather than by
+assumption. Two limits on that sentence. (1) The pre-install `node_modules/.package-lock.json` printed the same 270,828
+bytes at `s23-finalhead-gates-01.log:14`, and I deleted the moved-aside tree before hashing it, so **size** is the extent
+of what I can claim about those two files; nothing in this section leans on more, because the load-bearing facts are
+`npm ci`'s own exit and the nine gates that followed it. (2) `npm ci` printed warnings and they are not failures:
+`deprecated glob@10.5.0` (`:14`) and two `install-scripts` notices for `@swc/core@1.13.2` and `esbuild@0.25.12`
+(`:17-21`), which is a different question from the production audit's `found 0 vulnerabilities` and is not answered by
+it. The branch's own checkout in `s5qual` is left mixed — npm's `.package-lock.json` beside pnpm's `.modules.yaml` and
+`.pnpm/` — deliberately: §24 established that a pnpm operation there re-drops byte-identical `.yaml` files, those two
+files stay untracked and unstaged, and a merge consumes tracked bytes.
+
+**Three green gates my scratch directory turned red, and the failure I named rather than assumed.** The move-aside was
+not harmless: `.gitignore` covers `node_modules`, not `node_modules.prev`, so a 288 MB vendored tree sat *inside* the
+repository for `q8-logs/s25-finalgates-clean-tree-01.log` — and the capture that installed it had printed
+`?? node_modules.prev/` beneath a label promising "empty above" (`s24-clean-npm-ci-01.log:25-26`), which is why the
+pollution survived the install step. Three gates moved (`s25-finalgates-clean-tree-01.log`): `lint` reported
+**14851 problems (14039 errors, 812 warnings)** and exited 1 (`:12`, `:15`), `product:check` counted **12780 active
+file(s)** instead of 211 while still printing `0 violation(s)` and exit 0 (`:25-26`), and `npm test` returned
+**1 failed | 764 passed** with exit 1 (`:36-37`, `:41`). The middle one is §26's vocabulary lesson repeated: a count *is*
+a scope statement, and a scope that jumped sixty-fold was my scratch tree being walked by the checker — which is also
+why the `0 violation(s)` printed beside it says nothing about the product. I did not let the third failure inherit that
+explanation by assumption: `s25-take01-testfailure-repro-01.log` moves the tree back in (`:3`), scores
+`npm test exit=1` (`:4`), moves it out again (`:46`) and re-reads a clean porcelain (`:47`). The failure is
+`scripts/product-contract.test.mjs > product contract checker > passes against the current repository state`, and its
+error is `Error: Test timed out in 5000ms` raised at `scripts/product-contract.test.mjs:300`, where the test's own
+`scanRepository()` call is the next line; that suite's wall time in the polluted run was 32636 ms
+(`q8-logs/tmp/s25-repro-raw.txt:640`, with the failure block at `:759-772`). **A timeout, not a violation** — the scan
+was walking a vendored dependency tree inside a five-second budget. Nothing in the product was shown defective, no
+assertion was touched, and the consequence is procedural and belongs to whoever runs these gates next: scratch goes
+outside the repository, because an untracked directory in the working tree can redden a unit run that is genuinely
+green. `s25-finalgates-clean-tree-02.log` is the immediate clean re-take of those same three gates once the scratch tree
+left the scan root — `lint exit=0` at `:12`, `product_check exit=0` at `:16`, `Test Files 42 passed (42)` / **765** tests
+at `:21-22` with `test exit=0` at `:26`, and the porcelain empty at `:7` and `:31`.
+
+**The definitive run, and the last section.** `q8-logs/s26-finalgates-definitive-01.log` re-takes all nine gates on the
+pushed head in the fresh `npm ci` tree after the scratch directory was deleted (`:3`, that exact path and no other,
+created and removed by this step alone), beginning from a measured-clean porcelain (`:6`) and printing
+`typecheck exit=0` (`:12`), `9 problems (0 errors, 9 warnings)` / `lint exit=0` (`:14`, `:16`), the database contract
+(`:18-20`, exit `:21`), `211 active file(s) scanned, 0 violation(s)` (`:23`, exit `:24`), `31 rule(s) verified` (`:26-27`),
+`diffcheck exit=0` (`:29`), `Test Files 42 passed (42)` with `test exit=0` (`:31-32`; the **765**-test line itself is
+`s23-finalhead-gates-02.log:13` and `s25-finalgates-clean-tree-02.log:22`, since this capture piped `npm test` through a
+grep), `built in 22.62s` / `build exit=0` (`:34-35`), `dist_files=38` / `ad0ce11f…` (`:38-39`) for the third independent
+build of the same digest, and `found 0 vulnerabilities` / `audit exit=0` (`:42-43`). The volume reads **866 M** free at
+100% after that install (`:46`), which is the very condition §24 deferred on: reproducing this run on this host is a disk
+question again, not a method question, and `s23-finalhead-gates-01.log:49` together with `s24-clean-npm-ci-01.log:6`
+bracket the window in which it was possible. **The gates this edit owes:** two tracked files change — this one and the
+one README sentence that reported §23's defect count as the whole record (`README.md:369-371`, now naming §26 and §27 as
+four further defects) — and neither is a tier input, so the sweep is the Markdown set again, each gate with its own
+adjacent, unpiped exit in `q8-logs/s27-docs-final-gates-01.log` and its `-02` re-take on the bytes this commit
+carries. The browser, HTTP and SQL tiers carry from §25 on the same ground §26 used — no tier input differs — plus a
+new one: the bundle digest the browser tier ran against has now been rebuilt **three** times at this head and repeats **What is still not claimed:** the SQL, HTTP and
+browser tiers were not re-run for `9364a3f` — a rebuild that reproduces the digest they consumed, over an unchanged
+input set, is the strongest statement available without a re-run, and re-running a stateful tier against the shared
+database for a Markdown commit is exactly what §26's cleanup measured as unnecessary. No hosted Supabase project, no
+GitHub Actions run, no merge, no Stage 9; the `localvivaahvarnam` stack is left running because the brief says to
+preserve it. **This is the last section of this audit.** Its own commit cannot certify itself, and the alternative — one
+further section every time a head moves — is the regress the Stage 6 and Stage 7 head certifications already named and
+refused. The final SHA belongs in the report, which is where a reader should look for it; the gates quoted here were
+taken on the exact bytes that commit carries.
