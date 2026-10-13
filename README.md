@@ -526,28 +526,47 @@ Environment: copy `.env.example` to `.env` and point `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` at a Supabase project you own. Never commit `.env`, never use a
 service-role key in this app, and never connect an unrelated or production project for local work.
 
-Every gate, in the order CI runs the five it runs (CI's own `security` job then does the credential
-scan and `npm audit --omit=dev --audit-level=high`; the plain `npm audit` below is run locally, not in
-CI, and its advisories are reported rather than blocking):
+Every gate, in the order CI runs them. Its `build` job runs six of the commands below — lint,
+typecheck, database contract, product contract, unit tests, build — and its `security` job then does
+the credential scan and `npm audit --omit=dev --audit-level=high`. Two commands here are not in CI:
+the plain `npm audit`, whose advisories are reported rather than blocking, and Stage 9's
+`npm run render:check`, which is deliberately local because it reads committed font bytes and a
+CI wiring change for it is a handoff item rather than a silent edit.
 
 ```bash
 npm run lint
 npm run typecheck
 npm run dbtypes:check
 npm run product:check
+npm run render:check
 npm test
 npm run build
 npm audit
 npm audit --omit=dev --audit-level=high
 ```
 
+`npm run render:check` is the typography gate Stage 9 added: it re-reads
+`public/fonts/font-manifest.json`, re-hashes every committed `.woff2`, and refuses a stylesheet that
+disagrees with the manifest, a face whose bytes moved after review, a pinned version that drifted, and
+any `index.html` or `src/` reference to a remote font host. `scripts/renderAssets.test.mjs` is its
+battery, and it is run by `npm test` like every other file here.
+
 `npm run product:check` is the contract guard: **31 rules** over the active surfaces this tree scans
-(**213 files** at this Stage 8 head, from `q8-logs/s8-productcheck6.log`; **186 files** at `8e62c38`,
-from `q6-logs/s6-head-cert-8e62c38.log`; the count has moved three times
-since the rule list was first written — once for the storage adapter and the host's file panel, once
-for the adapter's own unit battery, and once for `8e62c38`'s panel tap-target test, which is the file
-that took it from the 185 every earlier certification printed) — retired brand names, fabricated
-social proof and per-guest pricing
+(**222 files** in this working tree at the Stage 9 head — of which a clean clone prints **220**, the
+two-file difference being `pnpm-lock.yaml` and `pnpm-workspace.yaml`, untracked scratch from a stray
+pnpm run that this stage never commits and that the walk counts anyway because it walks the tree, not
+the index; **213 files** at `d49cb94`, from `q8-logs/s8-productcheck6.log`, which is those same two
+pnpm files on top of 211 tracked; **186 files** at `8e62c38`, from `q6-logs/s6-head-cert-8e62c38.log`; the count has moved
+four times since the rule list was first written — once for the storage adapter and the host's file
+panel, once for the adapter's own unit battery, once for `8e62c38`'s panel tap-target test, which is
+the file that took it from the 185 every earlier certification printed, and once for Stage 9's
+typography surface).
+The nine that joined between `d49cb94` and here are Stage 9's design spec plus eight font-surface
+files: `public/fonts/fonts.css`, `public/fonts/font-manifest.json` and the six
+`public/fonts/licences/*.txt`. The other 75 files Stage 9 added are invisible to the walk for two
+named reasons — `scripts/` is an excluded prefix, so the checker, the fetcher and their 27-test
+battery do not move the count, and `.woff2` is not in `SCANNED_EXTENSIONS`, so 72 font binaries add
+nothing. What the rules refuse: retired brand names, fabricated social proof and per-guest pricing
 language, the retired scaffold vocabulary, which tables may be named outside the data adapter, the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets

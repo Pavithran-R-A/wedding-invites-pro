@@ -41,8 +41,8 @@ Each line was verified by reading or grepping the file named, at the baseline.
 | No server runtime exists. Edge runtime is off and the config says no function ships. | `supabase/config.toml:60-62`, restated at `:81-82`; no `supabase/functions/` directory (`ls` → nothing) |
 | One HTML entry, no SSR or multi-entry build, no `build` block at all in Vite config. | `vite.config.ts:1-20` (only `plugin-react-swc`, `server`, `resolve.alias`); `index.html:51` |
 | `InvitationRenderer` is a pure function of the DTO: no hooks, no router, no Supabase client, no fetch. | `src/components/invitation/InvitationRenderer.tsx:45-48` (its only imports, all type-only or pure libs); grep for `useState\|useEffect\|useContext\|createClient\|useParams\|fetch(` in that file → **0 matches** |
-| Its whole non-DTO environment is the compiled `:root` tokens plus six CDN-hosted faces. | `src/index.css:12-26,31-34`; `index.html:20-23` (`fonts.googleapis.com` + `gstatic.com`) |
-| **No font file of any kind is in the repository.** | `find` for `*.ttf,*.otf,*.woff,*.woff2` excluding `node_modules` → empty |
+| Its whole non-DTO environment is the compiled `:root` tokens plus six CDN-hosted faces. | `src/index.css:12-26,31-34`; `index.html:20-23` (`fonts.googleapis.com` + `gstatic.com`) — **retired by S9-2**, see §6.2 "As built" |
+| **No font file of any kind is in the repository.** | `find` for `*.ttf,*.otf,*.woff,*.woff2` excluding `node_modules` → empty. **True at spec time only:** S9-2 committed 72 `public/fonts/files/*.woff2`. |
 | The published address is one bearer credential per wedding, 43 URL-safe chars, re-parented across republishes, and only its SHA-256 is stored. | `supabase/migrations/20260926130000_stage3_publication_resolution_boundary.sql:488,515,520,988`; `src/integrations/supabase/publicInvitation.ts:38-42`; `private.access_tokens.token_hash` CHECK `^[0-9a-f]{64}$` at `20260925120400_stage2_assets_entitlements_secrets.sql:125` |
 | Exactly one active publication per wedding. | `20260925120200_stage2_versions_and_publication.sql:90-92` (`one_active_publication_per_wedding`) |
 | One Storage bucket, private, 5 MiB, four MIME types, no PDF/SVG/HTML; keys are DB-minted with no extension. | `20261006120000_stage6_wedding_asset_storage.sql:30-39,70-74` |
@@ -156,13 +156,14 @@ recorded as a token-set gap (ADR 0004 `:29-30`) in the audit, and the token set 
 
 ### 6.2 Fonts are self-hosted and version-pinned
 
-Today the six faces come from `fonts.googleapis.com` (`index.html:20-23`) and no font file exists in
-the tree. Stage 9 changes that deliberately:
+At spec time the six faces came from `fonts.googleapis.com` (`index.html:20-23`) and no font file
+existed in the tree. Stage 9 changes that deliberately:
 
 * `public/fonts/` receives the pinned Latin and Indic faces the product already offers
   (`Playfair Display`, `DM Sans`, `Noto Sans Tamil/Telugu/Kannada/Malayalam`, weights 400/500/600/700 —
   `src/pages/EditProject.tsx:117-124` is the menu they must keep matching), in **TTF** so the same file
-  serves both `@font-face` and Chromium's PDF embedding path.
+  serves both `@font-face` and Chromium's PDF embedding path. *(As built: woff2 — see correction 1
+  below.)*
 * `index.html` drops the CDN `<link>` and both `<preconnect>` lines and gains local `@font-face`
   rules with `font-display: swap`. The measured-referrer comment block at `index.html:6-16` describes a
   request that no longer happens; it is corrected in place with a pointer to this stage's audit, and
@@ -172,10 +173,50 @@ the tree. Stage 9 changes that deliberately:
   `docs/architecture/render-outputs.md` with: upstream source URL, family, style, weight, licence
   (expected SIL Open Font License 1.1 for all six — **verified against the file that ships with each
   download before commit, not from memory**), version string read from the font's own `name` table,
-  byte size and SHA-256. The OFL text files are committed beside the fonts they cover.
+  byte size and SHA-256. The OFL text files are committed beside the fonts they cover. *(As built: the
+  `name` table was not parsed — see correction 2 below.)*
 * A build-time checker (`scripts/check-render-assets.mjs`, run by the font tier and by
   `npm run product:check` wiring if it stays cheap) re-hashes every file in `public/fonts/` against
   the recorded table. A font that silently changes is a red gate, not a subtle metrics drift.
+  *(As built: its own `npm run render:check` gate — see correction 3 below.)*
+
+**As built (S9-2), including the three places this section was wrong.**
+
+The shipped surface is **72 woff2 faces, 1,006,240 bytes (982.7 KiB)**, six families × four weights ×
+their own subsets (DM Sans latin + latin-ext; Playfair Display latin, latin-ext, cyrillic, vietnamese;
+each Noto face latin, latin-ext and its own script), plus `public/fonts/fonts.css` (28,640 bytes, 72
+`@font-face` rules) and six OFL-1.1 licence texts. `public/fonts/font-manifest.json` (496,883 bytes)
+records per family the package name, version `5.3.0`, CSS family, `OFL-1.1`, and the registry tarball's
+URL, byte count, SHA-1 and SHA-512; per face the label, file path, family, style, weight,
+`unicode-range`, byte count and SHA-256; per licence the path, bytes and SHA-256. Nothing was added to
+`package.json`: `scripts/fetch-render-fonts.mjs` fetches the six registry tarballs into an OS temp
+directory, unpacks them with `tar`, and never executes package code.
+
+1. **TTF was the wrong container reasoning.** The claim "so the same file serves both `@font-face` and
+   Chromium's PDF embedding path" assumed the served container reaches the PDF. It does not: Chromium
+   embeds what it loaded as a parsed typeface, so the PDF's `/FontFile2` (or `/FontFile3` for a CFF
+   face) is derived from the in-memory font, not from the file's wrapper. `@fontsource` ships woff2
+   anyway, so carrying TTF would have meant a second unverified copy of every face. §6.3's
+   "a `/FontFile2` per face actually used" therefore stays an assertion to be *measured* on the first
+   real PDF in S9-6, including which `/FontFile` variant Chromium picks for a woff2-sourced face.
+   If that measurement comes back saying a face was not embedded at all, it is a Stage 9 finding, not a
+   reason to have pre-emptively committed TTF bytes.
+2. **The `name`-table version string was not read.** Reading it from woff2 needs a Brotli inflate and a
+   TrueType table parser; writing either, or adding a dependency, costs more than the field is worth
+   when the package version, the tarball digest and 72 per-file SHA-256s already pin the bytes
+   reproducibly. The manifest's `version` therefore sits beside `package`, where it reads as the package
+   version it is, and its `note` names the generator and the verifier rather than the field.
+   The `/BaseFont` name check in §6.3 is unaffected — it is read from the produced PDF, not from the
+   source file.
+3. **The checker is its own gate.** `scripts/check-render-assets.mjs` runs as `npm run render:check`
+   (local only; CI's six commands are unchanged and wiring a seventh is a disclosed handoff item)
+   rather than being folded into `product:check`, because it hashes a megabyte of font bytes and the
+   two gates fail for unrelated reasons. Its battery is `scripts/renderAssets.test.mjs`, 27 tests, run
+   by `npm test` through the `scripts/**/*.test.mjs` pattern already in `vitest.config.ts:11`.
+
+The referrer comment block was corrected in place, and the correction now carries a measured fact
+rather than a prediction: `docs/architecture/public-invitation-security.md` records that the 19 font
+requests Chromium makes against this origin name the stylesheet, not the page.
 
 Why self-hosting is the right call rather than a preference: reproducibility (an artefact's bytes
 cannot depend on a CDN response), privacy (the render pipeline makes zero third-party requests, and

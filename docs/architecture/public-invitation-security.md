@@ -90,11 +90,13 @@ and the whitelist below keeps it out of every response body.
 
 **Referrer, measured rather than assumed.** The guest document is served with
 `<meta name="referrer" content="no-referrer">` (in `index.html`, before the stylesheet links), and the
-request log of a live guest page was read back through CDP rather than reasoned from browser defaults:
+request log of a live guest page was read back through CDP rather than reasoned from browser defaults.
+Through Stage 8 the question worth measuring was what that tag did to a *cross-site* font request,
+because every route asked `fonts.googleapis.com` for the faces:
 
 | Request out of the guest page | Measured `referer` |
 | --- | --- |
-| `GET https://fonts.googleapis.com/css2?family=…` (the stylesheet the invitation needs) | present with an **empty value**, `sec-fetch-site: cross-site` |
+| `GET https://fonts.googleapis.com/css2?family=…` (the stylesheet the invitation needed) | present with an **empty value**, `sec-fetch-site: cross-site` |
 | a font resource request issued by the live guest document (`sec-fetch-dest: font`, `sec-fetch-mode: cors`, to `fonts.gstatic.com`) | `http://127.0.0.1:5173/` — the **origin only, path stripped**; no `/i/<token>` |
 | `POST /rest/v1/rpc/resolve_public_invitation` (loopback API) | present with an empty value |
 
@@ -105,6 +107,18 @@ sent*. `document.referrer` on the guest page is `""`. Four `fonts.gstatic.com` f
 by the page; their individual request headers were not each dumped (binary response bodies), so the
 font-row evidence above is from a same-document request of the same type, and the stylesheet row is a
 real page request.
+
+**Stage 9 retired the first two rows by removing the destination**, which changes what this section can
+claim. The faces are served from this origin (`public/fonts/`, gated by `npm run render:check`), and a
+Chromium pass over the production bundle measured **zero** requests toward either font host and no
+non-loopback host of any kind (`q9-logs/gate-chromium-fontproof.txt`). The font requests that remain
+do carry a referrer, and it is worth naming because it looks like the tag failing: all 19 `woff2`
+requests on that page sent `Referer: http://127.0.0.1:4173/fonts/fonts.css`. A stylesheet's own
+subresources name the stylesheet, not the page that loaded them, so no `/i/<credential>` path can
+appear in that value — and unlike the cross-site row above, there is no third party for it to reach.
+Two limits on this newer measurement, stated rather than implied: it was taken on the landing page, not
+on a live guest page (the guest re-run belongs to the Stage 9 browser tier, which needs the local
+stack), and it counts requests Chromium made, which says nothing about a page nobody visited.
 
 What this does **not** claim, stated because the residual is the interesting part: the credential still
 appears in that visitor's **browser history**, in any **same-origin server log** that logs request
