@@ -832,9 +832,10 @@ async function journeyA(browser) {
     storage.local.length === 0 && storage.session.length === 0 && cookies.length === 0,
     JSON.stringify({ local: storage.local, session: storage.session, cookies }));
   const guestNet = await guest.networkLog();
+  // The font CDN clause this line carried until Stage 9 is gone: the six pinned faces are served from
+  // this origin, so nothing a guest page loads has a destination outside the machine to explain.
   const remote = guestNet.filter((r) => /supabase\.co|\.supabase\.in/.test(r.url)
-    || (r.url.startsWith('http') && !r.url.includes('127.0.0.1')
-      && !r.url.includes('localhost') && !/^https:\/\/fonts\.(googleapis|gstatic)\.com/.test(r.url)));
+    || (r.url.startsWith('http') && !r.url.includes('127.0.0.1') && !r.url.includes('localhost')));
   check('27', 'the guest page contacted no hosted Supabase and no unexplained origin',
     remote.length === 0, remote.map((r) => r.url.split('?')[0]).join(', '));
   measure('27', 'guest requests classified',

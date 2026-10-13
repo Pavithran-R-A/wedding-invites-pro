@@ -1108,16 +1108,15 @@ async function network(browser, doc) {
     buckets.set(label, (buckets.get(label) ?? 0) + 1);
   }
   for (const [label, count] of [...buckets].sort()) {
+    // No font-CDN branch here since Stage 9: the faces the render page draws with are served from the
+    // preview origin, so anything that is not the preview or the API is UNCLASSIFIED and a finding.
     const kind = label === apiOrigin ? 'LOCAL API (this repository\'s own stack)'
       : label === previewOrigin ? 'LOCAL PREVIEW (the production bundle)'
-        : /fonts\.(googleapis|gstatic)\.com$/.test(new URL(label).hostname)
-          ? 'THIRD-PARTY FONT CDN (declared in index.html)'
-          : 'UNCLASSIFIED';
+        : 'UNCLASSIFIED';
     measure('26', `${label} — ${count} request(s)`, kind);
   }
-  const hosted = requests.filter((r) => !LOOPBACK.has(new URL(r.url).hostname)
-    && !/fonts\.(googleapis|gstatic)\.com$/.test(new URL(r.url).hostname));
-  check('26', 'no request left this machine except the declared font CDN', hosted.length === 0,
+  const hosted = requests.filter((r) => !LOOPBACK.has(new URL(r.url).hostname));
+  check('26', 'no request left this machine', hosted.length === 0,
     hosted.map((r) => r.url).join(', '));
   check('26', 'zero hosted-Supabase requests',
     !requests.some((r) => /\.supabase\.(co|in|api)\b/.test(new URL(r.url).hostname)));

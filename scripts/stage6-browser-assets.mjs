@@ -90,7 +90,9 @@ const DB_CONTAINER = `supabase_db_${projectId}`;
 const originOf = (url) => { try { return new URL(url).origin; } catch { return ''; } };
 const hostOf = (url) => { try { return new URL(url).hostname; } catch { return ''; } };
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
-const FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
+// Stage 9 removed this tier's font-host allowset: the six pinned faces are served from this origin
+// (`public/fonts/`), so an asset page has no legitimate destination outside the machine and any host
+// classified UNCLASSIFIED below is a finding rather than a declared exception.
 const API_ORIGIN = originOf(apiUrl);
 const PREVIEW = originOf(PREVIEW_ORIGIN);
 
@@ -855,12 +857,11 @@ async function journeyNetwork(browser, state) {
   for (const [o, count] of [...tally].sort()) {
     const kind = o === PREVIEW ? 'LOCAL PREVIEW (the production bundle)'
       : o === API_ORIGIN ? 'LOCAL API (this repository\'s own stack)'
-        : FONT_HOSTS.has(hostOf(o)) ? 'THIRD-PARTY FONT CDN (declared in index.html)' : 'UNCLASSIFIED';
+        : 'UNCLASSIFIED';
     measure(area, `${o} — ${count} request(s)`, kind);
   }
-  const foreign = [...tally.keys()].filter((o) => !LOOPBACK_HOSTS.has(hostOf(o))
-    && !FONT_HOSTS.has(hostOf(o)));
-  check(area, 'N1: no destination outside loopback and the declared font CDNs was contacted',
+  const foreign = [...tally.keys()].filter((o) => !LOOPBACK_HOSTS.has(hostOf(o)));
+  check(area, 'N1: no destination outside loopback was contacted',
     foreign.length === 0, foreign.join(', ') || 'every origin seen is accounted for above');
   const storageSeen = http.filter((r) => r.url.includes('/storage/v1/'));
   check(area, 'N1 vacuity: the tally is non-empty and holds at least one /storage/v1/ request',

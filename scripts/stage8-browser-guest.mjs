@@ -127,7 +127,9 @@ const DISCOVERED = new Set();
 const TOKEN_SHAPED = /(^|[^A-Za-z0-9_-])([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g;
 const mask = (value) => String(value).replace(TOKEN_SHAPED, (whole, lead) => `${lead}‹credential masked›`);
 
-const FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
+// Stage 9 removed this tier's font-host allowset: the six pinned faces are served from this origin
+// (`public/fonts/`), so a guest page has no legitimate destination outside the machine and any host
+// appearing below is a finding rather than a declared exception.
 const TELEMETRY_HOSTS = ['google-analytics.com', 'googletagmanager.com', 'analytics.google.com',
   'sentry.io', 'ingest.sentry.io', 'posthog.com', 'mixpanel.com', 'segment.io', 'segment.com',
   'amplitude.com', 'clarity.ms', 'hotjar.com', 'lovable.dev', 'vercel.app', 'supabase.co',
@@ -743,8 +745,6 @@ async function credentialTravel(page) {
   const offMachine = hosts.filter((h) => !urlHostIsLoopback(`http://${h}`));
   return {
     travel, nonUrl, hosts, offMachine,
-    declared: offMachine.filter((h) => FONT_HOSTS.has(h)),
-    undeclared: offMachine.filter((h) => !FONT_HOSTS.has(h)),
     telemetry: offMachine.filter((h) => TELEMETRY_HOSTS.some((t) => h === t || h.endsWith(`.${t}`))),
     offMachineReferers: [...new Map(offMachineReferers.map((x) => [`${x.host}\u0000${x.referer}`, x]))
       .values()],
@@ -793,10 +793,8 @@ function wireReport(tag, scan) {
   check(tag, 'the credential appears in no query, hash, page text, title, storage or cookie',
     appearances.length === 0,
     appearances.map(([k, v]) => `${k}: ${v.length} credential(s)`).join('; ') || 'none');
-  check(tag, 'the only destination outside this machine is a font host the product ships',
-    scan.undeclared.length === 0,
-    `off-machine: ${scan.offMachine.join(', ') || 'none'}; outside the allowset: `
-      + `${scan.undeclared.join(', ') || 'none'}`);
+  check(tag, 'no destination outside this machine is contacted at all',
+    scan.offMachine.length === 0, scan.offMachine.join(', ') || 'every host seen is loopback');
   check(tag, 'no analytics, session-replay or telemetry host was contacted by the guest page',
     scan.telemetry.length === 0, scan.telemetry.join(', ') || 'none');
   const refererRows = scan.offMachineReferers;

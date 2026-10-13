@@ -105,7 +105,13 @@ const hostedRef = hostedIsLoopback ? '' : hostOf(hostedUrl).split('.')[0];
 
 const API_ORIGIN = originOf(apiUrl);
 const PREVIEW = originOf(PREVIEW_ORIGIN);
-const FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
+// This tier carried `fonts.googleapis.com` and `fonts.gstatic.com` as a named allowset until Stage 9,
+// because `index.html` asked them for the six families on every route. The faces are served from this
+// origin now (`public/fonts/`, with `scripts/check-render-assets.mjs` as the gate), so the surface this
+// pass measures has no legitimate destination outside the machine: `openSurface` asserts the count of
+// requests toward those two hosts is zero, and `classify` treats any non-loopback host as a finding.
+/** Named rather than inlined, so the zero that `openSurface` reports says which hosts it looked for. */
+const FORMER_FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
 /** Origins that would be a finding if a single request reached one. The list is named, because "no
  *  analytics" is only a claim if the instrument knows what it looked for. */
 const TELEMETRY_HOSTS = [
@@ -352,8 +358,7 @@ function classify(area, label, requests, needles, allowed = TRAVEL) {
   for (const [o, count] of [...byOrigin].sort()) {
     const kind = o === PREVIEW ? 'LOCAL PREVIEW (the production bundle)'
       : o === API_ORIGIN ? 'LOCAL API (this repository\'s own stack)'
-        : FONT_HOSTS.has(hostOf(o)) ? 'THIRD-PARTY FONT CDN (declared in index.html)'
-          : 'UNCLASSIFIED';
+        : 'UNCLASSIFIED';
     measure(area, `${label} · ${o} — ${count} request(s)`, kind);
   }
   if (inPage.length) {
@@ -367,11 +372,8 @@ function classify(area, label, requests, needles, allowed = TRAVEL) {
   check(area, `${label}: every scheme this page used is http(s) or an in-page one`,
     other.length === 0, other.map((r) => schemeOf(r.url)).join(', ') || 'no other scheme appeared');
 
-  const offMachine = [...byOrigin.keys()].filter((o) => {
-    const h = hostOf(o);
-    return !LOOPBACK_HOSTS.has(h) && !FONT_HOSTS.has(h);
-  });
-  check(area, `${label}: every http(s) destination is loopback or a declared font host`,
+  const offMachine = [...byOrigin.keys()].filter((o) => !LOOPBACK_HOSTS.has(hostOf(o)));
+  check(area, `${label}: every http(s) destination is loopback`,
     offMachine.length === 0, offMachine.join(', ') || 'nothing else was reached');
   const telemetry = [...byOrigin.keys()].filter((o) =>
     TELEMETRY_HOSTS.some((h) => hostOf(o) === h || hostOf(o).endsWith(`.${h}`)));
@@ -405,42 +407,20 @@ async function openSurface(browser, { label, path, wait, area, needles, settleMs
   const out = classify(area, label, requests, needles);
   await reportPrivacyState(area, label, privacy, cookies);
 
-  // What the font CDN is actually told, per request. Run 1's claim here — "nothing is handed over as a
-  // referrer" — was wrong in both directions, so it is replaced by a measurement: the stylesheet the page
-  // itself requests carries an **empty** Referer (the `no-referrer` meta in index.html doing its job),
-  // while the font *files* are requested by Google's own stylesheet and so carry the CDN's own origin as
-  // their referrer. Neither names this app's address, and the credential is in neither.
-  const toFonts = requests.filter((r) => FONT_HOSTS.has(hostOf(r.url)));
-  const refClass = (value) => {
-    if (value === null) return 'absent';
-    if (value === '') return 'empty';
-    let name;
-    try { name = hostOf(value); } catch { return 'unparseable-value'; }
-    if (LOOPBACK_HOSTS.has(name)) return 'OUR-OWN-ORIGIN';
-    if (FONT_HOSTS.has(name)) return `cdn-self (${name})`;
-    return `other-host (${name})`;
-  };
-  const referred = toFonts.map((r) => {
-    const v = headerGet(r.headers, 'referer') ?? headerGet(r.headers, 'referrer');
-    return { type: r.type ?? '(unknown)', value: v, klass: refClass(v) };
-  });
-  measure(area, `${label} · ${toFonts.length} request(s) toward the font CDN, by referrer class`,
-    [...new Set(referred.map((x) => `${x.type}: ${x.klass}`))].join(' | ') || 'no CDN request');
-  const pageInitiated = referred.filter((x) => x.type !== 'Font');
-  check(area, `${label}: the requests this page makes to the CDN carry no referrer at all`,
-    pageInitiated.every((x) => x.klass === 'absent' || x.klass === 'empty'),
-    pageInitiated.filter((x) => x.klass !== 'absent' && x.klass !== 'empty')
-      .map((x) => `${x.type}: ${x.klass}`).join(', ') || 'nothing of ours was named');
-  check(area, `${label}: nothing sent to the CDN names this app's own origin`,
-    referred.every((x) => x.klass !== 'OUR-OWN-ORIGIN' && !x.klass.startsWith('other-host')),
-    referred.filter((x) => x.klass === 'OUR-OWN-ORIGIN' || x.klass.startsWith('other-host'))
-      .map((x) => `${x.type}: ${x.klass}`).join(', ')
-      || 'only the CDN\'s own origin ever appears, on files its own CSS asked for');
-  const originsSent = [...new Set(toFonts.map((r) => headerGet(r.headers, 'origin')).filter(Boolean))];
-  measure(area, `${label} · Origin the browser puts on CDN requests (not suppressible by referrer policy;`
-    + ` the preconnect in index.html reveals it by design)`, originsSent.join(', ') || 'none');
-  check(area, `${label}: the Origin handed to the CDN is the bare preview origin, with no path`,
-    originsSent.every((o) => o === PREVIEW), originsSent.join(', ') || 'none');
+  // What the font CDN was told, per request, was measured here until Stage 9 — and Run 1's claim on that
+  // line ("nothing is handed over as a referrer") was wrong in both directions, so it had already become
+  // a measurement: the stylesheet this page requested carried an **empty** Referer (the `no-referrer` meta
+  // in index.html doing its job) while the font *files*, requested by Google's own stylesheet, carried the
+  // CDN's own origin. Neither named this app's address. With the faces served from this origin there is no
+  // such request to describe, and re-running those three checks over an empty list would pass for the
+  // wrong reason. So the absence itself is asserted, by name, and the referrer property that remains is
+  // carried by `travelReport`: it hunts the needles through every header of every request, same-origin
+  // ones included, so a Referer that ever carried a credential would be reported as undeclared travel.
+  const toFontCdn = requests.filter((r) => FORMER_FONT_HOSTS.has(hostOf(r.url)));
+  measure(area, `${label} · requests toward the two hosts faces came from before Stage 9`,
+    `${toFontCdn.length}`);
+  check(area, `${label}: no request leaves this origin for a font host`, toFontCdn.length === 0,
+    toFontCdn.map((r) => r.url.slice(0, 80)).join(', ') || 'typography is served from this origin');
   return { page, requests, privacy, cookies, url, ...out };
 }
 

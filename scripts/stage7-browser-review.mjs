@@ -110,13 +110,12 @@ const DISCOVERED = new Set();
 const TOKEN_SHAPED = /(^|[^A-Za-z0-9_-])([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g;
 const mask = (value) => String(value).replace(TOKEN_SHAPED, (whole, lead) => `${lead}‹credential masked›`);
 
-/** Origins the shipped page reaches outside this machine, named rather than assumed — the same two
- *  the Stage 5 network tier declares (`stage5-network-privacy.mjs:108`). `index.html:22` loads the
- *  display and Tamil faces from Google Fonts on every route, the reviewer's included, so a journey
- *  that banned "any host outside the loopback" was banning the product. What this tier holds those
- *  two to is the credential test: an anonymous reviewer's visit may name their machine to the font
- *  host, but it must not hand them the invitation's address while doing it. */
-const FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
+/** Nothing outside this machine may be reached. Until Stage 9 this line carried the two Google Fonts
+ *  hosts as a named allowset, because `index.html` asked them for the display and Tamil faces on every
+ *  route, the reviewer's included — a journey that banned "any host outside the loopback" was banning
+ *  the product. The faces are served from this origin now (`public/fonts/`, and the gate that reads it
+ *  is `scripts/check-render-assets.mjs`), so there is no legitimate destination elsewhere and any host
+ *  that appears here is a finding. */
 /** Origins that would be a finding if a single request reached one. The list is named, because "no
  *  analytics" is only a claim if the instrument says what it looked for. Copied from Stage 5 so the
  *  two tiers mean the same thing by it. */
@@ -652,8 +651,6 @@ async function leakScan(page) {
     nonUrl,
     hosts,
     offMachine,
-    declared: offMachine.filter((h) => FONT_HOSTS.has(h)),
-    undeclared: offMachine.filter((h) => !FONT_HOSTS.has(h)),
     telemetry: offMachine.filter((h) => TELEMETRY_HOSTS.some((t) => h === t || h.endsWith(`.${t}`))),
     offMachineReferers: [...new Map(offMachineReferers.map((x) => [`${x.host}\u0000${x.referer}`, x]))
       .values()],
@@ -720,19 +717,18 @@ function wireReport(tag, scan) {
   check(tag, 'the credential appears in no query, hash, page text, title, storage or cookie',
     appearances.length === 0,
     appearances.map(([k, v]) => `${k}: ${v.length} credential(s)`).join('; ') || 'none');
-  check(tag, 'the only destination outside this machine is a font host the product ships',
-    scan.undeclared.length === 0,
-    `off-machine: ${scan.offMachine.join(', ') || 'none'}; outside the allowset: `
-      + `${scan.undeclared.join(', ') || 'none'}`);
+  check(tag, 'no destination outside this machine is contacted at all',
+    scan.offMachine.length === 0, scan.offMachine.join(', ') || 'every host seen is loopback');
   check(tag, 'no analytics, session-replay or telemetry host was contacted by the reviewer page',
     scan.telemetry.length === 0, scan.telemetry.join(', ') || 'none');
   // Reshaped 2026-10-08, and the reshape is recorded rather than smoothed over: the first version of
   // this line claimed "no request leaving this machine carried a Referer", which the run falsified —
-  // the woff2 files go out with `https://fonts.googleapis.com/`, the stylesheet's own address. Isolated
-  // probe (a page with a 43-character token in its path against the same page without one): the
-  // stylesheet request carries an empty Referer in both, the font requests carry the Google address
-  // in both, and no Referer in either case names this machine. The property the pass can actually
-  // stand behind is therefore about disclosure, and it is measured here as the values plus this check.
+  // the woff2 files went out with `https://fonts.googleapis.com/`, the stylesheet's own address. An
+  // isolated probe (the same page with and without a 43-character token in its path) showed the
+  // stylesheet request carrying an empty Referer in both and the font requests carrying the Google
+  // address in both, and no Referer in either case named this machine. Stage 9 served the faces from
+  // this origin, so the expected result here is `none at all`: nothing leaves, and the check above is
+  // what makes that a claim rather than an absence of evidence.
   const refererRows = scan.offMachineReferers;
   measure(tag, 'every Referer on a request that leaves this machine',
     refererRows.length === 0 ? 'none at all'
