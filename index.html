@@ -3,26 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- A guest's address is `/i/<credential>`, and the page loads a stylesheet from
-         fonts.googleapis.com. Browsers today default to `strict-origin-when-cross-origin`,
-         which already sends only the origin — not this path — to a cross-origin HTTPS
-         request; this tag is not there to fix a leak that default would otherwise cause.
-         It is here to make the property explicit and ours rather than inherited from a
-         browser default that a different browser, an older one, or a changed setting could
-         give us. It also suppresses the referrer for same-origin requests, where that
-         default sends the full path. Measured on the local stack: the fonts.googleapis.com
-         request carried no `Referer` header at all.
-         What this does NOT do: the credential still sits in browser history and in whatever
-         access logs the hosting stack keeps. No meta tag reaches either. -->
+    <!-- A guest's address is `/i/<credential>`, and a guest page asks its own origin for the
+         document, the stylesheet, the font files and the call that resolves the invitation. Under the
+         browser default (`strict-origin-when-cross-origin`) a same-origin request hands over the full
+         path, credential and all, as the referrer of the next request. This tag keeps that path out of
+         every one of them. It is here to make the property explicit and ours rather than inherited
+         from a default that a different browser, an older one, or a changed setting could give us.
+         What this does NOT do: the credential still sits in browser history and in whatever access
+         logs the hosting stack keeps. No meta tag reaches either. And because Stage 9 moved the faces
+         behind this stylesheet, one measured detail belongs here: Chrome put
+         `Referer: <this origin>/fonts/fonts.css` on all 19 font requests. A stylesheet's own
+         subresources name the stylesheet, not the page that loaded it — which is the part of this
+         surface that would otherwise read as the tag failing. -->
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600;700&family=Noto+Sans+Malayalam:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Typography comes from this origin. The faces, their versions and their digests are recorded
+         in public/fonts/font-manifest.json; scripts/check-render-assets.mjs is the gate that reads it,
+         so a stylesheet here that reaches a remote font host is a build failure rather than a drift. -->
+    <link rel="stylesheet" href="/fonts/fonts.css" />
 
     <title>VivaahVarnam — Digital Wedding Patrika</title>
     <meta

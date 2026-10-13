@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "product:check": "node scripts/check-product-contract.mjs",
+    "render:check": "node scripts/check-render-assets.mjs",
     "dbtypes:check": "node scripts/check-db-contract.mjs"
   },
   "dependencies": {
