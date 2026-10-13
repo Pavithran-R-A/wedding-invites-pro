@@ -27,19 +27,30 @@
       content="default-src 'none'; img-src 'self' data:; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'none'"
     />
 
-    <!-- Same reasoning as `index.html:6-20`, and the same measured caveat: the harness reads its
-         stylesheet and faces from this origin, and a stylesheet's subresources name the stylesheet.
-         Nothing here is addressed to another machine, and the output tier asserts that. -->
+    <!-- Same reasoning as `index.html:6-18`: the harness reads its stylesheet and faces from this
+         origin, nothing here is addressed to another machine, and the output tier asserts both halves
+         of that (§11.7). Measured, because the obvious reading of these two tags is wrong: a
+         stylesheet's own subresources inherit *the stylesheet's* referrer policy, not the document's.
+         With this meta alone, with `referrerpolicy` on the `<link>` below alone, and with both, the
+         `.woff2` requests still went out with `Referer: …/fonts/fonts.css`; a
+         `Referrer-Policy: no-referrer` **response header on the stylesheet** is what clears them, and it
+         clears the font requests only — on its own it leaves the stylesheet naming this document, so the
+         two tags stay. That header is a delivery requirement at the serving origin rather than something
+         this document can do to itself; `docs/architecture/render-outputs.md` §7 carries the six controls
+         (`q9-logs/referrer-controls-measured.txt` holds the raw lines). What stays true here, and what the
+         tier pins by exact value, is that the only referrer on the wire names the harness's own stylesheet
+         on its own loopback origin — never a credential, never a household name, never a third-party
+         host. -->
     <meta name="referrer" content="no-referrer" />
 
     <title>VivaahVarnam render harness</title>
 
     <!-- The faces the product uses, from this origin, exactly as the guest page loads them
-         (`index.html:26`). Loaded here rather than bundled so a rendered artefact and a guest's
+         (`index.html:24`). Loaded here rather than bundled so a rendered artefact and a guest's
          screen resolve the same pinned woff2 bytes — §6.2's reproducibility argument is about the
          file, not about the page that asked for it. `render:check` is the gate that keeps this
          stylesheet honest about which bytes are in the tree. -->
-    <link rel="stylesheet" href="/fonts/fonts.css" />
+    <link rel="stylesheet" href="/fonts/fonts.css" referrerpolicy="no-referrer" />
   </head>
 
   <body>
