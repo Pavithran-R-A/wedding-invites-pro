@@ -62,6 +62,10 @@ describe("product contract checker", () => {
         `| Host editor on a phone | the page a host works on has no main landmark |`,
         // `markup-injection-sink` — a new, unaudited write of markup into the live DOM.
         `element.innerHTML = weddingDetail.hostNoteHtml;`,
+        // `qr-encoder-imported-outside-its-owner` — Stage 9's encoder, imported somewhere a guest can
+        // download it. The line is the harness owner's own import, which is why the rule's only
+        // exemption has to be a path: `src/pages/Index.tsx` is not it.
+        `import { create } from "qrcode/lib/core/qrcode.js";`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());

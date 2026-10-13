@@ -454,6 +454,32 @@ export const RULES = [
     scope: ["src/"],
     exclude: ["src/test/"],
   },
+  {
+    id: "qr-encoder-imported-outside-its-owner",
+    // §9.4's promise about the QR encoder is about reachability, not existence: "The dependency is
+    // reachable only from `dist/render.*` and never from the guest bundle." A guest's page must not
+    // carry a symbol-encoding library it can never run, and a printed artefact's geometry must have
+    // exactly one owner — the same reason the harness draws its own squares instead of calling the
+    // encoder's canvas renderer, which computes a fractional module size (§5 refuses that).
+    //
+    // So the sweep is on the *import*, and the exemption is a single file rather than a directory:
+    // `src/render/qrPlate.ts`. Widening it is a deliberate edit, which is what makes the invariant
+    // visible — moving the encoder call into `src/lib/` would keep §9.4's bundle claim true and still
+    // deserve a decision someone had to write down.
+    //
+    // Two precision notes, because a rule that fires on prose gets switched off rather than read:
+    // the pattern needs an import form (`from`, `import(`, `require(`) immediately before the package
+    // name, so this file's own sentences about the dependency stay writable; and it names `qrcode`,
+    // the package §9.4 measured and this build ships. Replacing the encoder is a §9.4 re-measurement
+    // that edits this rule as part of it — and the authoritative check is not here anyway, it is the
+    // built-chunk sweep over `dist/assets/*.js` recorded in the Stage 9 audit, which reads the bundle
+    // a guest actually downloads rather than the source that produced it.
+    pattern: /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["'`]qrcode(?:\/[^"'`]*)?["'`]/g,
+    message: "imports the QR encoder outside its one owner; a guest's bundle must not carry it (§9.4)",
+    fix: "keep the only import in src/render/qrPlate.ts, reachable from the render entry alone — call buildQrPlate() instead",
+    scope: ["src/"],
+    exclude: ["src/render/qrPlate.ts"],
+  },
 ];
 
 /** Copy the reviewer's door prints today, quoted verbatim from `src/pages/FamilyReview.tsx` and
@@ -546,6 +572,11 @@ export const MUST_NOT_MATCH = [
   // exists to permit, and the four sentences are the refusals a family is actually shown.
   `const { data } = await client.schema('api').rpc('resolve_guest_invitation');`,
   ...SHIPPED_GUEST_DOOR_COPY,
+  // Stage 9's encoder rule is about the package, not the word "qr" — the harness's own modules are
+  // named for what they draw, and both lines below are real imports in `src/render/`. If a future
+  // widening of that pattern started firing on them, the fix would be the pattern, not the code.
+  `import { buildQrPlate } from "./qrPlate";`,
+  `import QrCanvas from "./QrCanvas";`,
 ];
 
 export function isScannedPath(relativePath) {
@@ -679,6 +710,11 @@ export function selfTest() {
       `<div dangerouslySetInnerHTML={{ __html: section.body }} />`,
       `node.insertAdjacentHTML("beforeend", importedMarkup);`,
       `document.write(response.markup);`,
+    ],
+    "qr-encoder-imported-outside-its-owner": [
+      `import QRCode from "qrcode";`,
+      `const { toCanvas } = await import("qrcode/lib/browser.js");`,
+      `const png = require('qrcode');`,
     ],
   };
   for (const [ruleId, fixture] of Object.entries(fixtures)) {
@@ -933,6 +969,28 @@ export function selfTest() {
   );
   if (readOnlyMarkup.some((v) => v.rule === "markup-injection-sink")) {
     failures.push("the guard flagged reading innerHTML, which is not an injection");
+  }
+
+  // The encoder rule is a *path* exemption, so both halves have to be pinned: that the one owner
+  // stays silent (or the harness could not import the dependency at all), and that the identical
+  // line elsewhere is still a finding (or the rule exempts the app rather than a file).
+  const encoderImport = `import { create } from "qrcode/lib/core/qrcode.js";`;
+  const encoderChecks = [
+    ["src/render/qrPlate.ts", false],
+    ["src/render/main.tsx", true],
+    ["src/components/invitation/InvitationRenderer.tsx", true],
+    ["src/pages/EditProject.tsx", true],
+  ].map(([path, expectFinding]) => {
+    const fired = scanContent(path, encoderImport).some(
+      (v) => v.rule === "qr-encoder-imported-outside-its-owner",
+    );
+    if (fired === expectFinding) return null;
+    return expectFinding
+      ? `the encoder rule let ${path} import the dependency, so the guest bundle has a second door`
+      : `the encoder rule flagged its own owner, so the geometry has no legal place left to live`;
+  });
+  for (const failure of encoderChecks) {
+    if (failure) failures.push(failure);
   }
 
   for (const phrase of MUST_NOT_MATCH) {
