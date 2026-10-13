@@ -1,4 +1,4 @@
-/* Canvas geometry for the three export surfaces, and nothing else.
+/* Canvas geometry for the four export surfaces — three documents and one plate — and nothing else.
  *
  * This stylesheet is loaded by exactly one document — `render.html` — which a person never opens.
  * That is the whole of §6.1's bargain: `InvitationRenderer` stays the one renderer of an
@@ -69,6 +69,20 @@ body {
 [data-render-surface='og'] p:has(> a),
 [data-render-surface='share'] p:has(> a) {
   display: none;
+}
+
+/* The plate canvas. A `<canvas>` is inline by default, so an unstyled one sits on a text baseline
+   and the box under it includes leading that nobody asked for; the capture box would then be a
+   25 mm square of QR plus a few pixels of an imaginary line of type. `block` makes the element's box
+   the plate's box, which is the only geometry promise §5 makes about these files.
+
+   This rule is the reason `qr` is in `src/lib/renderSurfaces.ts` beside the three document surfaces
+   rather than in `QrCanvas.tsx`: the component must not be able to claim a canvas it has not been
+   given rules for. The `[data-render-surface]` rule above also matches this element — a canvas has
+   no border, radius or shadow to strip, and `print-color-adjust: exact` is what keeps a PDF print
+   dialog from deciding that a black-and-white code is a decorative background. */
+[data-render-surface='qr'] {
+  display: block;
 }
 
 /* Pagination, PDF only. A ceremony's row stays whole across a break — a muhurtham time orphaned onto

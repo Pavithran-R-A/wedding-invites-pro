@@ -28,7 +28,7 @@ import { render } from "@testing-library/react";
 import InvitationRenderer from "@/components/invitation/InvitationRenderer";
 import { parsePublicInvitation, type PublicInvitation } from "@/lib/publicInvitation";
 import { RENDER_SECTION_KINDS } from "@/lib/invitationSections";
-import { RENDER_SURFACES } from "@/lib/renderSurfaces";
+import { DOCUMENT_SURFACES } from "@/lib/renderSurfaces";
 import {
   guestEvent,
   guestInvitation,
@@ -80,7 +80,7 @@ describe('the render-surface hook', () => {
     expect(container.innerHTML).not.toContain('data-render-');
   });
 
-  it.each([...RENDER_SURFACES])('names the %s surface on the article root alone', (surface) => {
+  it.each([...DOCUMENT_SURFACES])('names the %s surface on the article root alone', (surface) => {
     const container = articleOf(parsed(), surface);
     const stamped = container.querySelectorAll('[data-render-surface]');
     expect(stamped.length).toBe(1);
@@ -91,7 +91,7 @@ describe('the render-surface hook', () => {
   it('adds attributes and nothing else: the same document with and without a surface is the same DOM', () => {
     for (const invitation of [parsed(), through(packedGuestPayload())]) {
       const plain = articleOf(invitation).innerHTML;
-      for (const surface of RENDER_SURFACES) {
+      for (const surface of DOCUMENT_SURFACES) {
         const stamped = articleOf(invitation, surface).innerHTML.replace(/ data-render-[a-z-]+="[^"]*"/g, '');
         expect(stamped).toBe(plain);
       }
@@ -133,7 +133,7 @@ describe('the render-surface hook', () => {
   });
 
   it('prints the venue map link on every surface, because hiding it is CSS’s job', () => {
-    for (const surface of RENDER_SURFACES) {
+    for (const surface of DOCUMENT_SURFACES) {
       const link = articleOf(parsed(), surface).querySelector('a[href="https://maps.example/sri-kanchi-mahal"]');
       expect(link).not.toBeNull();
     }

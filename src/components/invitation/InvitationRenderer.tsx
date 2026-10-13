@@ -44,7 +44,7 @@
 
 import type { PublicInvitation, InvitationEvent, InvitationPerson } from '@/lib/publicInvitation';
 import type { RenderRegion, RenderSection, RenderSectionKind } from '@/lib/invitationSections';
-import type { RenderSurface } from '@/lib/renderSurfaces';
+import type { DocumentSurface } from '@/lib/renderSurfaces';
 import { normalizeInvitationSections } from '@/lib/invitationSections';
 import { formatDate, formatTime } from '@/lib/wallClock';
 
@@ -176,7 +176,7 @@ export interface InvitationRendererProps {
    * address the same JSX at three different boxes. A live browser never loads that file, which is
    * the whole reason the design allows one renderer and three artefacts (§6.1).
    */
-  surface?: RenderSurface;
+  surface?: DocumentSurface;
 }
 
 /** What a render surface's stylesheet needs in order to address a drawn section without naming
@@ -200,7 +200,7 @@ type EventStamp = {
 
 /** The stamp, or nothing: no surface means no attributes, which is what keeps a guest's DOM the
  *  document Stage 3 certified. */
-const stampFor = (section: RenderSection, surface: RenderSurface | undefined): SurfaceStamp | undefined =>
+const stampFor = (section: RenderSection, surface: DocumentSurface | undefined): SurfaceStamp | undefined =>
   surface === undefined
     ? undefined
     : { 'data-render-kind': section.kind, 'data-render-region': section.region };
@@ -330,7 +330,7 @@ const SectionBlock = ({
 }: {
   section: RenderSection;
   invitation: PublicInvitation;
-  surface?: RenderSurface;
+  surface?: DocumentSurface;
 }) => {
   const bare = section.region !== 'body';
   const stamp = stampFor(section, surface);

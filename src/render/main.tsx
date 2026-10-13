@@ -19,7 +19,10 @@
 // It imports no router, no auth provider, no Supabase client and no `src/lib/api*`, so the harness
 // cannot become a way to reach a database with a browser's credentials — `connect-src 'none'` in
 // `render.html` would block the attempt anyway, and the import list is why no attempt is worth
-// making. It draws one component, `InvitationRenderer`, with one extra prop.
+// making. It draws two components and no third: `InvitationRenderer`, with one extra prop that says
+// which canvas the document is being cut for, and `QrCanvas`, which mounts the plate `./qrPlate`
+// measured and has `./qrPaint` draw it. Both are fed by the same door, so a request this file cannot
+// read is a request that draws nothing.
 //
 // The `data-render-state` vocabulary is the harness's contract with the worker and with the output
 // tier, both of which read it from the DOM. `booting` and `waiting` are set here; `rendering`,
@@ -30,6 +33,8 @@
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import InvitationRenderer from "@/components/invitation/InvitationRenderer";
+import { QR_SURFACE } from "@/lib/renderSurfaces";
+import QrCanvas from "./QrCanvas";
 import { parseRenderRequest, type RenderRefusalReason } from "./renderRequest";
 
 // The product's own stylesheet first, then the canvas rules that override it. Order is the
@@ -87,12 +92,20 @@ const boot = (element: HTMLElement): RenderHarness => {
       return "refused";
     }
 
+    // Two things can be drawn, and the door already decided which: a document on one of the three
+    // canvases, or a plate. The plate is not an `InvitationRenderer` with a fourth surface — it has
+    // no invitation in the request at all, because a QR code is a function of the address, not of
+    // the content behind it (§5). A fifth surface would need a branch here, not a cast.
     flushSync(() =>
       root.render(
-        <InvitationRenderer
-          invitation={outcome.request.invitation}
-          surface={outcome.request.surface}
-        />,
+        outcome.request.surface === QR_SURFACE ? (
+          <QrCanvas plate={outcome.request.plate} />
+        ) : (
+          <InvitationRenderer
+            invitation={outcome.request.invitation}
+            surface={outcome.request.surface}
+          />
+        ),
       ),
     );
     await document.fonts.ready;

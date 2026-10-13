@@ -1,4 +1,4 @@
-// The three render surfaces Stage 9 exports, named in one place.
+// The render surfaces Stage 9 exports, named in one place.
 //
 // Why this lives in `src/lib/` rather than in the harness: the same word has to reach two
 // different kinds of file, and a drift between them is a silent layout bug. The renderer stamps
@@ -15,18 +15,36 @@
 //            in a chat. Never cropped — a longer document paginates within the same set.
 //   `pdf`    A4 or US Letter, paginated, with the map link kept because a PDF can carry a real
 //            link annotation and a PNG cannot.
+//   `qr`     One of three print plates (25/40/60 mm), and the only surface that draws *no*
+//            invitation document. It is here rather than in `src/render/qrPlate.ts` because the
+//            harness's door takes one field named `surface` for every artefact, and a fourth value
+//            has to be refused by the same rule the other three are. What it renders is a matrix
+//            of modules, so `InvitationRenderer` accepts `DocumentSurface` and not this one — the
+//            type is what stops a QR request from ever drawing a guest's page.
 //
-// The set is closed on purpose. A fourth value is a refusal at the harness door rather than a
+// The set is closed on purpose. A fifth value is a refusal at the harness door rather than a
 // string that reaches CSS, because an unrecognised surface would render the live page's geometry
 // and be filed as an artefact of whichever box the worker asked for.
 
-/** The surfaces a render request may name. Extend this list, `render.css` and the §7 `variant`
- *  CHECK together, or the export tier goes red on the artefact that has no rules. */
-export const RENDER_SURFACES = ["og", "share", "pdf"] as const;
+/** The three surfaces that draw an invitation document. */
+export const DOCUMENT_SURFACES = ["og", "share", "pdf"] as const;
+
+/** The surface that draws a printed address instead of a document. */
+export const QR_SURFACE = "qr";
+
+/** Every surface a render request may name: the three documents and the plate. */
+export const RENDER_SURFACES = [...DOCUMENT_SURFACES, QR_SURFACE] as const;
 
 export type RenderSurface = (typeof RENDER_SURFACES)[number];
+export type DocumentSurface = (typeof DOCUMENT_SURFACES)[number];
+export type QrSurface = typeof QR_SURFACE;
 
 /** Is this string one of the surfaces? Written as a predicate so the harness, the worker and any
- *  later UI share one answer instead of each keeping a `Set` of the same three words. */
+ *  later UI share one answer instead of each keeping a `Set` of the same four words. */
 export const isRenderSurface = (value: unknown): value is RenderSurface =>
   typeof value === "string" && (RENDER_SURFACES as readonly string[]).includes(value);
+
+/** Is this one of the surfaces that takes an invitation document? The renderer's prop is typed to
+ *  this so a `qr` request cannot be answered by drawing a wedding at plate geometry. */
+export const isDocumentSurface = (value: unknown): value is DocumentSurface =>
+  typeof value === "string" && (DOCUMENT_SURFACES as readonly string[]).includes(value);
