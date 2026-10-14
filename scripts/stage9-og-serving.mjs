@@ -21,17 +21,24 @@
 //     still masked on every line this tier prints: §10.3 puts the served strings "on record" by hashing
 //     them, and a tier that prints a credential-shaped string into a log it does not protect teaches the
 //     next stage that the discipline is decorative.
-//   * The preview image is a 1×1 PNG written to scratch, standing in for the `og_image` artefact the
-//     render worker draws in S9-6. What §10.1 asks to be proved is that the served bytes equal the
-//     manifest's `content_digest`, and that relation holds at any size; the drawing itself is proved
-//     there, not here.
+//   * Every `/previews/<key>.png` is that case's **own** `og_image`, drawn by `src/render/` through the
+//     same worker the raster tier drives. No bytes are shared between cases and none are invented: the
+//     one document whose teaser the fit ladder refuses (`unbroken-english`, whose 400-letter title cannot
+//     wrap into a 1200×630 box) is served with **no** `og:image` tag at all, which is §10.1's "nothing is
+//     invented where the document is silent" applied to the image slot rather than to a text slot. §B
+//     therefore proves three things at once: served bytes equal the manifest's `content_digest`, the
+//     served PNG reads back as §5's box, and two documents that produce the same card text produce
+//     different pixels.
 //
 // Usage:
 //   npm run build
+//   npm run preview -- --host 127.0.0.1 --port 4173 --strictPort    (a second shell: the render origin)
 //   node scripts/stage9-og-serving.mjs
 //
-// Exit code 1 means a finding was recorded; a harness that will not start, will not answer, or throws
-// is a harness failure and exits 2.
+// Env: STAGE9_OG_SHELL, STAGE9_OG_PORT (the harness's own loopback port), STAGE9_PREVIEW_ORIGIN
+//      (default http://127.0.0.1:4173), STAGE9_OG_CDP_PORT (default 9435), STAGE9_EVIDENCE_DIR.
+// Exit code 1 means a finding was recorded; a harness that will not start, will not answer, throws, or a
+// render origin that will not serve `dist/render.html` is a harness failure and exits 2.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -44,12 +51,19 @@ import {
   guestInvitationPacked,
   guestInvitationV1,
 } from '../src/test/invitationFixture.ts';
+import { OG_BOX } from '../src/render/outputGeometry.ts';
+import { imageDimensions, openRenderWorker } from './stage9-render-worker.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ADAPTER = join(ROOT, 'scripts', 'og-serving-adapter.mjs');
 const SHELL = resolve(ROOT, process.env.STAGE9_OG_SHELL ?? 'dist/index.html');
 const PORT = Number(process.env.STAGE9_OG_PORT ?? '4391');
 const HOST_ORIGIN = `http://127.0.0.1:${PORT}`;
+/** The origin the teaser is drawn from: the same `vite preview` of `dist/` the raster tier renders
+ *  against. The worker asserts it is loopback before it opens a browser, so a tier that is pointed at a
+ *  hosted target fails at this line rather than sending a fixture document to somebody's server. */
+const PREVIEW_ORIGIN = process.env.STAGE9_PREVIEW_ORIGIN ?? 'http://127.0.0.1:4173';
+const CDP_PORT = Number(process.env.STAGE9_OG_CDP_PORT ?? '9435');
 /** What the harness pretends to be: a public, `https`, path-free origin — the only shape §9.3's door
  *  allows a shared invitation address to have. */
 const PUBLIC_ORIGIN = 'https://vivaahvarnam.example';
@@ -59,7 +73,6 @@ const EVIDENCE_DIR = resolve(process.env.STAGE9_EVIDENCE_DIR ?? join(ROOT, '..',
 const SCRATCH = join(EVIDENCE_DIR, RUN_TAG);
 mkdirSync(SCRATCH, { recursive: true });
 const STATE = join(SCRATCH, 'state.json');
-
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 /** A credential from the alphabet the door accepts, derived from the case's own name so a rerun asks
  *  for the same addresses. */
@@ -190,30 +203,105 @@ const CASES = [
   },
 ];
 
-const PNG_1PX = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-  'base64',
-);
-const PREVIEW_FILE = join(SCRATCH, 'preview.png');
-writeFileSync(PREVIEW_FILE, PNG_1PX);
-const PREVIEW_DIGEST = sha256(PNG_1PX);
+/** §10.1's six pairs, in the order `src/lib/ogMetadata.ts` emits them. A set the harness *adds* to the
+ *  shell rather than replacing into would fail the order assertion, which is why the order is pinned
+ *  rather than the membership alone. */
+const CONTRACT_TAGS = ['og:title', 'og:description', 'og:type', 'og:image', 'og:url', 'twitter:card'];
+
+/** Each case's own `og:image`, drawn before the harness starts: `name → { file, content_digest, bytes,
+ *  source_dto_digest, measured_height_px, dropped }`. A case the teaser ladder refuses has no entry —
+ *  see `drawPreviews` — and a case with no entry gets no `preview` in the routing state, so the tag is
+ *  absent from its card rather than pointed at something this tier made up. */
+const previews = new Map();
+/** `name → reason`, for the same cases: §B prints the name the product answered with, which is the only
+ *  honest record of why a card has five tags instead of six. */
+const previewRefusals = new Map();
+
+/**
+ * Render every case document through the product's own worker and keep its PNG.
+ *
+ * Three things this deliberately does not do: it does not draw one image and hand it to eleven addresses
+ * (a shared preview file would make §B's byte-equality assertion about the harness, not about the
+ * wedding); it does not fall back to a placeholder when the ladder refuses (a refusal is §5's designed
+ * answer for a document that will not fit, and inventing pixels for it is the failure §10.1 names); and
+ * it does not serve the artefact from the worker's own output directory, because that directory is named
+ * by `(kind, variant, page)` and every one of these renders answers to the same filename — each copy
+ * below is made from the bytes read at that path *before* the next render overwrites it.
+ */
+async function drawPreviews() {
+  const worker = await openRenderWorker({
+    origin: PREVIEW_ORIGIN, outputDir: join(SCRATCH, 'renders'), cdpPort: CDP_PORT,
+  });
+  try {
+    for (const testCase of CASES) {
+      const result = await worker.renderOgTeaser({ dto: testCase.invitation() });
+      if (result.ok === false) {
+        previewRefusals.set(testCase.name, result.reason);
+        continue;
+      }
+      const artefact = result.artefacts.find((row) => row.name.endsWith('.png'));
+      const bytes = readFileSync(artefact.path);
+      const file = join(SCRATCH, `preview-${testCase.name}.png`);
+      writeFileSync(file, bytes);
+      previews.set(testCase.name, {
+        file,
+        // This tier's own digest of the bytes it is about to serve, hashed from the copy on disk rather
+        // than copied from the worker's record — so §B's manifest comparison is about the harness, and
+        // the comparison between the two digests is about the renderer and the hash agreeing.
+        content_digest: sha256(bytes),
+        worker_content_digest: artefact.content_digest,
+        bytes: bytes.length,
+        source_dto_digest: result.source_dto_digest,
+        measured_height_px: result.measured_height_px,
+        dropped: result.fit_plan.dropped,
+        render_config_hash: artefact.render_config_hash,
+      });
+    }
+  } finally {
+    const closed = await worker.close();
+    measured('preview worker profile removed', String(closed.profileRemoved));
+    measured('preview renders', String(closed.renders));
+  }
+  // A tier that drew nothing has no subject: the render origin is down or the bundle is stale, which is
+  // the definition of "unrunnable" in this file's exit-code vocabulary, and better said here than
+  // discovered as a TypeError three phases later.
+  if (previews.size === 0) {
+    throw new Error(`no case drew a teaser from ${PREVIEW_ORIGIN}: `
+      + `[${[...previewRefusals.entries()].map(([name, reason]) => `${name}=${reason}`).join(', ')}]`);
+  }
+}
+
+/** §10.1's six pairs, minus the image for a document whose teaser was refused: `ogMetadata.ts` drops an
+ *  empty slot instead of inventing one, and a card is only under this tier's contract to the extent its
+ *  own document has something to put in it. */
+const expectedTagsFor = (name) =>
+  (previews.has(name) ? CONTRACT_TAGS : CONTRACT_TAGS.filter((key) => key !== 'og:image'));
 
 const stateFor = (origin, names) => ({
   origin,
   invitations: CASES
     .filter((testCase) => names === null || names.includes(testCase.name))
-    .map((testCase) => ({
-      name: testCase.name,
-      token: credentialFor('i', testCase.name),
-      payload: { available: true, invitation: testCase.invitation() },
-      // A separate opaque key: an unfurl that shows both must not let one address be used to guess the
-      // other, and §10.3's published preview is a different capability from the guest's own link.
-      preview: {
-        path: `/previews/${credentialFor('preview', testCase.name)}.png`,
-        file: PREVIEW_FILE,
-        content_digest: PREVIEW_DIGEST,
-      },
-    })),
+    .map((testCase) => {
+      const preview = previews.get(testCase.name);
+      return {
+        name: testCase.name,
+        token: credentialFor('i', testCase.name),
+        payload: { available: true, invitation: testCase.invitation() },
+        // A separate opaque key: an unfurl that shows both must not let one address be used to guess the
+        // other, and §10.3's published preview is a different capability from the guest's own link.
+        // Spreading rather than setting `preview: null`, because the harness's own rule is
+        // "no preview object in the state ⇒ no `og:image` in the card", and a null would be a third
+        // spelling that rule has to guess between.
+        ...(preview === undefined ? {} : {
+          preview: {
+            path: `/previews/${credentialFor('preview', testCase.name)}.png`,
+            file: preview.file,
+            content_digest: preview.content_digest,
+            bytes: preview.bytes,
+          },
+        }),
+      };
+    }),
   revoked: [],
 });
 
@@ -333,8 +421,7 @@ async function phaseContract() {
   say('=== A. the exact tag set, per document, per user-agent ===');
   const shell = readFileSync(SHELL, 'utf8');
   const shellSocial = socialTags(shell);
-  const EXPECTED = ['og:title', 'og:description', 'og:type', 'og:image', 'og:url', 'twitter:card'];
-  const brandOnlyKeys = [...shellSocial.keys()].filter((key) => !EXPECTED.includes(key));
+  const brandOnlyKeys = [...shellSocial.keys()].filter((key) => !CONTRACT_TAGS.includes(key));
   say(`shell ${SHELL}: ${shellSocial.size} brand social tags, ${metaCount(shell)} <meta> in total`);
   check('shell/has-brand-tags', shellSocial.size > 0, `${shellSocial.size} to be replaced`);
   check('shell/brand-only-keys-exist', brandOnlyKeys.length > 0, brandOnlyKeys.join(', '));
@@ -362,16 +449,18 @@ async function phaseContract() {
 
     const html = servedBy.get(USER_AGENTS[0]);
     const tags = socialTags(html);
+    const expected = expectedTagsFor(testCase.name);
     check(`tags/${testCase.name}/exact-set-in-order`,
-      JSON.stringify([...tags.keys()]) === JSON.stringify(EXPECTED), `served ${JSON.stringify([...tags.keys()])}`);
+      JSON.stringify([...tags.keys()]) === JSON.stringify(expected),
+      `served ${JSON.stringify([...tags.keys()])}, expected ${JSON.stringify(expected)}`);
     check(`tags/${testCase.name}/brand-only-keys-gone`,
       brandOnlyKeys.every((key) => !tags.has(key)), `survivors: ${brandOnlyKeys.filter((key) => tags.has(key)).join(', ') || 'none'}`);
     check(`tags/${testCase.name}/brand-copy-gone`,
       tags.get('og:title') !== shellSocial.get('og:title')
       && tags.get('og:description') !== shellSocial.get('og:description'));
     check(`tags/${testCase.name}/meta-count-is-shell-minus-brand-plus-contract`,
-      metaCount(html) === metaCount(shell) - shellSocial.size + EXPECTED.length,
-      `${metaCount(html)} vs ${metaCount(shell)} shell − ${shellSocial.size} brand + ${EXPECTED.length} contract`);
+      metaCount(html) === metaCount(shell) - shellSocial.size + expected.length,
+      `${metaCount(html)} vs ${metaCount(shell)} shell − ${shellSocial.size} brand + ${expected.length} contract`);
     check(`tags/${testCase.name}/page-title-untouched`, titleOf(html) === titleOf(shell),
       '§10.3 leaves <title> alone');
     check(`tags/${testCase.name}/type`, tags.get('og:type') === 'website', tags.get('og:type'));
@@ -379,9 +468,17 @@ async function phaseContract() {
     check(`tags/${testCase.name}/url-is-the-public-door`,
       tags.get('og:url') === `${PUBLIC_ORIGIN}/i/${entry.token}`
       && /^https:\/\/[^/]+\/i\/[A-Za-z0-9_-]{43}$/.test(tags.get('og:url') ?? ''), tags.get('og:url'));
-    check(`tags/${testCase.name}/image-is-a-separate-key`,
-      tags.get('og:image') === `${PUBLIC_ORIGIN}${entry.preview.path}`
-      && !tags.get('og:image').includes(entry.token), tags.get('og:image'));
+    if (entry.preview === undefined) {
+      // The one card that has no image, and the reason it has none: the teaser ladder refused to draw
+      // this document rather than crop it (§B names the refusal). A URL invented here would point at an
+      // object that does not exist, which is the half-open card §10.1 rules out.
+      check(`tags/${testCase.name}/no-preview-no-image-tag`, !tags.has('og:image'),
+        `teaser refused: ${previewRefusals.get(testCase.name)}`);
+    } else {
+      check(`tags/${testCase.name}/image-is-a-separate-key`,
+        tags.get('og:image') === `${PUBLIC_ORIGIN}${entry.preview.path}`
+        && !tags.get('og:image').includes(entry.token), tags.get('og:image'));
+    }
     check(`tags/${testCase.name}/description-is-what-the-document-says`,
       (() => {
         const served = tags.get('og:description') ?? '';
@@ -416,24 +513,101 @@ async function phaseContract() {
   check('escape/no-executable-script-from-a-title', !/<script>alert/i.test(hostile.text));
 }
 
+/** The teaser route's own refusal vocabulary, copied from `scripts/stage9-render-worker.mjs`: the
+ *  ladder's answer (`teaser-does-not-fit`), the two measurement disagreements that mean "the plan and
+ *  the page do not agree", the worker's bounds (`render-timeout`, `worker-error`, `bytes-over-ceiling`,
+ *  `artefact-box-mismatch`, `image-header-*`) and the parse gate's `invitation-refused`. A reason outside
+ *  this list is not a designed outcome, so it must arrive as a finding rather than as a five-tag card. */
+const TEASER_REFUSALS = [
+  'teaser-does-not-fit', 'height-not-measurable', 'plan-says-fit-but-measurement-did-not',
+  'render-timeout', 'worker-error', 'invitation-refused', 'bytes-over-ceiling', 'artefact-box-mismatch',
+];
+const isDesignedTeaserRefusal = (reason) =>
+  typeof reason === 'string'
+  && (TEASER_REFUSALS.includes(reason) || reason.startsWith('image-header-'));
+
+const PNG_SIGNATURE = '89504e470d0a1a0a';
+
 async function phaseImage() {
   say('');
-  say('=== B. the preview object: served bytes against the manifest digest ===');
+  say('=== B. the preview objects: served bytes against the manifest, the artefact and the box ===');
   const state = stateFor(PUBLIC_ORIGIN, null);
   writeState(state);
-  const entry = entryFor(state, 'no-pack-tamil');
-  check('image/fixture-is-a-real-png', PNG_1PX.subarray(0, 8).toString('hex') === '89504e470d0a1a0a',
-    `${PNG_1PX.length} bytes, 1×1`);
-  const res = await fetchRaw(entry.preview.path);
-  check('image/status', res.status === 200, `status ${res.status}`);
-  check('image/content-type', res.headers['content-type'] === 'image/png', res.headers['content-type']);
-  check('image/no-store', res.headers['cache-control'] === 'no-store', res.headers['cache-control']);
-  const servedDigest = sha256(res.bytes);
-  check('image/digest-equals-manifest-content-digest',
-    servedDigest === entry.preview.content_digest, `served ${servedDigest}`);
-  check('image/byte-length', res.bytes.length === PNG_1PX.length, `${res.bytes.length} bytes`);
-  check('image/bytes-identical', res.bytes.equals(PNG_1PX));
-  measured('preview sha256', servedDigest);
+
+  check('image/every-case-either-drew-or-was-refused',
+    previews.size + previewRefusals.size === CASES.length,
+    `${previews.size} drawn, ${previewRefusals.size} refused, ${CASES.length} cases`);
+  for (const [name, reason] of previewRefusals) {
+    check(`image/${name}/refusal-is-a-teaser-route-name-not-an-accident`,
+      isDesignedTeaserRefusal(reason), `reason ${JSON.stringify(reason)}`);
+    check(`image/${name}/refusal-wrote-no-preview-file`, !existsSync(join(SCRATCH, `preview-${name}.png`)),
+      SCRATCH);
+  }
+
+  const servedDigests = new Map();
+  for (const testCase of CASES) {
+    const entry = entryFor(state, testCase.name);
+    if (entry.preview === undefined) continue;
+    const preview = previews.get(testCase.name);
+    const res = await fetchRaw(entry.preview.path);
+    check(`image/${testCase.name}/status`, res.status === 200, `status ${res.status}`);
+    check(`image/${testCase.name}/content-type`,
+      res.headers['content-type'] === 'image/png', res.headers['content-type']);
+    check(`image/${testCase.name}/no-store`,
+      res.headers['cache-control'] === 'no-store', res.headers['cache-control']);
+    const servedDigest = sha256(res.bytes);
+    servedDigests.set(testCase.name, servedDigest);
+    check(`image/${testCase.name}/digest-equals-manifest-content-digest`,
+      servedDigest === entry.preview.content_digest, `served ${servedDigest}`);
+    check(`image/${testCase.name}/digest-equals-the-artefact-the-worker-recorded`,
+      servedDigest === preview.worker_content_digest, `worker ${preview.worker_content_digest}`);
+    // The address and the file are two different things: a harness that served the *wrong* file with the
+    // right digest would be a broken manifest, and one that served the right file at the wrong address
+    // would be a card pointing at somebody else's wedding. Both halves are asserted separately.
+    check(`image/${testCase.name}/bytes-are-this-cases-own-artefact`,
+      res.bytes.equals(readFileSync(preview.file)), `${res.bytes.length} bytes`);
+    check(`image/${testCase.name}/byte-length`, res.bytes.length === entry.preview.bytes,
+      `${res.bytes.length} bytes`);
+    check(`image/${testCase.name}/is-a-png`,
+      res.bytes.subarray(0, 8).toString('hex') === PNG_SIGNATURE,
+      res.bytes.subarray(0, 8).toString('hex'));
+    const dims = imageDimensions(res.bytes, 'png');
+    check(`image/${testCase.name}/served-png-reads-back-as-the-og-box`,
+      dims.ok === true && dims.width === OG_BOX.width && dims.height === OG_BOX.height,
+      `${JSON.stringify(dims)} vs OG_BOX ${OG_BOX.width}x${OG_BOX.height} dpr ${OG_BOX.dpr}`);
+    // Which rung of the ladder this card came from, printed rather than assumed: the drop list is the
+    // product's answer about what a 630 px card leaves out, and it differs between these documents.
+    measured(`teaser ${testCase.name}`,
+      `height=${preview.measured_height_px} dropped=${JSON.stringify(preview.dropped)} `
+      + `render_config_hash=${preview.render_config_hash}`);
+  }
+  check('image/every-drawn-preview-was-fetched',
+    servedDigests.size === previews.size, `${servedDigests.size} of ${previews.size}`);
+
+  // Two documents that produce the *same* card text must still produce different pixels. `no-pack-tamil`
+  // and `no-pack-english` have the identical `og:title` and `og:description` (§A asserts both strings for
+  // both cases), so if their previews matched, the image would be a function of the harness rather than of
+  // the wedding — which is exactly what a shared stand-in file used to make unobservable.
+  const pair = ['no-pack-tamil', 'no-pack-english'];
+  const [first, second] = pair.map((name) => servedDigests.get(name));
+  check('image/different-documents-get-different-previews',
+    first !== undefined && second !== undefined && first !== second,
+    `${pair[0]} ${first} vs ${pair[1]} ${second}`);
+
+  // The converse witness, and the reason the check above is not a tautology about unique inputs: two of
+  // this tier's documents draw byte-identical teasers while their parsed documents hash differently — so
+  // a preview digest is a digest of what the surface *paints*, not of the DTO it was handed, and a field
+  // the teaser does not draw cannot move it. Measured for this pair on both probe runs that preceded the
+  // edit (`q9-logs/s9-6d-preview-render-probe.mjs`, `no-pack-tamil` and `legacy-v1` both
+  // `d0088fb2…` from `80988b7e…` and `0771c98b…` documents), which is what makes it a fact about the
+  // renderer rather than an accident of one run. §13's determinism, read from the serving side.
+  const sameBytesPair = ['no-pack-tamil', 'legacy-v1'];
+  const [sameA, sameB] = sameBytesPair.map((name) => servedDigests.get(name));
+  const [dtoA, dtoB] = sameBytesPair.map((name) => previews.get(name)?.source_dto_digest);
+  check('image/identical-teasers-are-a-drawn-document-fact-not-a-shared-file',
+    sameA !== undefined && sameA === sameB && dtoA !== undefined && dtoA !== dtoB,
+    `previews ${sameA} === ${sameB}, dto ${dtoA} vs ${dtoB}`);
+
   const missing = await fetchRaw('/previews/does-not-exist.png');
   check('image/unknown-preview-refuses', missing.status === 404, `status ${missing.status}`);
 }
@@ -447,8 +621,15 @@ async function phaseLifecycle() {
   const entry = entryFor(live, name);
   const before = await fetchRaw(`/i/${entry.token}`);
   check('lifecycle/live-address-answers', before.status === 200, `status ${before.status}`);
-  const beforeImage = await fetchRaw(entry.preview.path);
-  check('lifecycle/live-preview-answers', beforeImage.status === 200, `status ${beforeImage.status}`);
+  if (entry.preview === undefined) {
+    // Nothing to fetch: the card this case answers with has no image, so §10.2's "delete the preview
+    // object" has no object to delete. Both halves of that absence are asserted in §A and §B.
+    check('lifecycle/live-preview-answers', false, `${name} has no preview object to revoke`);
+    check('lifecycle/revoked-preview-object-refused', false, `${name} has no preview object to revoke`);
+  } else {
+    const beforeImage = await fetchRaw(entry.preview.path);
+    check('lifecycle/live-preview-answers', beforeImage.status === 200, `status ${beforeImage.status}`);
+  }
 
   writeState({ ...live, revoked: [...live.revoked, entry.token] });
   const after = await fetchRaw(`/i/${entry.token}`);
@@ -459,9 +640,11 @@ async function phaseLifecycle() {
     `${socialTags(after.text).size} social tags in a refusal body`);
   check('lifecycle/revoked-still-no-store', after.headers['cache-control'] === 'no-store',
     after.headers['cache-control']);
-  const afterImage = await fetchRaw(entry.preview.path);
-  check('lifecycle/revoked-preview-object-refused', afterImage.status === 410, `status ${afterImage.status}`,
-    'the §10.2 seam deletes the object; a refusal is the local expression of that');
+  if (entry.preview !== undefined) {
+    const afterImage = await fetchRaw(entry.preview.path);
+    check('lifecycle/revoked-preview-object-refused', afterImage.status === 410, `status ${afterImage.status}`,
+      'the §10.2 seam deletes the object; a refusal is the local expression of that');
+  }
 
   const never = await fetchRaw(`/i/${credentialFor('i', 'never-published')}`);
   check('lifecycle/unknown-address-404', never.status === 404, `status ${never.status}`);
@@ -627,8 +810,10 @@ async function phaseRecord() {
       });
     }
   }
-  check('record/attribute-values-were-hashed', rows.length === CASES.length * 6,
-    `${rows.length} values across ${CASES.length} documents × 6 tags`);
+  check('record/attribute-values-were-hashed',
+    rows.length === CASES.reduce((sum, testCase) => sum + expectedTagsFor(testCase.name).length, 0),
+    `${rows.length} values across ${CASES.length} documents, six pairs each less the image a refused `
+    + `teaser drops (${previewRefusals.size} refused)`);
   rows.forEach((row) => say(`  ${row.name} ${row.key} codepoints=${row.codepoints} sha256=${row.digest}`));
   const digests = responses.map((r) => sha256(r.bytes));
   check('record/every-response-body-hashed',
@@ -643,7 +828,11 @@ async function main() {
   say(`shell: ${SHELL}`);
   say(`scratch: ${SCRATCH}`);
   say(`harness: ${HOST_ORIGIN} answering as ${PUBLIC_ORIGIN}`);
+  say(`previews drawn from: ${PREVIEW_ORIGIN}`);
   check('cases/list-is-not-empty', CASES.length > 0, `${CASES.length} documents`);
+  await drawPreviews();
+  say(`previews: ${previews.size} drawn, ${previewRefusals.size} refused by name `
+    + `[${[...previewRefusals.entries()].map(([name, reason]) => `${name}=${reason}`).join(', ')}]`);
   await startAdapter();
   try {
     await phaseContract();
