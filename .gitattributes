@@ -17,3 +17,28 @@
 public/fonts/fonts.css text eol=lf
 public/fonts/licences/*.txt text eol=lf
 public/fonts/files/*.woff2 binary
+
+# The same defect, in the other digest this stage keeps. `render_config_hash` (§7.2's staleness query)
+# is built partly from the bytes of three source files, read straight off disk by
+# `scripts/stage9-render-worker.mjs:446-449`. Nothing pins those paths, so on this host a checkout
+# re-writes them with CRLF and the hash changes while the repository does not. Measured with
+# `node q9-logs/eol-checkout-proof.mjs` (output `q9-logs/eol-checkout-proof.txt`), which writes the
+# three paths out of the index with `git checkout-index` — the conversion a clone applies:
+#   src/render/outputGeometry.ts  worktree 15,431 bytes / 0 CR / 8106e938…  checkout 15,701 / 270 / 7237beb0…
+#   src/render/render.css          worktree  8,514 bytes / 0 CR / e0b13812…  checkout  8,652 / 138 / 940a7c53…
+#   src/index.css                  worktree  4,493 bytes / 148 CR / 09f9b317…  checkout identical
+# The first two disagree with themselves, so an artefact rendered on a Windows clone would carry a
+# different `render_config_hash` from the same committed tree rendered on a host that leaves the files
+# alone — and §13's "is this file stale?" answer would depend on the operator's git config. The third
+# is already CRLF in the worktree but LF in the index (`i/lf w/crlf`), which is the same divergence
+# seen from the other side: it is why pinning it to `eol=lf` converges every host on the LF digest
+# rather than freezing whatever this machine happens to hold.
+#
+# `docs/architecture/render-outputs.md` is read by the same worker for the browser pin but is not
+# digested into the hash, and its parser tolerates CRLF — `readBrowserPin`'s `\s*` before `$` absorbs
+# a `\r` (`q9-logs/pin-crlf-check.mjs`: lf, crlf and crlf-with-trailing-spaces all answer
+# `{"ok":true,"major":155}`). It is left alone deliberately, as are the rest of the repository's text
+# files, for the reason stated above: this is a rule for the digested set, not a line-ending policy.
+src/render/outputGeometry.ts text eol=lf
+src/render/render.css text eol=lf
+src/index.css text eol=lf
