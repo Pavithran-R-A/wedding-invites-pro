@@ -96,6 +96,11 @@ psql_q "select '  db: ' || version()"
 # wrote through a browser door, plus a kind-filtered read of `private.access_tokens`: the total above
 # cannot tell a leaked guest credential from a leaked review credential, and the two have different
 # owners, so a run that tore down the wrong kind would still have matched it.
+# Stage 9 adds the manifest row and the two buckets it points at. Both halves matter: a render run
+# that left an `invitation_outputs` row behind would move no `weddings` and no `invitation_versions`
+# count, and an artefact byte left in either bucket under a key no row names is a public object with
+# no owner. Both buckets are counted rather than just one, because which of them a given suite fills
+# is a property of the suite, and a census that guessed would be silent about the other.
 # Add a store by adding one `select` line; the comparison below reads whatever names come back.
 leak_census() {
   psql_q "select 'weddings='||count(*) from public.weddings
@@ -111,7 +116,10 @@ leak_census() {
     union all select 'invitation_versions='||count(*) from public.invitation_versions
     union all select 'guest_households='||count(*) from public.guest_households
     union all select 'household_event_scopes='||count(*) from public.household_event_scopes
-    union all select 'rsvp_responses='||count(*) from public.rsvp_responses"
+    union all select 'rsvp_responses='||count(*) from public.rsvp_responses
+    union all select 'invitation_outputs='||count(*) from public.invitation_outputs
+    union all select 'storage.objects(invitation-outputs)='||count(*) from storage.objects where bucket_id = 'invitation-outputs'
+    union all select 'storage.objects(invitation-previews)='||count(*) from storage.objects where bucket_id = 'invitation-previews'"
 }
 BASE_CENSUS=$(leak_census)
 printf '%s\n' "$BASE_CENSUS" | sed 's/^/  ..  baseline /'
