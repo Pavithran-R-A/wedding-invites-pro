@@ -1050,10 +1050,21 @@ BEGIN
 
   PERFORM pg_temp.s7b_eq('G1 `api` is exactly the host and door verbs it was measured to be at this '
     'head — thirteen at Stage 7, with Stage 7''s three added names and no fourteenth; nineteen from '
-    'Stage 8, which adds the six household-invitation verbs. Named rather than counted, because a '
-    'checker that only counts would not notice a swapped-out name',
+    'Stage 8, which adds the six household-invitation verbs; twenty-one from Stage 9, which adds the '
+    'output manifest and one frozen version''s document, both reads. Named rather than counted, '
+    'because a checker that only counts would not notice a swapped-out name',
     api_names,
-    CASE WHEN pg_temp.s7b_at_least('stage8')
+    CASE WHEN pg_temp.s7b_at_least('stage9')
+         THEN pg_temp.s7b_sorted(ARRAY['create_invitation_version', 'get_approval_requests',
+           'get_guest_invitation_state', 'get_invitation_publication_state',
+           'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',
+           'preview_invitation_document', 'publish_invitation_version',
+           'render_invitation_document',
+           'request_family_review', 'resolve_family_review',
+           'resolve_guest_invitation', 'resolve_public_invitation', 'revoke_family_review',
+           'revoke_guest_invitation', 'revoke_invitation_publication', 'rotate_guest_invitation',
+           'rotate_invitation_token', 'submit_family_review', 'submit_guest_rsvp'])
+         WHEN pg_temp.s7b_at_least('stage8')
          THEN pg_temp.s7b_sorted(ARRAY['create_invitation_version', 'get_approval_requests',
            'get_guest_invitation_state', 'get_invitation_publication_state',
            'issue_guest_invitations', 'preview_invitation', 'preview_invitation_document',
@@ -1070,13 +1081,17 @@ BEGIN
 
   PERFORM pg_temp.s7b_eq('G2 and `internal_api` holds the bodies behind them: twenty-four at Stage 7, '
     'thirteen mirrored from `api` plus the eleven cultural-authority names §7 keeps on this side; '
-    'thirty from Stage 8, whose six new bodies are all mirrors, so the eleven stay eleven',
+    'thirty from Stage 8, whose six new bodies are all mirrors, so the eleven stay eleven; thirty-two '
+    'from Stage 9, whose two are mirrors too — G3f below is the line that proves the eleven did not '
+    'move',
     cardinality(internal_names)::bigint,
-    CASE WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
+    CASE WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
+         WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
 
   PERFORM pg_temp.s7b_eq('G3 `authenticated` holds EXECUTE on the mirrored internal bodies and on the '
     'same number of `api` names — thirteen and thirteen at Stage 7, nineteen and nineteen from Stage '
-    '8 — so the eleven cultural-authority bodies are refused to a host by the absence of a grant, '
+    '8, twenty-one and twenty-one from Stage 9 — so the eleven cultural-authority bodies are refused '
+    'to a host by the absence of a grant, '
     'not by the size of the schema §7. The two halves must agree: a host granted an internal body '
     'with no wrapper would be a second, unadvertised door',
     ARRAY[(SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -1085,7 +1100,8 @@ BEGIN
           (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text]::text[],
-    CASE WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
+    CASE WHEN pg_temp.s7b_at_least('stage9') THEN ARRAY['21', '21']::text[]
+         WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
          ELSE ARRAY['13', '13']::text[] END);
 
   -- The sentence G3 cannot say, said here instead. Both schemas are visible to both client roles: an
@@ -1133,7 +1149,8 @@ BEGIN
   -- neither can be satisfied by a swapped-out body that happens to leave the arithmetic intact.
   -- The want-list here is `api_names`, the array G1 was just checked against, so this assertion
   -- follows the head automatically: thirteen against thirteen at Stage 7, nineteen against nineteen
-  -- from Stage 8, and in both cases by name rather than by count.
+  -- from Stage 8, twenty-one against twenty-one from Stage 9, and in each case by name rather than
+  -- by count.
   PERFORM pg_temp.s7b_eq('G3e the internal bodies that `authenticated` may call are not merely '
     'counted: taken by name they are exactly the published `api` wrappers'' own names, one mirror '
     'per verb and no extra body opened to a host beyond the surface it is served',
@@ -1180,7 +1197,8 @@ BEGIN
 
   PERFORM pg_temp.s7b_eq('G5 and `service_role` — the key a server integration would hold — has no '
     'path through either schema: zero EXECUTE grants across every name in both of them (thirty-seven '
-    'at the Stage 7 head, forty-nine from Stage 8), so neither the review workflow nor the guest one '
+    'at the Stage 7 head, forty-nine from Stage 8, fifty-three from Stage 9), so neither the review '
+    'workflow nor the guest one '
     'can be driven by a trusted key bypassing the caller checks §9',
     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname IN ('api','internal_api')

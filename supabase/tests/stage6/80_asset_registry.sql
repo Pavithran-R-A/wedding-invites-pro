@@ -118,6 +118,31 @@ BEGIN
   PERFORM set_config('storage.allow_delete_query', 'false', true);
 END $fn$;
 
+-- Which head is being qualified, and is it this one or later — the same two questions every suite
+-- from Stage 5 onwards asks of itself, for the reason they all give: heads are cumulative, so a
+-- chain that qualifies Stage 9 still contains everything Stage 6 added, and an equality test would
+-- hand a later chain this file's Stage 6 expectations. A malformed token refuses rather than
+-- defaulting, because a runner that cannot name the head it is qualifying must not print a green.
+-- This file needs the machinery for one line of its census, B1/D6's bucket inventory, which Stage 9
+-- moves from one bucket to three.
+CREATE FUNCTION pg_temp.s6r_head() RETURNS text
+LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(current_setting('app.stage_head', true), 'stage6') $fn$;
+
+CREATE FUNCTION pg_temp.s6r_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.s6r_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 's6r_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.s6r_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.s6r_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$fn$;
+
 -- --------------------------------------------------------------------------- the cast
 -- Two host accounts and their weddings: one is the actor, one is the stranger. A third wedding
 -- belongs to the stranger and is the target of the "upload into someone else's prefix" shape.
@@ -148,8 +173,21 @@ BEGIN
   PERFORM pg_temp.s6r_ok('B0 the bucket the migration declares is here — a guard that silently '
     'skipped it would print every assertion below as a pass on an empty schema',
     found);
-  PERFORM pg_temp.s6r_eq('B1 §4: exactly one bucket for the whole product',
-    (SELECT count(*) FROM storage.buckets), 1::bigint);
+  -- §4's "one bucket for the whole product" was true of the product Stage 6 shipped, and Stage 9
+  -- is the first stage to add to it: the render artefacts get a bucket of their own, and the
+  -- published-preview bucket is created closed with nothing readable in it. The census is therefore
+  -- stated as the inventory *by name* at both heads rather than as a number, because a number can be
+  -- raised by whatever a later stage forgets to declare; a fourth id fails this line by appearing in
+  -- the list. Stage 6's own bucket keeps every property below.
+  PERFORM pg_temp.s6r_eq('B1 §4: the bucket inventory is '
+    || CASE WHEN pg_temp.s6r_at_least('stage9')
+              THEN 'exactly these three — the wedding-asset bucket §4 declares, Stage 9''s render '
+                   || 'outputs, and Stage 9''s published-preview bucket, which is created closed'
+            ELSE 'exactly one, the wedding-asset bucket §4 declares' END,
+    (SELECT coalesce(string_agg(b.id, ', ' ORDER BY b.id), '(none)') FROM storage.buckets b),
+    CASE WHEN pg_temp.s6r_at_least('stage9')
+         THEN 'invitation-outputs, invitation-previews, wedding-assets'
+         ELSE 'wedding-assets' END);
   PERFORM pg_temp.s6r_eq('B2 §4: it is private, so I8 has something to stand on',
     bucket_row.public, false);
   PERFORM pg_temp.s6r_eq('B3 §4: the recorded byte ceiling is 5 MiB',
@@ -193,17 +231,38 @@ BEGIN
     = ARRAY['set_updated_at','wedding_assets_guard_delete','wedding_assets_guard_update',
             'wedding_assets_mint_object_key']::text[]);
 
-  PERFORM pg_temp.s6r_eq('B9 §5: the policy set on storage.objects is read, insert, delete — and no '
+  -- §5's claim is about the *kinds* of statement a policy admits to: read, insert, delete, and no
+  -- UPDATE — which is what makes A7 a refusal rather than a convention. Stage 9 adds a second read
+  -- policy, for its own bucket, so the multiset of command letters is no longer a statement of that
+  -- claim (two `r` rows would have to be explained by a count). The distinct set still is, and B9b
+  -- names the policies themselves, which is what stops a third read policy, an update policy or a
+  -- renamed one from arriving as a number that happens to fit.
+  PERFORM pg_temp.s6r_eq('B9 §5: the policy kinds on storage.objects are read, insert, delete — and no '
     'UPDATE, which is what makes A7 a refusal instead of a convention',
-    (SELECT array_agg(pol.polcmd::text ORDER BY pol.polcmd::text) FROM pg_policy pol
+    (SELECT array_agg(DISTINCT pol.polcmd::text ORDER BY pol.polcmd::text) FROM pg_policy pol
       WHERE pol.polrelid = 'storage.objects'::regclass),
     ARRAY['a','d','r']::text[]);
+  PERFORM pg_temp.s6r_eq('B9b and the policies on that table are '
+    || CASE WHEN pg_temp.s6r_at_least('stage9')
+              THEN 'exactly these four — Stage 6''s read, upload and tombstone-delete for the asset '
+                   || 'bucket, plus Stage 9''s read for the output bucket; no insert, update or '
+                   || 'delete policy reaches a render artefact'
+            ELSE 'exactly these three, one read, one insert and one delete, all of them Stage 6''s' END,
+    (SELECT coalesce(string_agg(pol.polname, ', ' ORDER BY pol.polname COLLATE "C"), '(none)')
+       FROM pg_policy pol WHERE pol.polrelid = 'storage.objects'::regclass),
+    CASE WHEN pg_temp.s6r_at_least('stage9')
+         THEN 'wedding_members_read_asset_objects, wedding_members_read_output_objects, '
+              || 'wedding_members_remove_tombstoned_asset_objects, '
+              || 'wedding_members_upload_staged_asset_objects'
+         ELSE 'wedding_members_read_asset_objects, '
+              || 'wedding_members_remove_tombstoned_asset_objects, '
+              || 'wedding_members_upload_staged_asset_objects' END);
   PERFORM pg_temp.s6r_eq('B10 every one of those policies is PERMISSIVE and aimed at authenticated '
     'alone, which is what Stage 2 C18/C19 require of a policy in any schema',
     (SELECT count(*) FROM pg_policy pol WHERE pol.polrelid = 'storage.objects'::regclass
        AND pol.polpermissive
        AND ARRAY(SELECT r::regrole::text FROM unnest(pol.polroles) r) = ARRAY['authenticated']),
-    3::bigint);
+    CASE WHEN pg_temp.s6r_at_least('stage9') THEN 4::bigint ELSE 3::bigint END);
 
   PERFORM pg_temp.s6r_ok('B11 the storage helpers the policies call are executable by '
     'authenticated — measured here rather than assumed, because an inert helper turns a policy into '
@@ -719,10 +778,15 @@ BEGIN
 
   -- The bucket that only existed to prove S4 must not survive into the next file's counts.
   PERFORM pg_temp.s6r_service_remove_bucket('s6-other-bucket');
-  PERFORM pg_temp.s6r_eq('D6 the probe bucket and its object are gone, and the wedding bucket is '
-    'still the only bucket — note that both DELETEs above ran with the flag the Storage API sets, '
-    'because D0 measured that the same statement is refused without it even for this role',
-    (SELECT count(*) FROM storage.buckets), 1::bigint);
+  PERFORM pg_temp.s6r_eq('D6 the probe bucket and its object are gone and the inventory is the '
+    'declared one again — the same list B1 printed before this file created anything, so a fixture '
+    'bucket leaving residue is a failing line here rather than a number that happens to match '
+    '(note that both DELETEs above ran with the flag the Storage API sets, '
+    'because D0 measured that the same statement is refused without it even for this role)',
+    (SELECT coalesce(string_agg(b.id, ', ' ORDER BY b.id), '(none)') FROM storage.buckets b),
+    CASE WHEN pg_temp.s6r_at_least('stage9')
+         THEN 'invitation-outputs, invitation-previews, wedding-assets'
+         ELSE 'wedding-assets' END);
 END $D$;
 
 -- --------------------------------------------------------------------------- L: the floor
@@ -735,8 +799,8 @@ DO $L$
 DECLARE ran int;
 BEGIN
   ran := coalesce(nullif(current_setting('s6r.passed', true), '')::int, 0);
-  IF ran < 89 THEN
-    RAISE EXCEPTION 'FAIL: only % Stage 6 registry assertions ran — the measured floor is 89', ran;
+  IF ran < 90 THEN
+    RAISE EXCEPTION 'FAIL: only % Stage 6 registry assertions ran — the measured floor is 90', ran;
   END IF;
   PERFORM pg_temp.s6r_ok('L1 the counter, the fixtures and the floor all moved together ('
     || ran || ' assertions)', true);
