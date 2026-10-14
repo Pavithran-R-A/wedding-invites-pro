@@ -803,10 +803,13 @@ describe('§23 BROWSER WRITE SECURITY', () => {
     // (`get_guest_invitation_state`, `issue_guest_invitations`, `revoke_guest_invitation`,
     // `rotate_guest_invitation` for the host; `resolve_guest_invitation`, `submit_guest_rsvp` for the
     // guest), and it is the same rule again, because a guest door is still a body the wrapper's
-    // caller has to be able to name. Which of the nineteen anon may also reach is the other half: the
+    // caller has to be able to name. Stage 9 put the last two on it — `list_invitation_outputs` and
+    // `render_invitation_document`, both host reads, both granted to `authenticated` and to no
+    // anonymous caller — measured from `q9-logs/s9-http-census-readout-02.txt` rather than predicted.
+    // Which of the twenty-one anon may also reach is the other half: the
     // five header-credential doors, three of which take no argument at all, are pinned per name in
     // `stage3_publication.test.mjs` §6.6, so this case pins only the half that is common to all
-    // nineteen.
+    // twenty-one.
     const direct = sqlRows(`select n.nspname || '.' || p.proname from pg_proc p
                               join pg_namespace n on n.oid = p.pronamespace
                              where n.nspname = 'internal_api'
@@ -815,8 +818,10 @@ describe('§23 BROWSER WRITE SECURITY', () => {
     assert.deepEqual(direct, ['internal_api.create_invitation_version',
       'internal_api.get_approval_requests', 'internal_api.get_guest_invitation_state',
       'internal_api.get_invitation_publication_state', 'internal_api.issue_guest_invitations',
+      'internal_api.list_invitation_outputs',
       'internal_api.preview_invitation', 'internal_api.preview_invitation_document',
-      'internal_api.publish_invitation_version', 'internal_api.request_family_review',
+      'internal_api.publish_invitation_version', 'internal_api.render_invitation_document',
+      'internal_api.request_family_review',
       'internal_api.resolve_family_review', 'internal_api.resolve_guest_invitation',
       'internal_api.resolve_public_invitation', 'internal_api.revoke_family_review',
       'internal_api.revoke_guest_invitation', 'internal_api.revoke_invitation_publication',

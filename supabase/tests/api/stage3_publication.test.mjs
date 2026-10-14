@@ -1057,8 +1057,8 @@ describe('§6.5 taking a link down', () => {
 // `api`, which PostgREST serves and which now holds only one-line SECURITY INVOKER
 // wrappers, and `internal_api`, which it does not serve and which holds the privileged
 // SECURITY DEFINER bodies those wrappers name. Asserting them in one pass is what makes
-// the split a fact rather than a claim: the same nineteen names, in two postures, with the
-// same nineteen caller sets.
+// the split a fact rather than a claim: the same twenty-one names, in two postures, with the
+// same twenty-one caller sets.
 describe('§6.6 the callable catalogue is closed', () => {
   /** `grantees` lists the roles this build intends to reach the function. The owner is
    *  always allowed and is not a caller; nothing else may appear. */
@@ -1084,7 +1084,7 @@ describe('§6.6 the callable catalogue is closed', () => {
     // asking who has been invited is a third caller class again. Signatures and grantees for the
     // five below are read from `q7-logs/s7-census-readout-03.log`, which is a census of the whole
     // published chain applied through the Stage 7 head — not from the migration's intent. What
-    // this map proves over HTTP is that all nineteen names sit in the same two postures behind the
+    // this map proves over HTTP is that all twenty-one names sit in the same two postures behind the
     // transport, with `service_role` on none of them.
     ['get_approval_requests', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
     ['request_family_review', {
@@ -1125,6 +1125,15 @@ describe('§6.6 the callable catalogue is closed', () => {
     ['revoke_guest_invitation', { args: 'p_household_id uuid', grantees: ['authenticated'] }],
     ['rotate_guest_invitation', { args: 'p_household_id uuid', grantees: ['authenticated'] }],
     ['submit_guest_rsvp', { args: 'p_answers jsonb', grantees: ['anon', 'authenticated'] }],
+    // Stage 9's two render reads. Both are host reads keyed by an id the caller's own JWT already
+    // bounds — the manifest by the wedding, the document by the frozen version a render worker is
+    // told about — and neither is anonymous, because an output row's existence is not public information
+    // even when its bytes are. The signatures and caller sets below are read from
+    // `q9-logs/s9-http-census-readout-01.txt`, a census of the published chain applied through the
+    // Stage 9 head on the throwaway Postgres, taken with this file's own `readSurface` query; the HTTP
+    // run at this head is what re-confirms them against the deployed stack.
+    ['list_invitation_outputs', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['render_invitation_document', { args: 'p_version_id uuid', grantees: ['authenticated'] }],
   ]);
 
   // The maintenance surface Stage 5 added, named here rather than left to be discovered: the
@@ -1356,10 +1365,10 @@ describe('§6.6 the callable catalogue is closed', () => {
     // executable by a browser role. A leftover in `public` would be reachable through the
     // default profile without anybody changing a setting, and API05 only proves three
     // particular names are gone. `internal_api` is excluded from this scan on purpose:
-    // the nineteen bodies that have a wrapper beside them *are* browser-callable, by
+    // the twenty-one bodies that have a wrapper beside them *are* browser-callable, by
     // necessity — PostgreSQL checks a nested call as the invoking role, so a wrapper's
     // caller must also hold EXECUTE on the body beside it. API33 is what keeps that
-    // necessary grant to exactly those nineteen paired names, API38 is what proves the
+    // necessary grant to exactly those twenty-one paired names, API38 is what proves the
     // eleven maintenance bodies behind them are granted to nobody but the owner, and
     // `stage3_security.test.mjs` is what measures that none of it is reachable as an HTTP
     // profile.

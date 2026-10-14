@@ -613,8 +613,10 @@ describe('§17 CATALOGUE', () => {
                                where routine_schema = 'api' order by 1`).join(',');
     assert.deepEqual(exposed.split(','), [
       'create_invitation_version', 'get_approval_requests', 'get_guest_invitation_state',
-      'get_invitation_publication_state', 'issue_guest_invitations', 'preview_invitation',
-      'preview_invitation_document', 'publish_invitation_version', 'request_family_review',
+      'get_invitation_publication_state', 'issue_guest_invitations', 'list_invitation_outputs',
+      'preview_invitation',
+      'preview_invitation_document', 'publish_invitation_version', 'render_invitation_document',
+      'request_family_review',
       'resolve_family_review', 'resolve_guest_invitation', 'resolve_public_invitation',
       'revoke_family_review', 'revoke_guest_invitation', 'revoke_invitation_publication',
       'rotate_guest_invitation', 'rotate_invitation_token',
@@ -637,7 +639,8 @@ describe('§17 CATALOGUE', () => {
     // schema, and why `stage3_publication.test.mjs` puts only the first three in its anonymous-refusal
     // matrix. None of the five takes a pack key, a release id or a selection reference: the fifth
     // assertion below is the one that would notice if one ever did, and the SQL tier's own catalogue
-    // tripwire pins the same nineteen names (`supabase/tests/stage2/40_catalog.sql`). Their behaviour
+    // tripwire pins the same twenty-one names at this head (`supabase/tests/stage2/40_catalog.sql`).
+    // Their behaviour
     // at the transport is qualified in `supabase/tests/api/stage7_family_approval.test.mjs`.
     //
     // Stage 8 added the last six, under that stage's own design note. Two host verbs are keyed by the
@@ -648,6 +651,20 @@ describe('§17 CATALOGUE', () => {
     // `:840`), exactly as Stage 7's reviewer pair reads `x-review-token`. None of the six takes a pack
     // key, a release id or a selection reference either. Their behaviour at the transport is qualified
     // in `supabase/tests/api/stage8_guest_rsvp.test.mjs`.
+    //
+    // Stage 9 adds the last two, under §7.3 of its own design note, and they are the smallest kind of
+    // addition this list has seen: two host reads, no writer. `list_invitation_outputs(p_wedding_id)`
+    // is keyed by the caller's wedding and `render_invitation_document(p_version_id)` by one frozen
+    // version, both reject a non-member with `insufficient_privilege` rather than with a
+    // `{"available": false}` constant — a deviation from §7.3 that is recorded as-built, because an
+    // existence oracle over a uuid the caller picked is the one thing a constant would have smuggled
+    // in — and neither takes a pack key, a release id or a selection reference. What the manifest read
+    // leaves out is the point a catalogue line cannot show and the migration states at
+    // `20261013120000_stage9_render_outputs.sql`: no `object_key`, no `target_url_digest`, no
+    // `wedding_id` in any element, because a path is not a delivery mechanism and a digest of a live
+    // credential's target is not a panel's business. This line therefore says only that the two names
+    // exist and are host reads; their behaviour at the transport is Stage 9's own suite's job, and
+    // until that file exists this pin is the whole of the HTTP-side claim about them.
     const maintenanceSchema = sqlRows(`select coalesce(string_agg(distinct n.nspname, ',' order by n.nspname), '(none)')
                                          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                                         where p.proname like '%tradition_pack%'`);
