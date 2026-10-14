@@ -84,6 +84,67 @@ export const isPaperVariant = (value: unknown): value is PaperVariant =>
  *  default (0.39 in on every side, plus a header and footer the product never asked for). */
 export const PDF_MARGIN_IN = 0.5;
 
+/** The CDP parameter set one paper variant is printed with, and the reason each field is explicit.
+ *
+ *  Measured on Chrome 155.0.8059.40 with no device-metrics override (`q9-logs/pdf-controls.mjs`,
+ *  `q9-logs/pdf-controls2.mjs`; evidence `q9-logs/pdf-controls-measured.txt`,
+ *  `q9-logs/pdf-controls2-measured.txt`), against the question `render.css:19-27` refuses to assume:
+ *  the parameters decide the sheet. An injected `@page { size: 300mm 200mm; margin: 1in }` changed
+ *  nothing in the produced file, and `preferCSSPageSize: true` with no `@page` present produced the
+ *  same bytes as `false`, so there is exactly one source of paper geometry in this pipeline and it is
+ *  this object plus `PDF_MEDIA_BOX_PT`. `render.css` therefore stays without an `@page` block — a
+ *  second opinion about the same sheet that measurement says would not even be heard.
+ *
+ *  `generateTaggedPDF` is passed rather than inherited. Chromium 155 answers a print with a
+ *  `StructTreeRoot` even when the flag is omitted (measured: `/StructTreeRoot` present in the default
+ *  call), which is exactly the kind of inherited behaviour §6.4 exists to catch: a browser that later
+ *  flips its default would silently stop shipping §5's tagged file. Stating it makes the requirement a
+ *  request the browser receives, which is the only form in which this file can express it.
+ *
+ *  `preferCSSPageSize: false` is the honest half of the same finding — the pipeline does not let a
+ *  stylesheet decide the paper, so a CSS change cannot move a sheet size without moving this file. */
+export function pdfPrintParams(variant: PaperVariant) {
+  const paper = PAPERS[variant];
+  return {
+    paperWidth: paper.widthIn,
+    paperHeight: paper.heightIn,
+    marginTop: PDF_MARGIN_IN,
+    marginBottom: PDF_MARGIN_IN,
+    marginLeft: PDF_MARGIN_IN,
+    marginRight: PDF_MARGIN_IN,
+    printBackground: true,
+    preferCSSPageSize: false,
+    generateTaggedPDF: true,
+  } as const;
+}
+
+/** The `/MediaBox` this browser writes for `pdfPrintParams(variant)`, in points.
+ *
+ *  An expectation rather than a derivation, because the two papers do not come out the same way.
+ *  US Letter is exact: 8.5 × 11 in → 612 × 792 pt → 215.9 × 279.4 mm. A4 is not: both 8.27 in and the
+ *  exact 210/25.4 in produce **595.91998 × 841.91998 pt**, which is 210.227 × 297.011 mm — 0.227 mm
+ *  wider than the nominal sheet, and the same sheet Chromium's own print dialog reports for A4. Two
+ *  inputs collapsing to one output is a quantisation inside Skia's print pipeline that this repository
+ *  does not own and cannot derive, so it is recorded as measured and asserted as a constant.
+ *
+ *  A produced file has to answer to this number: a print that comes back with a different box is a
+ *  different sheet than a manifest row would describe, which is why the delta is stated here — in the
+ *  unit a print shop reads — rather than absorbed silently or re-derived from the paper's nominal size.
+ *  The guard that refuses a mismatch belongs to the print path, not to this file, and this file is the
+ *  single place it reads the expectation from. */
+export const PDF_MEDIA_BOX_PT: Record<PaperVariant, { width: number; height: number }> = {
+  a4: { width: 595.91998, height: 841.91998 },
+  letter: { width: 612, height: 792 },
+};
+
+/** The same two boxes in millimetres, with the delta from `PAPERS` beside them — the numbers a print
+ *  shop reads, kept so a reader of this file does not have to redo the pt→mm conversion to find out how
+ *  far the produced sheet is from the nominal one. */
+export const PDF_MEDIA_BOX_MM: Record<PaperVariant, { width: number; height: number; deltaWidthMm: number; deltaHeightMm: number }> = {
+  a4: { width: 210.227, height: 297.011, deltaWidthMm: 0.227, deltaHeightMm: 0.011 },
+  letter: { width: 215.9, height: 279.4, deltaWidthMm: 0, deltaHeightMm: 0 },
+};
+
 /**
  * The teaser's fit ladder.
  *

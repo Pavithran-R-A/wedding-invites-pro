@@ -21,10 +21,13 @@ import {
   OG_FIT,
   PAPERS,
   PDF_MARGIN_IN,
+  PDF_MEDIA_BOX_MM,
+  PDF_MEDIA_BOX_PT,
   SHARE_HEIGHTS,
   SHARE_WIDTH,
   chooseShareBox,
   isPaperVariant,
+  pdfPrintParams,
   planOgFit,
   type OgFitPlan,
 } from '@/render/outputGeometry';
@@ -99,6 +102,94 @@ describe('the papers', () => {
 
   it('states its margin rather than leaving it to Chromium', () => {
     expect(PDF_MARGIN_IN).toBe(0.5);
+  });
+});
+
+describe('the print parameter set', () => {
+  // `PDF_MEDIA_BOX_PT` is the only number in this file that came from a browser rather than from a
+  // product decision, and these tests do not re-measure it. They check that the table is *internally*
+  // true — that one sheet in points and the same sheet in millimetres are the same sheet — and that the
+  // delta from the nominal paper is the delta the probe found. Confirming it against a live Chromium is
+  // the raster tier's `pdf-box-*` assertions; this file is what makes a changed expectation visible
+  // without a browser open.
+  const ptToMm = (points: number) => (points * 25.4) / 72;
+
+  it('asks for every field by name, so a Chromium default cannot decide the sheet', () => {
+    // The set is pinned as a key list, not just a value check, because the dangerous addition is a
+    // `scale` or a `pageRanges` arriving unnoticed: either one would change what a page of the
+    // document *is* while still writing a valid file under the same name.
+    const expectedKeys = [
+      'marginBottom', 'marginLeft', 'marginRight', 'marginTop',
+      'generateTaggedPDF', 'paperHeight', 'paperWidth', 'preferCSSPageSize', 'printBackground',
+    ].sort();
+    for (const variant of ['a4', 'letter'] as const) {
+      expect(Object.keys(pdfPrintParams(variant)).sort()).toEqual(expectedKeys);
+    }
+  });
+
+  it('prints the paper `PAPERS` declares, in the unit CDP takes', () => {
+    expect(pdfPrintParams('a4')).toMatchObject({
+      paperWidth: PAPERS.a4.widthIn,
+      paperHeight: PAPERS.a4.heightIn,
+    });
+    expect(pdfPrintParams('letter')).toMatchObject({
+      paperWidth: PAPERS.letter.widthIn,
+      paperHeight: PAPERS.letter.heightIn,
+    });
+  });
+
+  it('keeps the margin on all four sides and identical across papers', () => {
+    for (const variant of ['a4', 'letter'] as const) {
+      const params = pdfPrintParams(variant);
+      expect([params.marginTop, params.marginBottom, params.marginLeft, params.marginRight])
+        .toEqual([PDF_MARGIN_IN, PDF_MARGIN_IN, PDF_MARGIN_IN, PDF_MARGIN_IN]);
+    }
+    // Choosing a paper must not be a way to choose a margin.
+    const sides = (p: ReturnType<typeof pdfPrintParams>) =>
+      [p.marginTop, p.marginBottom, p.marginLeft, p.marginRight];
+    expect(sides(pdfPrintParams('a4'))).toEqual(sides(pdfPrintParams('letter')));
+  });
+
+  it('states the two flags the probe measured as inherited or inert', () => {
+    // `generateTaggedPDF` because Chromium 155 tags a print even when the flag is absent, and a flipped
+    // upstream default would otherwise silently stop shipping §5's tagged file; `preferCSSPageSize: false`
+    // because an injected `@page` was measured as not heard at all, so the stylesheet is not a second
+    // source of paper geometry in this pipeline.
+    for (const variant of ['a4', 'letter'] as const) {
+      expect(pdfPrintParams(variant)).toMatchObject({
+        generateTaggedPDF: true,
+        preferCSSPageSize: false,
+        printBackground: true,
+      });
+    }
+  });
+
+  it('is a pure function of the variant', () => {
+    expect(pdfPrintParams('a4')).toEqual(pdfPrintParams('a4'));
+  });
+
+  it('keeps the point table and the millimetre table the same sheet', () => {
+    // Three decimals in the millimetre table against the exact conversion is the measured rounding, so
+    // the check is at that precision — a looser one would let a wrong box through, a tighter one would
+    // fail on the rounding the probe itself reported.
+    for (const variant of ['a4', 'letter'] as const) {
+      expect(ptToMm(PDF_MEDIA_BOX_PT[variant].width)).toBeCloseTo(PDF_MEDIA_BOX_MM[variant].width, 3);
+      expect(ptToMm(PDF_MEDIA_BOX_PT[variant].height)).toBeCloseTo(PDF_MEDIA_BOX_MM[variant].height, 3);
+    }
+  });
+
+  it('discloses A4\'s quantisation instead of deriving around it', () => {
+    // Both 8.27 in and the exact 210/25.4 in produce 595.91998 pt on this browser, which is why the
+    // delta is a recorded number rather than something this file can compute from `PAPERS`.
+    expect(PDF_MEDIA_BOX_MM.a4.deltaWidthMm).toBeGreaterThan(0);
+    expect(ptToMm(PDF_MEDIA_BOX_PT.a4.width) - PAPERS.a4.widthMm)
+      .toBeCloseTo(PDF_MEDIA_BOX_MM.a4.deltaWidthMm, 3);
+    expect(ptToMm(PDF_MEDIA_BOX_PT.a4.height) - PAPERS.a4.heightMm)
+      .toBeCloseTo(PDF_MEDIA_BOX_MM.a4.deltaHeightMm, 3);
+    expect(PDF_MEDIA_BOX_MM.letter.deltaWidthMm).toBe(0);
+    expect(PDF_MEDIA_BOX_MM.letter.deltaHeightMm).toBe(0);
+    expect(ptToMm(PDF_MEDIA_BOX_PT.letter.width)).toBeCloseTo(PAPERS.letter.widthMm, 6);
+    expect(ptToMm(PDF_MEDIA_BOX_PT.letter.height)).toBeCloseTo(PAPERS.letter.heightMm, 6);
   });
 });
 

@@ -16,12 +16,15 @@
  * worker that has one.
  *
  * Deliberately absent, with the reason:
- *   * No `@page`. §5 gives A4 and US Letter as the PDF boxes, but whether the paper size wins from
- *     `Page.printToPDF`'s own `paperWidth`/`paperHeight` or from an `@page` block (and what
- *     `preferCSSPageSize` then does to the margin boxes) is a Chromium behaviour to be measured in
- *     S9-6, not assumed here. Writing an `@page` rule before that measurement would put a second,
- *     unverified source of geometry into the pipeline — the exact thing §13's reproducibility
- *     ladder exists to catch.
+ *   * No `@page`. §5 gives A4 and US Letter as the PDF boxes, and which of `Page.printToPDF`'s own
+ *     `paperWidth`/`paperHeight` and an `@page` block wins — and what `preferCSSPageSize` then does to
+ *     the margin boxes — was measured rather than assumed (`q9-logs/pdf-controls-measured.txt`,
+ *     `q9-logs/pdf-controls2-measured.txt`): an injected `@page { size: 300mm 200mm; margin: 1in }`
+ *     changed nothing in the produced file, and `preferCSSPageSize: true` with no `@page` present
+ *     produced byte-identical output to `false`. The parameters are the only source of paper geometry
+ *     in this pipeline, so they live in `pdfPrintParams()` in `src/render/outputGeometry.ts` — and a
+ *     second opinion about the same sheet would be the exact thing §13's reproducibility ladder exists
+ *     to catch.
  *   * No fixed pixel heights. The capture box comes from `Emulation.setDeviceMetricsOverride`; a
  *     height here would be a second opinion about the same page.
  *   * No `overflow: hidden`. A canvas that clips silently loses a ceremony while the manifest still
@@ -85,6 +88,16 @@ body {
    image it reads as a broken button in a printed photograph. The renderer still prints it — hiding
    it is this file's job, not the component's (test 7 of
    `src/test/invitationRenderSurfaces.test.tsx` is what keeps that division honest).
+
+   `pdf` is deliberately NOT in this list, and it was added and then taken back out on the strength of
+   a measurement rather than a hunch: `Page.printToPDF` gives the anchor a real link annotation — the
+   produced file carries `/Annots` with `/S /URI` whose value is the venue's own `map_url`
+   (`q9-logs/pdf-controls.mjs`, `q9-logs/pdf-probe/c2-a4.pdf`, which reads
+   `/URI (https://maps.example/sri-kanchi-mahal)`). On paper the box is inert; in the file a guest
+   forwards by WhatsApp it is the only route to the map, and hiding it here would remove a working
+   affordance to improve a printed appearance. That trade is a visual-review question, not a defect,
+   so it is recorded for the human pass (H-3) instead of decided in a stylesheet. The annotation is
+   also a second place a URL can land in a delivered file, beside the text the page already paints.
 
    The paragraph is the selector rather than the anchor because the anchor is the paragraph: leaving
    an empty `pt-1` block behind would put a gap where a button used to be. `h2`/`p` element names are
