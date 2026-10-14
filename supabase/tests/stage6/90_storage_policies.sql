@@ -324,21 +324,38 @@ BEGIN
   -- Battery 1 measures the policy *shape*; this file depends on the shape still being there, so the
   -- census is re-taken here. Without it, a later migration that dropped the read policy would turn
   -- every "stranger sees zero rows" assertion in R into a pass.
-  PERFORM pg_temp.s6p_eq('P1 exactly three policies exist on storage.objects for the product''s own '
-    'commands, and they are read, insert and delete',
-    (SELECT ARRAY_AGG(DISTINCT cmd ORDER BY cmd) FROM pg_policies
+  PERFORM pg_temp.s6p_eq('P1 the wedding-assets bucket has exactly three policies, and they are read, '
+    'insert and delete',
+    (SELECT ARRAY_AGG(policyname::text ORDER BY policyname) FROM pg_policies
       WHERE schemaname = 'storage' AND tablename = 'objects'
-        AND policyname LIKE 'wedding_members_%'),
-    ARRAY['DELETE','INSERT','SELECT']::text[]);
+        AND (coalesce(qual, '') LIKE '%wedding-assets%'
+             OR coalesce(with_check, '') LIKE '%wedding-assets%')),
+    ARRAY['wedding_members_read_asset_objects',
+          'wedding_members_remove_tombstoned_asset_objects',
+          'wedding_members_upload_staged_asset_objects']::text[]);
+  -- Scoped by bucket and pinned by name, not counted. `pg_policies` has no bucket column — a bucket
+  -- only ever appears inside a policy expression, and for the INSERT policy that expression is
+  -- `with_check` rather than `qual`, so both are searched. The old line counted every policy on
+  -- `storage.objects` under a label saying "the product's own", and when Stage 9 added
+  -- `wedding_members_read_output_objects` for `invitation-outputs` the population it measured and the
+  -- claim it printed had silently come apart. Naming the three is also what makes a swapped-out name a
+  -- finding rather than a re-count. The `::text` is load-bearing: `pg_policies.policyname` is `name`,
+  -- and `s6p_eq`'s two `anyelement` arguments cannot unify a `name[]` with the `text[]` expectation.
+  --
+  -- P2 and P3 deliberately keep the wider net (`wedding_members_%` across every bucket): an UPDATE
+  -- policy on a later bucket would break A7's reasoning just as surely as one here would, and a policy
+  -- written for `anon` anywhere on `storage.objects` would make R's anonymous refusals permissions.
+  -- Stage 9's SELECT policy is inside both, and passes both.
   -- `pg_policies` folds a `FOR ALL` policy into cmd = 'ALL', so both spellings of "this policy would
   -- let an UPDATE through" have to be counted; P1's exact census already implies it, and this names
   -- the absence the A7 claim rests on rather than leaving it to be inferred from that census.
-  PERFORM pg_temp.s6p_eq('P2 none of them is a FOR UPDATE policy — A7 rests on this absence, so it is '
-    'asserted here and not assumed',
+  PERFORM pg_temp.s6p_eq('P2 no product policy on storage.objects, whichever bucket it serves, is a '
+    'FOR UPDATE policy — A7 rests on this absence, so it is asserted here and not assumed',
     (SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects'
       AND cmd IN ('UPDATE', 'ALL') AND policyname LIKE 'wedding_members_%'), 0::bigint);
-  PERFORM pg_temp.s6p_eq('P3 all three target `authenticated` alone — no policy is written for anon, '
-    'which is what makes the anonymous answers in R an absence rather than a permission',
+  PERFORM pg_temp.s6p_eq('P3 every product policy on storage.objects targets `authenticated` alone — '
+    'none is written for anon, whichever bucket it serves, which is what makes the anonymous answers '
+    'in R an absence rather than a permission',
     (SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects'
       AND policyname LIKE 'wedding_members_%'
       AND roles IS DISTINCT FROM ARRAY['authenticated']::name[]), 0::bigint);

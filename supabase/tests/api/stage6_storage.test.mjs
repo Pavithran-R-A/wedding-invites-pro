@@ -1038,11 +1038,26 @@ describe('S6 METADATA', () => {
   test('A11b the tables and the policies do exist, so every refusal above is about reachability, not absence', async () => {
     assert.equal(sqlRows(`select to_regclass('storage.objects')::text`)[0], 'storage.objects');
     assert.equal(sqlRows(`select to_regclass('storage.buckets')::text`)[0], 'storage.buckets');
-    const policies = sqlRows(`select policyname from pg_policies where schemaname = 'storage'
-                              and tablename = 'objects' order by policyname`);
-    assert.equal(policies.length, 3,
-      `the Stage 6 bucket has ${policies.length} storage.objects policies, the design says three: ${policies}`);
-    // No UPDATE policy is the whole of the overwrite refusal, so its absence is asserted as a fact.
+    // Stage 6's own three, scoped to Stage 6's own bucket. A bucket only ever appears inside a policy's
+    // expression — `pg_policies` has no bucket column — and for the INSERT policy that expression is
+    // `with_check` rather than `qual`, so both are searched. The scope is not decoration: this line
+    // counted every `storage.objects` policy while its message said "the Stage 6 bucket", and when
+    // Stage 9 added `wedding_members_read_output_objects` for `invitation-outputs` it reported four and
+    // called them Stage 6's. Named rather than counted, because a checker that only counts would not
+    // notice a swapped-out name.
+    const assetPolicies = sqlRows(`select policyname from pg_policies where schemaname = 'storage'
+                                    and tablename = 'objects'
+                                    and (coalesce(qual, '') like '%wedding-assets%'
+                                      or coalesce(with_check, '') like '%wedding-assets%')
+                                    order by policyname`);
+    assert.deepEqual(assetPolicies, [
+      'wedding_members_read_asset_objects',
+      'wedding_members_remove_tombstoned_asset_objects',
+      'wedding_members_upload_staged_asset_objects',
+    ], `the wedding-assets bucket has ${assetPolicies.length} policies, the design says three: ${assetPolicies}`);
+    // No UPDATE policy is the whole of the overwrite refusal, so its absence is asserted as a fact —
+    // and it is asserted over every product policy, whichever bucket it serves, because that is the
+    // stronger claim and the one A7 actually rests on.
     const updatePolicies = sqlRows(`select count(*)::text from pg_policies where schemaname = 'storage'
                                     and tablename = 'objects' and cmd = 'UPDATE'`)[0];
     assert.equal(updatePolicies, '0',
