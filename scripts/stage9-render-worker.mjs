@@ -23,9 +23,15 @@
 //     guest page and the harness go through (§11.1), and it is consulted here *before* the request is
 //     mounted, so the worker cannot be used to print bytes the product has already refused to draw.
 //   * **Content that does not fit.** A teaser that still overflows after the ladder is
-//     `teaser-does-not-fit`, and share content taller than the last quantised box is `paginate`. Neither
-//     produces a file: §5 makes "never cropped" and "never a complete document" two different promises,
-//     and both are kept by refusing to hand over the wrong artefact rather than handing it over quietly.
+//     `teaser-does-not-fit`. Share content taller than the last quantised box becomes a *set* of
+//     `1080x2160` pages (§5: "continues onto a second page of the same set … Never cropped"), and only
+//     when the cut can be made honestly: past four pages it is `too-many-pages`, and a single ceremony
+//     taller than a page is `unbreakable-content`. Neither produces a file — §5 makes "never cropped"
+//     and "never a complete document" two different promises, and both are kept by refusing to hand over
+//     the wrong artefact rather than handing it over quietly. A set that stops partway also deletes the
+//     pages it already wrote, so no orphan sheet can outlive its refusal; the tier drives that loop only
+//     as far as a §11.4 timeout on page one (R-H), which is why the deletion is a code path here and not
+//     a measured result.
 //   * **A sheet that is not the paper it was asked for.** `Page.printToPDF` is sent the inches
 //     `pdfPrintParams()` states and the answer is read back out of the file's own `/MediaBox` and
 //     `/Count`. Wrong numbers, a page tree the reader cannot settle, or more sheets than §5's bound is
@@ -42,11 +48,12 @@
 // font bytes, the encoder settings, the box and the applied plan — which is what turns §13's "is this
 // artefact stale?" from a conversation into a query.
 //
-// What is deliberately NOT here yet, because a slice boundary is a claim and not a silence: the second
-// page of a paginated share set, Storage upload, and the `invitation_outputs` rows. PDF output *is* here
-// — the whole document on either paper, with the sheet size and page count read back from the produced
-// bytes before they are written — and §6.3's text-layer and per-script glyph checks are the output
-// tier's, because they belong to the artefact a guest will hold rather than to the call that made it.
+// What is deliberately NOT here yet, because a slice boundary is a claim and not a silence: Storage
+// upload and the `invitation_outputs` rows. The paginated share set *is* here now — page 1 of N at one
+// box, with every cut taken from the drawn document's own unit bottoms — as is PDF output, the whole
+// document on either paper, with the sheet size and page count read back from the produced bytes before
+// they are written. §6.3's text-layer and per-script glyph checks are the output tier's, because they
+// belong to the artefact a guest will hold rather than to the call that made it.
 // The record this file returns already carries the manifest's columns, so the migration changes where a
 // record goes, not what it says.
 //
@@ -58,7 +65,7 @@
 //   await worker.close();
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,6 +80,7 @@ import {
   PDF_MEDIA_BOX_PT,
   SHARE_WIDTH,
   chooseShareBox,
+  chooseShareSlices,
   isPaperVariant,
   pdfPrintParams,
   planOgFit,
@@ -81,8 +89,11 @@ import {
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Travels in every record, so a manifest row says which worker arithmetic produced it and an old row
- *  stops being confusable with a new one the moment this file's logic changes. */
-export const WORKER_VERSION = 'stage9-render-worker/1';
+ *  stops being confusable with a new one the moment this file's logic changes. `/2` is the slice that
+ *  turns a too-tall share document into a paginated set: `/1` could only refuse it, and a record from
+ *  either arithmetic describes a different thing the worker does with the same DTO. Bumping this
+ *  changes every `render_config_hash`, not a single artefact byte. */
+export const WORKER_VERSION = 'stage9-render-worker/2';
 export const ENGINE_TAG = 'chromium-cdp';
 
 /** Lossy WebP is the chat-attachable type §5 asks for, and a quality *default* is not a fact about an
@@ -438,14 +449,107 @@ const APPLY_AND_MEASURE = `((plan) => {
   };
 })`;
 
-/** Share content is never scaled and never dropped (§5: it is the whole document), so measuring it must
- *  not touch the lead the host chose. This reads the drawn height of the document as mounted. */
-const MEASURE_ARTICLE = `(() => {
+/** Where a share document may be cut, as the drawn document itself states it.
+ *
+ *  Offsets are document-space CSS pixels, which is the space `Page.captureScreenshot`'s `clip.y` answers
+ *  in (measured at `q9-logs/share-pagination-measured.txt`: a clip at `y` returns document row `y` at
+ *  both a 1350 and a 2160 device-metrics override, and two captures overlapping by 1160 px agree on all
+ *  5,011,200 overlapped subpixel values).
+ *
+ *  The list is deliberately not "every element's bottom". A page break is only honest if it lands where
+ *  nothing was mid-thought, so the same restraint `src/render/render.css:126-138` states for paper is
+ *  computed here against the renderer's own stamps and its own paragraphs, structurally rather than as a
+ *  filter afterwards:
+ *
+ *    * a stamped section or paragraph contributes its bottom — the unit is finished there;
+ *    * every paragraph outside a ceremony contributes its bottom and each *line box*'s bottom, from
+ *      `Range.getClientRects()`, because a twelve-line blessing is pageable between its lines and a whole
+ *      section is not the smallest unit a guest would accept. This one is deliberately wider than the
+ *      stamps: a body section stamps its wrapper and leaves the paragraph inside it unlabelled
+ *      (`InvitationRenderer.tsx:347-350`), so a collector that walked only `[data-render-kind]` would
+ *      offer a single cut for a thirty-line blessing and none between its lines. Measured on the tier's
+ *      own documents — 4 pages where the fill needs 3 for 5,606.34 px, and an `unbreakable-content`
+ *      refusal where the honest answer is `too-many-pages` for 11,815.78 px
+ *      (`q9-logs/raster-pagination-run1.txt`);
+ *    * a roster contributes each `<li>` bottom — one name is an atomic line, and a family list that
+ *      ran past a page would otherwise refuse an ordinary wedding rather than paginate it;
+ *    * a ceremony (`[data-render-event-position]`) contributes ONLY its own bottom. Nothing from inside
+ *      one is a candidate — its address lines are `p` elements, so the exclusion is expressed as
+ *      `closest('[data-render-event-position]')` rather than as a shape filter afterwards — because a
+ *      muhurtham time on one card and its hall on the next is the wrong-day, wrong-hall confusion §5's
+ *      "never cropped" is protecting against;
+ *    * an `h2` contributes nothing at all, which is what keeps a heading with the block it introduces —
+ *      the first candidate after a heading is the bottom of that block, so no break can fall between
+ *      them. The element name is safe to address here for the same reason render.css addresses it: the
+ *      heading level is part of the renderer's accessibility contract and asserted elsewhere.
+ *
+ *  `events` and `headings` come back alongside the candidates so the output tier can check the rule from
+ *  the browser's own evidence rather than taking the worker's arithmetic on trust. */
+const SHARE_LAYOUT = `(() => {
+  const round = (value) => Math.round(value * 100) / 100;
   const article = document.querySelector('[data-render-surface]');
   if (!article) return { ok: false, reason: 'no-render-root' };
-  void article.offsetHeight;
-  const box = article.getBoundingClientRect();
-  return { ok: true, widthPx: box.width, heightPx: box.height };
+  const root = article.getBoundingClientRect();
+  if (!(root.height > 0) || !Number.isFinite(root.height)) {
+    return { ok: false, reason: 'content-not-measurable' };
+  }
+  const scroll = window.scrollY;
+  const docTop = (node) => round(node.getBoundingClientRect().top + scroll);
+  const docBottom = (node) => round(node.getBoundingClientRect().bottom + scroll);
+
+  const events = [...article.querySelectorAll('[data-render-event-position]')].map((node) => ({
+    position: Number(node.getAttribute('data-render-event-position')),
+    topPx: docTop(node),
+    bottomPx: docBottom(node),
+  }));
+  const headings = [...article.querySelectorAll('h2')].map((node) => ({
+    text: (node.textContent ?? '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+    topPx: docTop(node),
+    bottomPx: docBottom(node),
+  }));
+
+  const breaks = [];
+  const add = (px, label) => {
+    if (Number.isFinite(px) && px > 0) breaks.push({ px, label });
+  };
+  /** The section an element belongs to, as the renderer stamped it. For a paragraph inside a body
+   *  section that means its wrapper: InvitationRenderer.tsx:347-350 deliberately puts the stamp on the
+   *  wrapper and leaves the h2 and p inside it unlabelled, so that a guest's DOM and a render
+   *  surface's differ only in what carries the label, not in what is drawn. */
+  const labelOf = (node) => {
+    const unit = node.closest('[data-render-kind]');
+    return unit === null
+      ? 'unstamped'
+      : unit.getAttribute('data-render-kind') + '/' + unit.getAttribute('data-render-region');
+  };
+
+  for (const node of article.querySelectorAll('[data-render-kind]')) {
+    if (node.tagName === 'H2') continue;
+    add(docBottom(node), labelOf(node));
+  }
+  for (const node of article.querySelectorAll('p')) {
+    if (node.closest('[data-render-event-position]')) continue;
+    add(docBottom(node), 'para:' + labelOf(node));
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    for (const rect of range.getClientRects()) {
+      add(round(rect.bottom + scroll), 'line:' + labelOf(node));
+    }
+  }
+  for (const event of events) add(event.bottomPx, 'event#' + event.position);
+  for (const row of article.querySelectorAll('[data-render-kind="people_list"] li')) {
+    add(docBottom(row), 'roster-row');
+  }
+
+  return {
+    ok: true,
+    widthPx: round(root.width),
+    contentHeightPx: round(root.height),
+    documentTopPx: round(root.top + scroll),
+    breaks,
+    events,
+    headings,
+  };
 })()`;
 
 /** Undo what an applied plan did to the page.
@@ -676,10 +780,14 @@ export async function openRenderWorker({
 
     const clearApplied = () => serialised(() => page.evaluate(CLEAR_APPLIED));
 
-    const capture = (format, box) => serialised(() => page.cdp('Page.captureScreenshot', {
+    /** `topPx` is a document-space offset, not a viewport one: page 2 of a share set is captured at the
+     *  y its slice record carries, with `captureBeyondViewport` doing the reaching. Left at 0 for every
+     *  single-box artefact, which is what keeps an og image or a plate byte-identical to the one the
+     *  `/1` worker produced for the same document. */
+    const capture = (format, box, { topPx = 0 } = {}) => serialised(() => page.cdp('Page.captureScreenshot', {
       format,
       ...(format === 'webp' ? { quality: WEBP_QUALITY } : {}),
-      clip: { x: 0, y: 0, width: box.width, height: box.height, scale: 1 },
+      clip: { x: 0, y: topPx, width: box.width, height: box.height, scale: 1 },
       captureBeyondViewport: true,
     }).then((r) => Buffer.from(r.data, 'base64')));
 
@@ -873,9 +981,43 @@ export async function openRenderWorker({
         });
       },
 
-      /** 1080-wide share image: the whole document at the host's own lead size, into the smallest of
-       *  §5's four quantised boxes that holds it. Taller than the last box is `paginate` with no file —
-       *  a second page is the designed answer, and this slice does not draw one yet. */
+      /** Measurement only: the same page script the share route runs, handed to the output tier so the
+       *  break rule can be checked against the drawn document instead of against this file's arithmetic.
+       *  "Never inside a ceremony, never between a heading and its block" is a claim about a layout, and
+       *  the tier is the place that has to be able to witness it — including the failure mode where the
+       *  renderer's stamps drift and the collector silently offers no candidates at all, which would make
+       *  every restraint check pass on an empty list. No capture, no bytes, no file. */
+      async measureShareLayout({ dto }) {
+        const parsed = parseGate(dto);
+        if (parsed.ok === false) return parsed;
+        return withDeadline(async () => {
+          await clearApplied();
+          await serialised(() => page.viewport({
+            width: SHARE_WIDTH, height: 1350, dpr: 1, mobile: false }));
+          const mounted = await mount({ surface: 'share', dto });
+          if (mounted.ok === false) return mounted;
+          return await serialised(() => page.evaluate(SHARE_LAYOUT));
+        });
+      },
+
+      /** 1080-wide share image: the whole document at the host's own lead size, into the smallest of §5's
+       *  four quantised boxes that holds it — and when none does, into a set of pages that between them
+       *  *are* the whole document. §5 states the rule and the reason for it ("content taller than the
+       *  last box continues onto a second page of the same set … Never cropped"), and `variant` +
+       *  `page_number` exist as separate manifest columns (§7) precisely so a set is N records of one
+       *  shape rather than one truncated record.
+       *
+       *  So `paginate` out of `chooseShareBox` is no longer an answer a caller receives: it is the signal
+       *  to measure the document's legal cuts and run the arithmetic in `chooseShareSlices`. What a caller
+       *  can still receive instead of files is a *named* refusal — `too-many-pages` past §5's ceiling of
+       *  four, or `unbreakable-content` when one ceremony that must stay whole is taller than a page —
+       *  and both leave nothing on disk.
+       *
+       *  Every page of a set is cut at the same box (`SHARE_PAGE_HEIGHT_PX`, the tallest rung), including
+       *  the last one even when its content is shorter: a set is swiped through as one thing, and the
+       *  strip under short content is the paper token the harness already paints, not a colour this file
+       *  invents (measured at `q9-logs/share-pagination-measured.txt`: the canvas foot of a 2160 box
+       *  under a 903 px article is `rgb(255, 246, 240)` — `paper` — at both sampled rows). */
       async renderShareImage({ dto }) {
         const parsed = parseGate(dto);
         if (parsed.ok === false) return parsed;
@@ -885,49 +1027,82 @@ export async function openRenderWorker({
             width: SHARE_WIDTH, height: 1350, dpr: 1, mobile: false }));
           const mounted = await mount({ surface: 'share', dto });
           if (mounted.ok === false) return mounted;
-          const measured = await serialised(() => page.evaluate(MEASURE_ARTICLE));
-          if (measured.ok === false) return { ok: false, reason: measured.reason };
+          const layout = await serialised(() => page.evaluate(SHARE_LAYOUT));
+          if (layout.ok === false) return { ok: false, reason: layout.reason };
 
-          const choice = chooseShareBox(measured.heightPx);
-          if (choice.ok === false) {
-            return {
-              ...choice,
-              kind: 'share_image',
-              content_height_px: measured.heightPx,
-              width_px: SHARE_WIDTH,
-            };
+          let slices;
+          const single = chooseShareBox(layout.contentHeightPx);
+          if (single.ok === true) {
+            slices = [{ pageNumber: 1, topPx: 0, bottomPx: layout.contentHeightPx, box: single.box }];
+          } else {
+            const paginated = chooseShareSlices(
+              layout.breaks.map((candidate) => candidate.px),
+              layout.contentHeightPx,
+            );
+            if (paginated.ok === false) {
+              return {
+                ...paginated,
+                kind: 'share_image',
+                content_height_px: layout.contentHeightPx,
+                width_px: SHARE_WIDTH,
+                break_candidates: layout.breaks.length,
+              };
+            }
+            slices = paginated.slices;
           }
-          const box = { width: choice.box.width, height: choice.box.height, dpr: 1 };
-          await serialised(() => page.viewport({ ...box, mobile: false }));
-          const png = await capture('png', box);
-          const webp = await capture('webp', box);
-          state.renders += 1;
+
+          const pageBox = { width: slices[0].box.width, height: slices[0].box.height, dpr: 1 };
+          await serialised(() => page.viewport({ ...pageBox, mobile: false }));
 
           const derivation = {
             fit_plan: null,
-            content_height_px: measured.heightPx,
-            quantised_box: `${box.width}x${box.height}`,
+            content_height_px: layout.contentHeightPx,
+            quantised_box: `${pageBox.width}x${pageBox.height}`,
+            page_count: slices.length,
           };
           const artefacts = [];
-          for (const [format, bytes] of [['png', png], ['webp', webp]]) {
-            const written = await writeArtefact({
-              kind: 'share_image',
-              variant: `${box.width}x${box.height}`,
-              format,
-              pageNumber: 1,
-              box,
-              bytes,
-              derivation,
-              gate: deadline,
-            });
-            if (written.ok === false) return { ...written, ...derivation };
-            artefacts.push(written);
+          const writtenPaths = [];
+          for (const slice of slices) {
+            const png = await capture('png', pageBox, { topPx: slice.topPx });
+            const webp = await capture('webp', pageBox, { topPx: slice.topPx });
+            const record = {
+              ...derivation,
+              page_number: slice.pageNumber,
+              page_top_px: slice.topPx,
+              page_bottom_px: slice.bottomPx,
+            };
+            for (const [format, bytes] of [['png', png], ['webp', webp]]) {
+              const written = await writeArtefact({
+                kind: 'share_image',
+                variant: `${pageBox.width}x${pageBox.height}`,
+                format,
+                pageNumber: slice.pageNumber,
+                box: pageBox,
+                bytes,
+                derivation: record,
+                gate: deadline,
+              });
+              if (written.ok === false) {
+                // A set arrives whole or not at all. Page 1 of a three-page document that failed on page
+                // 3 would sit on disk under a record the caller never got, which is §11.4's "never a
+                // silent loss" read from the other side; these are the exact paths this route wrote, in
+                // this call, and nothing else. R-H drives the route past its deadline only on page one,
+                // so this loop has never yet had a file it needed to remove.
+                for (const path of writtenPaths) rmSync(path);
+                return { ...written, ...record };
+              }
+              writtenPaths.push(written.path);
+              artefacts.push(written);
+            }
           }
+          state.renders += 1;
+
           return {
             ok: true,
             kind: 'share_image',
             source_dto_digest: parsed.source_dto_digest,
             ...derivation,
+            page_breaks_px: slices.map((slice) => slice.bottomPx),
             artefacts: artefacts.map(({ config_inputs, ...row }) => row),
             config_inputs: artefacts[0].config_inputs,
           };

@@ -24,8 +24,10 @@ import {
   PDF_MEDIA_BOX_MM,
   PDF_MEDIA_BOX_PT,
   SHARE_HEIGHTS,
+  SHARE_PAGE_HEIGHT_PX,
   SHARE_WIDTH,
   chooseShareBox,
+  chooseShareSlices,
   isPaperVariant,
   pdfPrintParams,
   planOgFit,
@@ -79,6 +81,130 @@ describe('chooseShareBox', () => {
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(chooseShareBox(bad)).toEqual({ ok: false, reason: 'height-not-measurable' });
     }
+  });
+});
+
+describe('chooseShareSlices', () => {
+  /** The tier's own measured document, in the numbers the browser answered with
+   *  (`q9-logs/share-pagination2-measured.txt` G): a three-block, eight-ceremony invitation lays out
+   *  2923.78 px tall at 1080 wide and offers one legal break, at the bottom of the fifth ceremony.
+   *  Using the measured pair rather than invented round numbers is what makes this test about the
+   *  arithmetic and not about a tidy example. */
+  const threeByEight = { breaks: [2038.97], bottom: 2923.78 };
+
+  it('cuts every page of a set at the tallest rung, so one set has one shape', () => {
+    expect(SHARE_PAGE_HEIGHT_PX).toBe(SHARE_HEIGHTS[SHARE_HEIGHTS.length - 1]);
+    const out = chooseShareSlices(threeByEight.breaks, threeByEight.bottom);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.slices.map((slice) => slice.box)).toEqual([
+      { surface: 'share', width: SHARE_WIDTH, height: 2160, dpr: 1 },
+      { surface: 'share', width: SHARE_WIDTH, height: 2160, dpr: 1 },
+    ]);
+  });
+
+  it('pages 1 of N run from the top of the document to its bottom, with no gap and no overlap', () => {
+    const out = chooseShareSlices(threeByEight.breaks, threeByEight.bottom);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.page_count).toBe(2);
+    expect(out.slices.map((slice) => slice.pageNumber)).toEqual([1, 2]);
+    expect(out.slices[0].topPx).toBe(0);
+    expect(out.slices[0].bottomPx).toBe(2038.97);
+    expect(out.slices[1].topPx).toBe(2038.97);
+    expect(out.slices[1].bottomPx).toBe(2923.78);
+    // Contiguity expressed as a property of the whole list: whatever the breaks are, the set covers
+    // the document exactly once.
+    const contiguous = out.slices.every((slice, index) => index === 0
+      ? slice.topPx === 0
+      : slice.topPx === out.slices[index - 1].bottomPx);
+    expect(contiguous).toBe(true);
+    expect(out.slices[out.slices.length - 1].bottomPx).toBe(threeByEight.bottom);
+  });
+
+  it('takes the furthest legal break that fits, because the page count is the cost of paginating', () => {
+    // 1000, 2038.97 and 2100 all fit under a 2160 limit, and 2100 is the one to take: a shorter first
+    // page spends a page the document does not need and leaves a shorter card in a set people swipe
+    // through. 2200 does not fit, and cannot be reached by rounding.
+    const out = chooseShareSlices([1000, 2038.97, 2100, 2200], 4000);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.slices.map((slice) => slice.bottomPx)).toEqual([2100, 4000]);
+    // The same list with the reachable break removed falls back to the next one that fits.
+    expect(chooseShareSlices([1000, 2038.97, 2161], 4000)).toEqual({
+      ok: true,
+      page_count: 2,
+      slices: [
+        { pageNumber: 1, topPx: 0, bottomPx: 2038.97,
+          box: { surface: 'share', width: SHARE_WIDTH, height: 2160, dpr: 1 } },
+        { pageNumber: 2, topPx: 2038.97, bottomPx: 4000,
+          box: { surface: 'share', width: SHARE_WIDTH, height: 2160, dpr: 1 } },
+      ],
+    });
+  });
+
+  it('fills a page to exactly the rung and no further', () => {
+    const exact = chooseShareSlices([2160, 2160.01], 4320);
+    expect(exact.ok).toBe(true);
+    if (!exact.ok) return;
+    expect(exact.slices.map((slice) => slice.bottomPx)).toEqual([2160, 4320]);
+  });
+
+  it('treats the document’s own bottom edge as a legal last break', () => {
+    // 40 px of bottom padding is not content and draws no unit's box, so a fill that had to land on a
+    // candidate would report `unbreakable-content` about the end of a finished invitation.
+    const out = chooseShareSlices([], 500);
+    expect(out).toEqual({
+      ok: true,
+      page_count: 1,
+      slices: [{ pageNumber: 1, topPx: 0, bottomPx: 500,
+        box: { surface: 'share', width: SHARE_WIDTH, height: 2160, dpr: 1 } }],
+    });
+  });
+
+  it('refuses past §5’s ceiling with the count and the ceiling, and names the ceiling it used', () => {
+    const breaks = [2000, 4000, 6000, 8000, 10000, 12000];
+    const out = chooseShareSlices(breaks, 12043.31);
+    expect(out).toEqual({ ok: false, reason: 'too-many-pages', pages: 6, ceiling: MAX_SHARE_PAGES });
+    expect(MAX_SHARE_PAGES).toBe(4);
+  });
+
+  it('refuses an over-tall unit rather than separating a ceremony from where it is', () => {
+    // The measured 44 px-lead, forty-direction-line case: the opening ends at 336.66 and the single
+    // ceremony runs to 3478.06 — 3113.4 px, taller than any page the ladder offers.
+    expect(chooseShareSlices([336.66, 3478.06], 3563.06)).toEqual({
+      ok: false,
+      reason: 'unbreakable-content',
+      pages_before_stuck: 1,
+      stuck_at_px: 336.66,
+      next_break_px: 3478.06,
+      page_height_px: SHARE_PAGE_HEIGHT_PX,
+    });
+    // …and a document whose very first unit is the over-tall one gets no page at all.
+    expect(chooseShareSlices([3113.4], 3563.06)).toEqual({
+      ok: false,
+      reason: 'unbreakable-content',
+      pages_before_stuck: 0,
+      stuck_at_px: 0,
+      next_break_px: 3113.4,
+      page_height_px: SHARE_PAGE_HEIGHT_PX,
+    });
+  });
+
+  it('reports a broken measurement as a broken measurement', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(chooseShareSlices([100], bad)).toEqual({ ok: false, reason: 'content-not-measurable' });
+    }
+  });
+
+  it('ignores a candidate that is not an offset inside the document', () => {
+    // The collector is supposed to hand only drawn units' bottoms, but this is the function that turns
+    // a list into a page count, so a stray non-number or an offset past the document has to be unable to
+    // invent a page break — the same defence `chooseShareBox` keeps against a negative height.
+    const out = chooseShareSlices([0, -40, Number.NaN, Number.POSITIVE_INFINITY, 12000, 2038.97], 2923.78);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.slices.map((slice) => slice.bottomPx)).toEqual([2038.97, 2923.78]);
   });
 });
 

@@ -66,6 +66,94 @@ export function chooseShareBox(
   return { ok: false, reason: 'paginate' };
 }
 
+/** The page height a *paginated* share set is cut to: the tallest rung of §5's ladder.
+ *
+ *  Not the smallest that holds one page's content, and not a per-page choice. A set is swiped through
+ *  as one thing, so every sheet of it has the same shape — which is also what keeps §5's whole reason
+ *  for quantising ("a fixed shape set is what makes legible at chat-thumbnail size testable") true
+ *  across pages rather than only within one. Choosing the tallest rung minimises the count a person
+ *  swipes, and the count is the cost pagination pays for never cropping. */
+export const SHARE_PAGE_HEIGHT_PX = SHARE_HEIGHTS[SHARE_HEIGHTS.length - 1];
+
+export interface ShareSlice {
+  pageNumber: number;
+  /** Document-relative CSS pixels, the same coordinate space `Page.captureScreenshot`'s `clip.y` uses
+   *  (measured: a clip at `y` returns document row `y` at two different device-metrics overrides, and
+   *  two overlapping captures agree on every one of 5,011,200 overlapped subpixel values —
+   *  `q9-logs/share-pagination-measured.txt`). */
+  topPx: number;
+  bottomPx: number;
+  box: ShareBox;
+}
+
+export type SharePaginationRefusal =
+  | { ok: false; reason: 'content-not-measurable' }
+  | { ok: false; reason: 'unbreakable-content'; pages_before_stuck: number; stuck_at_px: number;
+      next_break_px: number | null; page_height_px: number }
+  | { ok: false; reason: 'too-many-pages'; pages: number; ceiling: number };
+
+/** Offsets arrive from `getBoundingClientRect()`, which answers fractions; two pages of one set have to
+ *  carry the same number in a record and in a clip, so the cut is made once, at collector precision. */
+const roundPx = (value: number) => Math.round(value * 100) / 100;
+
+/** Cut a too-tall share document into pages, or name why it cannot be cut.
+ *
+ *  `legalBreaksPx` is whatever the browser measured as an end-of-unit offset — see the collector in
+ *  `scripts/stage9-render-worker.mjs`, which offers a whole unit's bottom, a prose line's bottom, and
+ *  *nothing* from inside a ceremony block or between a section heading and the first line under it.
+ *  This function is deliberately arithmetic: it cannot tell a legal break from an illegal one, so the
+ *  restraint lives in the one place that can see the document, and the bound lives in the one place a
+ *  unit test can drive without a browser.
+ *
+ *  Greedy-from-the-top is the minimum page count for a fixed page height when every candidate is at
+ *  least the top of some unit: taking the furthest break that fits can never cost a page that a shorter
+ *  first page would have saved. Measured, not argued — probe 2 filled the tier's own documents and the
+ *  fill never needed backtracking (`q9-logs/share-pagination2-measured.txt`: 2 pages for 2923.78 px, 3
+ *  for 5606.34, 4 for 8219.72, 6 for 12043.31).
+ *
+ *  Two refusals, both with no artefact written: `too-many-pages` past §5's ceiling of four (the same
+ *  shape as the sheet route's refusal, so one vocabulary covers "bounded execution" for both kinds),
+ *  and `unbreakable-content` when a single unit that must stay whole is taller than a page — reachable
+ *  with one ceremony whose directions block runs to 3113.4 px at a 44 px lead. Refusing there is the
+ *  honest answer: the alternative is a muhurtham time on one page and its hall on the next, which is
+ *  the exact confusion `render.css:126-130` exists to prevent on paper. */
+export function chooseShareSlices(
+  legalBreaksPx: number[],
+  contentBottomPx: number,
+): { ok: true; slices: ShareSlice[]; page_count: number } | SharePaginationRefusal {
+  if (!Number.isFinite(contentBottomPx) || contentBottomPx <= 0) {
+    return { ok: false, reason: 'content-not-measurable' };
+  }
+  const box: ShareBox = { surface: 'share', width: SHARE_WIDTH, height: SHARE_PAGE_HEIGHT_PX, dpr: 1 };
+  // The document's own bottom edge is always a legal end of the last page. The article's bottom padding
+  // is not content, so no drawn unit's bottom has to coincide with it, and a fill that could not reach
+  // it would report `unbreakable-content` about the last 40 pixels of an otherwise finished invitation.
+  const breaks = [...new Set(legalBreaksPx
+    .filter((offset) => Number.isFinite(offset) && offset > 0 && offset <= contentBottomPx))]
+    .concat(contentBottomPx)
+    .sort((a, b) => a - b);
+
+  const slices: ShareSlice[] = [];
+  let cursor = 0;
+  while (cursor < contentBottomPx) {
+    const limit = cursor + SHARE_PAGE_HEIGHT_PX;
+    const next = breaks.filter((offset) => offset > cursor && offset <= limit).pop();
+    if (next === undefined) {
+      return {
+        ok: false, reason: 'unbreakable-content', pages_before_stuck: slices.length,
+        stuck_at_px: roundPx(cursor), next_break_px: breaks.find((offset) => offset > cursor) ?? null,
+        page_height_px: SHARE_PAGE_HEIGHT_PX,
+      };
+    }
+    slices.push({ pageNumber: slices.length + 1, topPx: roundPx(cursor), bottomPx: roundPx(next), box });
+    cursor = next;
+  }
+  if (slices.length > MAX_SHARE_PAGES) {
+    return { ok: false, reason: 'too-many-pages', pages: slices.length, ceiling: MAX_SHARE_PAGES };
+  }
+  return { ok: true, slices, page_count: slices.length };
+}
+
 /** Print papers in inches, which is the unit `Page.printToPDF` takes. A4 is 210×297 mm exactly
  *  (8.2677…×11.6929…); US Letter is 215.9×279.4 mm. Kept as the metric pair plus the derived
  *  inches so a reader can check the conversion instead of trusting it. */

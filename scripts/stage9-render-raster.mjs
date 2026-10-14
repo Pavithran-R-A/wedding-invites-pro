@@ -25,9 +25,13 @@
 //     `SKIPPED: no text extractor available` for the operational half rather than passing silently), and
 //     Indic coverage per script — Tamil, Telugu, Kannada, Malayalam and English each has to arrive in
 //     the file's text layer, not only on the page. What it does *not* claim is that anybody who reads
-//     those scripts checked the shaping (§15's H-3, the same claim `render-contract.md` §8.4 withholds),
-//     and share content taller than the last quantised box is still asserted to come back as `paginate`
-//     with no artefact: page two of a share set is the next slice, not this one.
+//     those scripts checked the shaping (§15's H-3, the same claim `render-contract.md` §8.4 withholds).
+//   * It checks a paginated share set *as a set*: the cut positions re-derived from the drawn document's
+//     own legal breaks rather than from the worker's arithmetic, every page answering with one box and no
+//     page taller than it, the pages contiguous from the document top and covering its whole measured
+//     height, and each page's bytes different from every other page's. The two ways a set cannot be drawn
+//     — past §5's ceiling of four sheets, and one ceremony taller than a sheet — are each asserted to
+//     come back with a name and no artefact.
 //   * The credential assertions are split the way §11.7 requires: a token-shaped string may appear in
 //     exactly one place, the `qr` plate's pixels, and nowhere in a filename, record, request, header
 //     or the report this tier writes. The same pass asserts the render session carried no JWT-shaped
@@ -51,11 +55,13 @@ import { fileURLToPath } from 'node:url';
 import {
   BYTE_CEILINGS,
   MAX_PDF_PAGES,
+  MAX_SHARE_PAGES,
   OG_BOX,
   OG_DROP_ORDER,
   OG_FIT,
   PDF_MEDIA_BOX_PT,
   SHARE_HEIGHTS,
+  SHARE_PAGE_HEIGHT_PX,
   SHARE_WIDTH,
 } from '../src/render/outputGeometry.ts';
 import {
@@ -475,6 +481,125 @@ const failure = (result) => {
 
 const record = (name, result) => { records.push({ case: name, result }); return result; };
 
+/** A cut this close to a box's edge is treated as *at* it: `getBoundingClientRect()` answers fractions
+ *  and the collector rounds to 2 dp, so the same edge measured from two elements can differ by a
+ *  sub-pixel. Same tolerance the pagination probes scored break legality with
+ *  (`q9-logs/share-pagination-measured.txt`). */
+const CUT_TOLERANCE_PX = 0.5;
+
+/** Draw one paginated share set and check the set itself.
+ *
+ *  Everything asserted here is re-derived from the files on disk or from the drawn document, because a
+ *  record that agrees with itself proves nothing: the dimensions come from each artefact's own image
+ *  header, the page identities from the names, the cut positions from `measureShareLayout` mounting the
+ *  same DTO, and the arithmetic claim ("this document needed exactly N sheets") from the measured content
+ *  height against the page height on both sides of N.
+ *
+ *  `measureShareLayout` is called first and its directory snapshot re-taken after it, so "measurement
+ *  only" is a checked property of that route and not a description. The event and heading counts are
+ *  asserted before the restraint checks: a collector whose renderer stamps had drifted would offer an
+ *  empty candidate list, every "no cut is inside a ceremony" check would pass on nothing, and a document
+ *  that cannot be cut would be indistinguishable from one that should not be.
+ *
+ *  `expectedPages` is pinned from `q9-logs/share-pagination-measured.txt` (`pages_at_2160` for these same
+ *  documents), and the two bounds around it are what make the pin mean the content forced that count
+ *  rather than that the worker happened to answer a number. */
+const shareSet = async (name, spec, expectedPages) => {
+  const dto = longDocument(spec);
+  const beforeMeasure = fingerprints(artefactDir);
+  const layout = record(`${name}-layout`, await worker.measureShareLayout({ dto }));
+  // Diffed *before* the render, because the question is what the measurement alone did. Snapshot
+  // comparison is relative to the directory as it stands when the diff is taken, so a later baseline
+  // would have had the set's own files in it and reported them as the measurement's output.
+  const measuredOnly = writtenSince(artefactDir, beforeMeasure);
+  const beforeRender = fingerprints(artefactDir);
+  const set = record(name, await worker.renderShareImage({ dto }));
+
+  check(`${name}-ok`, set.ok === true, failure(set));
+  check(`${name}-layout-was-measurable`, layout.ok === true, failure(layout));
+  check(`${name}-measurement-wrote-no-file`, measuredOnly.length === 0, measuredOnly.join(','));
+  if (set.ok !== true || layout.ok !== true) return set;
+
+  check(`${name}-needed-exactly-that-many-pages`,
+    set.page_count === expectedPages
+    && (expectedPages - 1) * SHARE_PAGE_HEIGHT_PX < set.content_height_px
+    && set.page_count * SHARE_PAGE_HEIGHT_PX >= set.content_height_px
+    && set.content_height_px > SHARE_PAGE_HEIGHT_PX,
+  `${set.page_count} page(s) of ${SHARE_PAGE_HEIGHT_PX} px for ${set.content_height_px} px`);
+  check(`${name}-one-box-for-every-page-of-the-set`,
+    set.quantised_box === `${SHARE_WIDTH}x${SHARE_PAGE_HEIGHT_PX}`
+    && SHARE_PAGE_HEIGHT_PX === Math.max(...SHARE_HEIGHTS)
+    && set.fit_plan === null,
+  `${set.quantised_box}, ladder ${SHARE_HEIGHTS.join('/')}, scaled ${set.fit_plan === null ? 'no' : 'yes'}`);
+
+  const spans = set.page_breaks_px.map((bottom, index) => ({
+    page: index + 1, top: index === 0 ? 0 : set.page_breaks_px[index - 1], bottom,
+  }));
+  check(`${name}-pages-are-contiguous-from-the-document-top`,
+    spans.every((span, index) => index === 0 || span.top === spans[index - 1].bottom),
+  JSON.stringify(spans.map((span) => [span.top, span.bottom])));
+  check(`${name}-pages-cover-the-whole-measured-document`,
+    spans[spans.length - 1].bottom === set.content_height_px,
+  `last page ends at ${spans[spans.length - 1].bottom}, document at ${set.content_height_px}`);
+  check(`${name}-no-page-is-taller-than-its-box`,
+    spans.every((span) => span.bottom - span.top <= SHARE_PAGE_HEIGHT_PX),
+  spans.map((span) => `p${span.page}:${span.bottom - span.top}`).join(','));
+
+  check(`${name}-collector-saw-this-document`,
+    layout.breaks.length > 0 && layout.events.length === spec.eventCount
+    && layout.headings.length >= 1,
+  `${layout.breaks.length} candidate(s), ${layout.events.length} of ${spec.eventCount} ceremonies, `
+    + `${layout.headings.length} heading(s)`);
+  const candidates = new Set(layout.breaks.map((candidate) => candidate.px));
+  const cuts = set.page_breaks_px.slice(0, -1);
+  check(`${name}-every-cut-is-a-legal-break-of-the-drawn-document`,
+    cuts.every((cut) => candidates.has(cut)),
+  `cuts ${cuts.join(',')} of ${candidates.size} candidate(s)`);
+  check(`${name}-no-cut-inside-a-ceremony`,
+    cuts.every((cut) => !layout.events.some((event) => (
+      cut > event.topPx + CUT_TOLERANCE_PX && cut < event.bottomPx - CUT_TOLERANCE_PX))),
+  `${cuts.length} cut(s) against ${layout.events.length} ceremony box(es)`);
+  check(`${name}-no-cut-orphan-a-heading`,
+    cuts.every((cut) => !layout.headings.some((heading) => (
+      cut > heading.topPx + CUT_TOLERANCE_PX && cut <= heading.bottomPx))),
+  `${cuts.length} cut(s) against ${layout.headings.length} heading box(es)`);
+  check(`${name}-no-candidate-inside-a-heading`,
+    layout.breaks.every((candidate) => !layout.headings.some((heading) => (
+      candidate.px > heading.topPx + CUT_TOLERANCE_PX
+      && candidate.px < heading.bottomPx - CUT_TOLERANCE_PX))),
+  `${layout.breaks.length} candidate(s), ${layout.headings.length} heading(s)`);
+
+  const expectedNames = spans.flatMap((span) => [
+    `share_image_${SHARE_WIDTH}x${SHARE_PAGE_HEIGHT_PX}_p${span.page}.png`,
+    `share_image_${SHARE_WIDTH}x${SHARE_PAGE_HEIGHT_PX}_p${span.page}.webp`,
+  ]).sort().join(',');
+  check(`${name}-wrote-exactly-the-set-and-nothing-else`,
+    writtenSince(artefactDir, beforeRender).sort().join(',') === expectedNames,
+  writtenSince(artefactDir, beforeRender).join(','));
+
+  set.artefacts.forEach((row, index) => {
+    const format = row.name.split('.').pop();
+    const dims = imageDimensions(readFileSync(row.path), format);
+    check(`${name}-page-${Math.floor(index / 2) + 1}-${format}-is-the-set-box-in-its-own-bytes`,
+      dims.ok === true && dims.width === SHARE_WIDTH && dims.height === SHARE_PAGE_HEIGHT_PX,
+    dims.ok === true ? `${dims.width}x${dims.height}` : `${dims.reason} for ${row.name}`);
+  });
+  // That each page is its own drawing is what separates a set from N copies of page 1 — the defect a
+  // `clip.y` that stopped reaching past the first viewport would produce, and the one a record cannot
+  // show. Whether page 2 *has ink* needs the pixels sampled in the page, and that evidence is the probe's
+  // (`q9-logs/share-pagination2-measured.txt` G: page 1 and page 2 of a two-page set, 700 px row inked on
+  // each, distinct digests); this tier has no image decoder, so it asserts what bytes-on-disk can prove
+  // and says which claim it is not making.
+  const pngDigests = set.artefacts.filter((row) => row.name.endsWith('.png'))
+    .map((row) => sha256Hex(readFileSync(row.path)).slice(0, 16));
+  check(`${name}-each-page-is-different-bytes`,
+    new Set(pngDigests).size === set.page_count, pngDigests.join(','));
+
+  measured(`${name} spans`, spans.map((span) => `p${span.page} ${span.top}→${span.bottom}`).join(' · '));
+  measured(`${name} bytes`, set.artefacts.map((row) => `${row.name} ${row.bytes}`).join(' · '));
+  return set;
+};
+
 try {
   worker = await openRenderWorker({
     origin: ORIGIN, outputDir: artefactDir, renderDeadlineMs: 60_000, cdpPort: 9421 });
@@ -685,7 +810,7 @@ try {
   // Enough content to leave the first box standing but stay inside the ladder of four: three blocks in
   // each of the four prose slots measures 1394.34 px, past 1350 and inside 1620, so the box that comes
   // back has to be a *later* one, and still the earliest that fits. Ten blocks measured 2486.34 px —
-  // past the last box, which is `share-tall`'s answer rather than this one.
+  // past the last box, which is the paginated set's answer rather than this one.
   const shareMid = record('share-mid',
     await worker.renderShareImage({ dto: longDocument({ blocks: 3 }) }));
   check('share-mid-ok', shareMid.ok === true, failure(shareMid));
@@ -700,26 +825,72 @@ try {
     check('share-mid-dropped-nothing', shareMid.fit_plan === null);
   }
 
-  // Past the last box the answer is a second page, which this slice does not draw: §5's contract is
-  // that the document continues, never that it gets cropped.
-  const tallFiles = fingerprints(artefactDir);
-  const shareTall = record('share-tall',
-    await worker.renderShareImage({ dto: longDocument({ blocks: 60, eventCount: 8 }) }));
-  check('share-tall-paginates-instead-of-cropping', shareTall.ok === false
-    && shareTall.reason === 'paginate', JSON.stringify({
-    ok: shareTall.ok, reason: shareTall.reason, height: shareTall.content_height_px }));
-  check('share-tall-content-really-is-past-the-last-box',
-    shareTall.content_height_px > SHARE_HEIGHTS[SHARE_HEIGHTS.length - 1],
-  `measured ${shareTall.content_height_px} against a ${SHARE_HEIGHTS[SHARE_HEIGHTS.length - 1]} ceiling`);
-  check('share-tall-wrote-no-file', writtenSince(artefactDir, tallFiles).length === 0,
-  writtenSince(artefactDir, tallFiles).join(','));
-  measured('share-tall content height', shareTall.content_height_px);
+  // Past the tallest box the document continues: §5's answer is a set of pages, never a crop. Three
+  // fixtures, one per page count the ladder can reach, each pinned to a probe measurement of the same
+  // document (`q9-logs/share-pagination-measured.txt`, `pages_at_2160`): three blocks in the four prose
+  // slots with eight ceremonies is 2,923.78 px → 2 pages; thirty blocks with two ceremonies is 5,606.34 px
+  // → 3; one block with thirty ceremonies is 8,219.72 px → 4, which is also §5's ceiling, so the last case
+  // is the boundary and the two refusals below start one page past it.
+  await shareSet('share-two-pages', { blocks: 3, eventCount: 8, lead: 24, addressLines: 0 }, 2);
+  await shareSet('share-three-pages', { blocks: 30, eventCount: 2, lead: 24, addressLines: 0 }, 3);
+  await shareSet('share-four-pages', { blocks: 1, eventCount: 30, lead: 24, addressLines: 0 }, 4);
 
-  const shareEnormous = record('share-enormous',
-    await worker.renderShareImage({ dto: longDocument({ eventCount: 300 }) }));
-  check('share-enormous-paginates', shareEnormous.ok === false
-    && shareEnormous.reason === 'paginate', JSON.stringify({
-    ok: shareEnormous.ok, reason: shareEnormous.reason }));
+  // The first refusal: a set longer than anybody should swipe. §11.4's bounded execution says the answer
+  // is a `failed` row with a named reason rather than a silent loss, and the reason has to be the ceiling
+  // and not a measurement failure — which is why the candidate count is asserted alongside the page count:
+  // the document *could* be cut, there are simply too many sheets to deliver.
+  const ceilingFiles = fingerprints(artefactDir);
+  const overCeiling = record('share-over-ceiling', await worker.renderShareImage({
+    dto: longDocument({ blocks: 60, eventCount: 8, lead: 24, addressLines: 0 }) }));
+  check('share-over-ceiling-refuses-by-name', overCeiling.ok === false
+    && overCeiling.reason === 'too-many-pages', JSON.stringify({
+    ok: overCeiling.ok, reason: overCeiling.reason, pages: overCeiling.pages,
+    height: overCeiling.content_height_px }));
+  check('share-over-ceiling-count-is-really-past-the-ceiling',
+    overCeiling.pages > MAX_SHARE_PAGES && overCeiling.ceiling === MAX_SHARE_PAGES
+    && overCeiling.content_height_px > SHARE_PAGE_HEIGHT_PX * MAX_SHARE_PAGES,
+  `${overCeiling.pages} sheet(s) against a ceiling of ${overCeiling.ceiling}, `
+    + `${overCeiling.content_height_px} px of content`);
+  check('share-over-ceiling-had-cuts-to-use', overCeiling.break_candidates > 0,
+  `${overCeiling.break_candidates} candidate(s) — the refusal is the ceiling, not an empty collector`);
+
+  // The same refusal by the other road: 300 ceremonies reach the ceiling through events instead of
+  // prose, which matters because the two documents have entirely different candidate lists.
+  const shareEnormous = record('share-enormous', await worker.renderShareImage({
+    dto: longDocument({ blocks: 1, eventCount: 300, lead: 24, addressLines: 0 }) }));
+  check('share-enormous-refuses-by-name', shareEnormous.ok === false
+    && shareEnormous.reason === 'too-many-pages'
+    && shareEnormous.pages > MAX_SHARE_PAGES, JSON.stringify({
+    ok: shareEnormous.ok, reason: shareEnormous.reason, pages: shareEnormous.pages }));
+  check('share-refusals-wrote-no-file', writtenSince(artefactDir, ceilingFiles).length === 0,
+  writtenSince(artefactDir, ceilingFiles).join(','));
+
+  // The second refusal is the one §5's "never cropped" actually costs something: a single ceremony whose
+  // own venue directions are taller than a sheet cannot be split, and the honest answer is no file rather
+  // than a muhurtham time on one page and its hall on the next. Reachable with real content — forty
+  // address lines at the largest lead a host can choose measures 3,113.4 px of undroppable card against a
+  // 2,160 px page (`q9-logs/share-pagination2-measured.txt` F.lead44-addr40), whose neighbouring legal
+  // cuts are 336.66 px and 3,478.06 px apart.
+  const unbreakableFiles = fingerprints(artefactDir);
+  const unbreakable = record('share-unbreakable', await worker.renderShareImage({
+    dto: longDocument({ blocks: 0, eventCount: 1, lead: 44, addressLines: 40 }) }));
+  check('share-unbreakable-refuses-by-name', unbreakable.ok === false
+    && unbreakable.reason === 'unbreakable-content', JSON.stringify({
+    ok: unbreakable.ok, reason: unbreakable.reason, stuck: unbreakable.stuck_at_px,
+    next: unbreakable.next_break_px }));
+  check('share-unbreakable-stuck-because-one-unit-is-taller-than-a-page',
+    unbreakable.page_height_px === SHARE_PAGE_HEIGHT_PX
+    && unbreakable.next_break_px !== null
+    && unbreakable.next_break_px - unbreakable.stuck_at_px > SHARE_PAGE_HEIGHT_PX
+    && unbreakable.pages_before_stuck < MAX_SHARE_PAGES,
+  `gap ${unbreakable.next_break_px - unbreakable.stuck_at_px} px against a `
+    + `${unbreakable.page_height_px} px page, ${unbreakable.pages_before_stuck} page(s) filled first`);
+  check('share-unbreakable-content-really-is-past-one-page',
+    unbreakable.content_height_px > SHARE_PAGE_HEIGHT_PX && unbreakable.break_candidates > 0,
+  `${unbreakable.content_height_px} px, ${unbreakable.break_candidates} candidate(s)`);
+  check('share-unbreakable-wrote-no-file', writtenSince(artefactDir, unbreakableFiles).length === 0,
+  writtenSince(artefactDir, unbreakableFiles).join(','));
+  measured('share-unbreakable refusal', JSON.stringify(unbreakable));
 
   // ------------------------------------------------------------------- qr
   say('');
@@ -1062,10 +1233,18 @@ try {
   check('deadline-refuses-the-sheet-too', lateSheet.ok === false
     && lateSheet.reason === 'render-timeout', JSON.stringify({
     ok: lateSheet.ok, reason: lateSheet.reason }));
+  // The same gate on the route that writes *more than one file*. A paginated set checks the deadline at
+  // every page, so a caller that gives up must not be left with page 1 on disk under a record it never
+  // received — that is §11.4's "never a silent loss" read from the filesystem side. One directory holds
+  // all three kinds, so one empty listing covers the teaser, the sheet and the set's first page.
+  const lateSet = record('deadline-share-set',
+    await impatient.renderShareImage({ dto: longDocument({ blocks: 3, eventCount: 8 }) }));
+  check('deadline-refuses-a-paginated-set-too', lateSet.ok === false
+    && lateSet.reason === 'render-timeout', JSON.stringify({
+    ok: lateSet.ok, reason: lateSet.reason, page_number: lateSet.page_number }));
   // The callers were answered at 1 ms; both renders are still running on the serialised chain. The files
   // they would have written have to stay unwritten *after* that work lands, or §11.4's bound is a way of
-  // not looking at the artefact rather than a way of not making one. One directory holds both kinds, so
-  // one empty listing covers the teaser and the sheet.
+  // not looking at the artefact rather than a way of not making one.
   await sleep(20_000);
   check('deadline-wrote-nothing-even-after-the-abandoned-render-finished',
     listArtefacts(deadlineDir).length === 0, listArtefacts(deadlineDir).join(','));
@@ -1297,8 +1476,11 @@ try {
   // `kind_box_pN.format`, so every teaser render in this tier answers the same 1200×630 page-one box
   // and writes the same pair of names — each one replacing the last. `records` is the witness that a
   // render happened, and each case's own `artefacts` check is the witness for its bytes; what this
-  // check can say is that the directory holds exactly the outputs the tier asked for, with
-  // `share_image_1080x1620_*` the one pair no other case can produce.
+  // check can say is that the directory holds exactly the outputs the tier asked for. `1080x1350` and
+  // `1080x1620` are the two single-box answers; the eight `share_image_1080x2160_p*` names are the sets —
+  // eight rather than two because a set writes one file per page per format, and no case here has content
+  // in the 1800–2160 band that would take the tallest rung for a single sheet, so a stray `_p2` would be
+  // a page nobody asked for.
   //
   // The two PDF names are the sheet's whole footprint: paper is in the name and page one is the only
   // page a `renderPdf` call writes (§5's sheet is one file with N pages inside it, not N files), so
@@ -1310,6 +1492,10 @@ try {
     'og_image_1200x630_p1.png', 'og_image_1200x630_p1.webp',
     'share_image_1080x1350_p1.png', 'share_image_1080x1350_p1.webp',
     'share_image_1080x1620_p1.png', 'share_image_1080x1620_p1.webp',
+    'share_image_1080x2160_p1.png', 'share_image_1080x2160_p1.webp',
+    'share_image_1080x2160_p2.png', 'share_image_1080x2160_p2.webp',
+    'share_image_1080x2160_p3.png', 'share_image_1080x2160_p3.webp',
+    'share_image_1080x2160_p4.png', 'share_image_1080x2160_p4.webp',
     'qr_25mm_p1.png', 'qr_40mm_p1.png', 'qr_60mm_p1.png',
     'pdf_a4_p1.pdf', 'pdf_letter_p1.pdf',
   ].sort().join(',');

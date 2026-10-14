@@ -70,9 +70,27 @@ re-derivable from the repository rather than from a memory of a run.
 | Kind | Box | Overflow contract |
 | --- | --- | --- |
 | `og_image` | 1200 × 630, DPR 1 | fit ladder: scale the lead within the product's own 22–44 px range, then drop whole optional lines in `OG_DROP_ORDER`; below that, a named refusal |
-| `share_image` | 1080 wide, height quantised to 1350 / 1620 / 1800 / 2160 | taller content paginates — reported as `paginate`, never captured into a shorter box |
+| `share_image` | 1080 wide, height quantised to 1350 / 1620 / 1800 / 2160 | taller than 2160 becomes a *set* of `1080x2160` pages that between them are the whole document; past `MAX_SHARE_PAGES` it is `too-many-pages`, and a single ceremony taller than a sheet is `unbreakable-content` — both named, neither writes a file |
 | `pdf` | A4 210 × 297 mm, US Letter 215.9 × 279.4 mm, 0.5 in margin | bounded page count, named refusal beyond `MAX_PDF_PAGES` |
 | `qr` | 25 / 40 / 60 mm at 16 px per mm | `plate-too-dense` is a refusal, not a smaller code |
+
+**Where a share set may be cut.** §5's "never cropped" only means something if a page break lands where
+nothing was mid-thought, so the cut list is not "every element's bottom": the worker's collector offers a
+stamped unit's bottom, each prose line box's bottom (`Range.getClientRects()`), and each roster row's
+bottom, and refuses to offer anything from *inside* a `[data-render-event-position]` ceremony or between
+an `h2` and the block under it — a muhurtham time on one sheet and its hall on the next is the wrong-day,
+wrong-hall confusion the rule exists to prevent. The paragraph rule is deliberately wider than the
+stamps, because a body section stamps its wrapper and leaves the paragraph inside it unlabelled
+(`InvitationRenderer.tsx:347-350`); a collector that walked only `[data-render-kind]` needed 4 sheets for
+a 5,606.34 px document that fills 3, and reported `unbreakable-content` for an 11,815.78 px document
+whose honest answer is `too-many-pages` (`q9-logs/raster-pagination-run1.txt`). Every sheet of one set is
+cut at the same box — `SHARE_PAGE_HEIGHT_PX`, the tallest rung — because a set is swiped through as one
+thing. `chooseShareSlices` is pure arithmetic and cannot tell a legal cut from an illegal one, which is
+what keeps the restraint in the one place that can see the document and the bound in the one place a unit
+test can drive; the output tier re-derives each set's cuts from a fresh `measureShareLayout` of the same
+DTO rather than trusting that arithmetic, and asserts both restraints from the browser's own event and
+heading boxes. A set that stops partway deletes the sheets it already wrote; the tier drives that route
+only as far as a timeout on page one, so the deletion is a code path, not a measured result.
 
 **How the ladder is applied, and why not from CSS.** `InvitationRenderer` sets the lead size as an
 *inline* style on the article (its own clamp of the host's choice), and `src/render/render.css`
