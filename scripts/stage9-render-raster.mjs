@@ -18,9 +18,16 @@
 //     first drawn ceremony still **paint** under every plan the ladder proposed. Which rung first
 //     fits is a fact about Chromium's line breaking, so the tier reads that off the page instead of
 //     hard-coding a px height a font update would move for the wrong reason.
-//   * It does not check paper, PDF embedding, pagination or Indic glyph coverage — §6.3 and the second
-//     half of §5, which are the next slice. Share content taller than the last quantised box is
-//     asserted to come back as `paginate` with no artefact, which is this slice's honest boundary.
+//   * It checks the sheet out of the bytes the browser wrote, not out of the record that describes
+//     them: the paper from the file's own `/MediaBox`, the sheet count from its page tree *and* its leaf
+//     page objects together, the faces from `/BaseFont`+`/FontFile2`+`/ToUnicode`, the text layer from
+//     `pdftotext` when the operator's PATH has it (§6.3 runs the structural half always and reports
+//     `SKIPPED: no text extractor available` for the operational half rather than passing silently), and
+//     Indic coverage per script — Tamil, Telugu, Kannada, Malayalam and English each has to arrive in
+//     the file's text layer, not only on the page. What it does *not* claim is that anybody who reads
+//     those scripts checked the shaping (§15's H-3, the same claim `render-contract.md` §8.4 withholds),
+//     and share content taller than the last quantised box is still asserted to come back as `paginate`
+//     with no artefact: page two of a share set is the next slice, not this one.
 //   * The credential assertions are split the way §11.7 requires: a token-shaped string may appear in
 //     exactly one place, the `qr` plate's pixels, and nowhere in a filename, record, request, header
 //     or the report this tier writes. The same pass asserts the render session carried no JWT-shaped
@@ -35,6 +42,7 @@
 //      STAGE5_CHROME — the last forwarded to the Stage 5 driver.
 // Exit 1 = a finding; 2 = the harness, the browser or the origin made the tier unrunnable.
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -42,9 +50,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
   BYTE_CEILINGS,
+  MAX_PDF_PAGES,
   OG_BOX,
   OG_DROP_ORDER,
   OG_FIT,
+  PDF_MEDIA_BOX_PT,
   SHARE_HEIGHTS,
   SHARE_WIDTH,
 } from '../src/render/outputGeometry.ts';
@@ -54,8 +64,10 @@ import {
   browserMajor,
   checkBrowserPin,
   imageDimensions,
+  normalisePdfTimestamps,
   openRenderWorker,
   readBrowserPin,
+  readPdfStructure,
   withinByteCeiling,
 } from './stage9-render-worker.mjs';
 import { guestInvitation } from '../src/test/invitationFixture.ts';
@@ -84,17 +96,25 @@ const lines = [];
 // Two masks, in this order, because they are answering different questions.
 //
 // The exact value first: this tier's own credential is the one secret it created, and redacting it is
-// not optional. §11.7's requirement is a property of the report's bytes, so it is also checked as one
-// — after the run, `report.txt` is grepped for this string, and a masking rule that only rewrote
-// *shaped* text would not be the guarantee.
+// not optional. §11.7's requirement is a property of the report's bytes, so it is also checked as one —
+// at the end of the run the report's lines and every recorded result are grepped for this string
+// (`report-lines-carry-no-credential`, `record-bodies-carry-no-credential`), because a masking rule that
+// only rewrote *shaped* text would not be the guarantee.
 //
-// The shaped sweep is a canary for secrets this tier did not create (another run's token arriving in
-// a header value or an error message). It deliberately skips runs made only of lowercase letters,
-// digits and hyphens: three of this file's own check ids are exactly 43 such characters
-// (`only-plate-artefacts-came-from-the-qr-route` among them), and redacting a failing assertion's name
-// would turn a finding into an unreadable line — which is how a privacy rule ends up hiding the very
-// result it was written to protect. A base64url credential carries an upper-case letter, a digit or an
-// underscore with overwhelming probability, so the skipped shape is an identifier rather than a secret.
+// The shaped sweep is a canary for secrets this tier did not create (another run's token arriving in a
+// header value or an error message). It leaves a run alone when that run carries no upper-case letter,
+// no digit and no underscore, on the reasoning that a base64url credential has one of those with
+// overwhelming probability, so an all-lowercase-and-hyphen run is an identifier rather than a secret —
+// four of this file's own check ids are exactly 43 such characters
+// (`only-plate-artefacts-came-from-the-qr-route` among them) and redacting a failing assertion's name
+// would turn a finding into an unreadable line, which is how a privacy rule ends up hiding the very
+// result it was written to protect.
+//
+// The carve-out's edge is not hypothetical: `pdf-a4-page-tree-settles-against-its-leaves` was 43
+// characters too, and its `4` put it on the credential side of the line, so the run printed
+// `PASS <credential>` for that assertion until the id was shortened. Since ids grow and their lengths
+// are nobody's intention, the last section asserts that every verdict in the report still names itself
+// (`every-assertion-kept-its-name`).
 const TOKEN_SHAPED = /(^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
 const mask = (text) => String(text)
   .split(credential).join('<credential>')
@@ -147,9 +167,9 @@ const prose = (seed, blocks) => Array.from(
  *  The public DTO parser sets no length ceiling on host text (the authoring bounds are the database's,
  *  and the harness deliberately re-uses a guest's parser rather than inventing a render-shaped one),
  *  so this is content the pipeline can be handed — which is exactly why the refusal has to exist. */
-const longDocument = ({ blocks = 1, eventCount = 2, lead = 24, addressLines = 0 } = {}) => {
+const longDocument = ({ blocks = 1, eventCount = 2, lead = 24, addressLines = 0, language = 'ta' } = {}) => {
   const document = clone(guestInvitation({
-    language: 'ta',
+    language,
     draft: {
       welcome: prose('with the blessings of our elders,', blocks),
       family_introduction: prose('we invite you to share in the joy of', blocks),
@@ -195,6 +215,163 @@ const protectedStillPainted = (applied) => applied !== null
  *  `display: none` is the only witness. */
 const everyPlannedDropHidANode = (applied) => applied !== null
   && applied.plan.dropped.every((id) => applied.hidden.some((entry) => entry.drop === id));
+
+// --------------------------------------------------------------------- sheet instruments
+
+/** §6.3's operational half, and it is an *instrument* dependency.
+ *
+ *  Poppler's `pdftotext` is on this host (`C:\Program Files\Git\mingw64\bin\pdftotext.exe`, measured in
+ *  `q9-logs/pdf-controls2-measured.txt`, which is the same binary the design's §6.3 cites). It is never
+ *  a product dependency and never installed by anything in this repository, so its absence is a
+ *  possibility rather than a bug: when it is not there the cases below report
+ *  `SKIPPED: no text extractor available` as a measured row instead of passing silently, which is what
+ *  §6.3 asks for and what makes a machine without poppler produce a readable — if weaker — run.
+ *  `PDFTOTEXT` on the environment points the instrument at a different build. */
+const PDFTOTEXT = [process.env.PDFTOTEXT,
+  'C:\\Program Files\\Git\\mingw64\\bin\\pdftotext.exe']
+  .filter(Boolean).find((candidate) => existsSync(candidate)) ?? null;
+
+/** The file's text, one array of trimmed lines per sheet, with the trailing empty sheet poppler always
+ *  emits after the last `/f` dropped. Measured shape (`q9-logs/pdf-tier-lines-measured.txt`): a five-page
+ *  document reads back as six arrays, the sixth empty. */
+const extractedPages = (pdfPath, name) => {
+  if (PDFTOTEXT === null) return null;
+  const txtPath = join(SCRATCH, `extracted-${name}.txt`);
+  execFileSync(PDFTOTEXT, ['-enc', 'UTF-8', pdfPath, txtPath]);
+  return readFileSync(txtPath, 'utf8').split('\f')
+    .map((page) => page.split('\n').map((line) => line.trim()).filter(Boolean))
+    .filter((page) => page.length > 0);
+};
+
+const codepoints = (text) => new Set([...String(text)].filter((ch) => !/\s/.test(ch)));
+
+/** The six families the render surface is allowed to draw with, read out of the generated stylesheet
+ *  rather than restated here: `public/fonts/fonts.css` is the file the browser is handed, so a family
+ *  that appears in a produced PDF's `/BaseFont` but not in it is a face this project does not ship. */
+const pinnedFamilies = [...new Set([...readFileSync(join(ROOT, 'public', 'fonts', 'fonts.css'), 'utf8')
+  .matchAll(/font-family:\s*'([^']+)'/g)].map((found) => found[1].replace(/\s+/g, '')))];
+
+/** The family name a `/BaseFont` entry claims, with its subset tag removed:
+ *  `/AAAAAA+NotoSansTamil-Regular` → `NotoSansTamil`. */
+const familyOf = (baseFont) => baseFont.replace(/^\//, '').split('+')[1]?.split('-')[0] ?? baseFont;
+
+/** The five scripts §6.3 names, with the same wording `src/test/invitationScripts.test.tsx` holds.
+ *  Restated rather than imported because a node instrument cannot import a `.tsx`, and because the
+ *  question here is a different one: not whether React draws the run, but whether the run survives into
+ *  the text layer of a file somebody else will open. `run` is the codepoint range that sample's own
+ *  script occupies (Latin for the English one, since its title is Latin too), taken from the range table
+ *  the Stage 9 PDF probes measured with (`q9-logs/pdf-controls2-measured.txt` P4). */
+const SCRIPT_RANGES = {
+  latin: '[\\u0020-\\u024F]', ta: '[\\u0B80-\\u0BFF]', te: '[\\u0C00-\\u0C7F]',
+  kn: '[\\u0C80-\\u0CFF]', ml: '[\\u0D00-\\u0D7F]',
+};
+
+const SCRIPT_SAMPLES = [
+  { code: 'en', script: 'latin', font: 'Playfair Display', title: 'Arun weds Deepa',
+    welcome: 'With the blessings of our elders, we invite you',
+    closing: 'With love,\nArun and Deepa' },
+  { code: 'ta', script: 'ta', font: 'Noto Sans Tamil', title: 'அருண் திருமணம்',
+    welcome: 'எங்கள் பெரியோர்களின் ஆசீர்வாதத்துடன்',
+    closing: 'அன்புடன்,\nஅருண் மற்றும் தீபா' },
+  { code: 'te', script: 'te', font: 'Noto Sans Telugu', title: 'అరుణ్ వివాహం',
+    welcome: 'మా పెద్దల ఆశీర్వదానంతో',
+    closing: 'ప్రేమతో,\nఅరుణ్ మరియు దీప' },
+  { code: 'ml', script: 'ml', font: 'Noto Sans Malayalam', title: 'അരുൺ വിവാഹം',
+    welcome: 'ഞങ്ങളുടെ മുതിർന്നവരുടെ ആശീർവാദോടെ',
+    closing: 'സ്നേഹത്തോടെ,\nഅരുൺ, ദീപ' },
+  { code: 'kn', script: 'kn', font: 'Noto Sans Kannada', title: 'ಅರುಣ್ ಮದುವೆ',
+    welcome: 'ನಮ್ಮ ಹಿರಿಯರ ಆಶೀರ್ವಾದದೊಂದಿಗೆ',
+    closing: 'ಪ್ರೀತಿಯಿಂದ,\nಅರುಣ್ ಮತ್ತು ದೀಪ' },
+];
+
+/** A document whose only script-specific content is the sample's own three slots, built the way the
+ *  fixture requires: through `draft`, so the host's words reach the flat key and the section body that
+ *  names it together (`src/test/invitationFixture.ts:27-37`). A document that wrote only the flat copy
+ *  would render a page missing the blessing line and the tier would read its own shortcut as a defect
+ *  in the renderer. */
+const scriptDocument = (sample) => {
+  const document = clone(guestInvitation({
+    language: sample.code,
+    draft: { welcome: sample.welcome, closing: sample.closing },
+  }));
+  document.title = sample.title;
+  document.style = { ...document.style, font: sample.font };
+  return document;
+};
+
+/** The words an invitation promises a guest will be able to read: the title, each person's name, each
+ *  ceremony's own name and where it is, and the four slots a host writes prose into. Deliberately not
+ *  the whole DTO — a public DTO also carries keys no sheet draws (`role_label`, `timezone`, the
+ *  template's display name), and asserting the file contains *those* would be a claim about the
+ *  renderer this tier has not made. §5's PDF row is "the whole document", so the completeness test is
+ *  whether everything the document says to show arrives. */
+const declaredText = (document) => [
+  document.title,
+  ...document.people.map((person) => person.display_name),
+  ...document.events.flatMap((event) => [
+    event.display_name, event.venue.name, event.venue.address_text,
+  ]),
+  document.welcome, document.family_introduction, document.event_notes, document.closing,
+].filter((value) => typeof value === 'string').join('\n');
+
+/** The characters one of the five samples' own script occupies inside a document's declared words —
+ *  the set a produced sheet has to carry for that script to count as delivered rather than as drawn on
+ *  screen and lost on the way to the file. Whitespace is dropped from both sides (`codepoints`), which
+ *  is not a relaxation: the sheet breaks a ceremonial line where the DTO wrote it on one, so the
+ *  characters are the invariant and their positions are not. */
+const scriptRun = (sample, text) => codepoints(
+  (String(text).match(new RegExp(SCRIPT_RANGES[sample.script], 'g')) ?? []).join(''));
+
+/** Every assertion one produced sheet has to pass, run against the bytes **on disk**.
+ *
+ *  The tier reads the file rather than trusting `result.pdf` because the two are different claims: the
+ *  record is what the worker believes it printed, the file is what a guest opens. The record is then
+ *  compared against the file, so a worker that described a sheet it had not produced goes red even when
+ *  the sheet is fine. `label` keeps the ids readable per case (`a4`, `letter`, `long`, one per script). */
+const sheetChecks = (label, { paper, result, bytes }) => {
+  const row = result.artefacts[0];
+  const file = readPdfStructure(bytes);
+  const expected = PDF_MEDIA_BOX_PT[paper];
+  check(`pdf-${label}-named-for-its-paper`, row.name === `pdf_${paper}_p1.pdf`, row.name);
+  check(`pdf-${label}-reads-as-a-pdf`, file.ok === true, file.reason);
+  if (file.ok === false) return file;
+  check(`pdf-${label}-sheet-is-the-paper-it-was-asked-for`, file.mediaBoxes.length === 1
+    && file.mediaBoxes[0].widthPt === expected.width
+    && file.mediaBoxes[0].heightPt === expected.height,
+  `${JSON.stringify(file.mediaBoxes)} against ${expected.width}x${expected.height}`);
+  check(`pdf-${label}-tree-settles-against-its-leaves`, file.pageCount >= 1
+    && file.pageObjectCount === file.pageCount
+    && file.pageTreeCounts.every((count) => count <= file.pageCount),
+  `count ${file.pageCount} · tree ${file.pageTreeCounts.join('/')} · leaves ${file.pageObjectCount}`);
+  check(`pdf-${label}-faces-are-embedded-and-decodable`, file.fonts.fontFile2 > 0
+    && file.fonts.toUnicode === file.fonts.fontFile2
+    && file.fonts.fontFile3 === 0 && file.fonts.type3 === 0,
+  JSON.stringify(file.fonts));
+  check(`pdf-${label}-ships-only-self-hosted-families`, file.fonts.baseFonts.length > 0
+    && file.fonts.baseFonts.every((name) => pinnedFamilies.includes(familyOf(name))),
+  file.fonts.baseFonts.join(','));
+  check(`pdf-${label}-tagged-and-no-document-id`, file.tagged === true
+    && file.hasDocumentId === false,
+  `tagged ${file.tagged} · /ID ${file.hasDocumentId}`);
+  check(`pdf-${label}-names-its-producer`, typeof file.producer === 'string'
+    && file.producer.length > 0, file.producer);
+  check(`pdf-${label}-within-the-pdf-ceiling`, row.bytes <= BYTE_CEILINGS.pdf,
+  `${row.bytes} bytes against ${BYTE_CEILINGS.pdf}`);
+  check(`pdf-${label}-scaled-nothing-and-dropped-nothing`, result.fit_plan === null,
+  JSON.stringify(result.fit_plan));
+  // The record's account of the sheet, against the sheet. Key order is not a coincidence to lean on:
+  // both sides come out of the same `readPdfStructure`, so this is checking that the worker carried the
+  // file's own answer into the row rather than a number it computed for itself.
+  check(`pdf-${label}-record-describes-the-file`,
+    JSON.stringify(result.pdf.media_box) === JSON.stringify(file.mediaBoxes)
+    && result.pdf.page_count === file.pageCount
+    && JSON.stringify(result.pdf.fonts) === JSON.stringify(file.fonts)
+    && result.pdf.tagged === file.tagged
+    && result.pdf.has_document_id === file.hasDocumentId
+    && result.pdf.link_annotations === file.linkTargets.length,
+  JSON.stringify(result.pdf));
+  return file;
+};
 
 // --------------------------------------------------------------------- pure gates (no browser)
 
@@ -644,18 +821,251 @@ try {
     hostileText.ok === true && hostileText.source_dto_digest !== clean.source_dto_digest
     && hostileText.config_inputs.box.width === 1200);
 
+  // ------------------------------------------------------------------- §5 / §6.3 the sheet
+  //
+  // Everything in this section reads the bytes the worker put on disk. `result.pdf` is the worker's own
+  // account of the sheet it printed, and `sheetChecks` compares that account against the file — so a
+  // worker that described a document it had not written goes red here even while the file it wrote is
+  // fine, and a file a guest cannot search for their own ceremony goes red even while every record field
+  // is self-consistent. The claims are §5's (the whole invitation, paginated, nothing scaled away, a
+  // bounded sheet count with a named refusal) and §6.3's (each face embedded with a decodable text layer,
+  // in all five scripts the product admits).
+  say('');
+  say('## R-G. §5/§6.3 the sheet, read back out of the file the browser wrote');
+  const pdfA4 = record('pdf-a4', await worker.renderPdf({ dto: shortDoc, paper: 'a4' }));
+  check('pdf-a4-rendered', pdfA4.ok === true, failure(pdfA4));
+  const pdfLetter = record('pdf-letter', await worker.renderPdf({ dto: shortDoc, paper: 'letter' }));
+  check('pdf-letter-rendered', pdfLetter.ok === true, failure(pdfLetter));
+  if (pdfA4.ok && pdfLetter.ok) {
+    const a4Row = pdfA4.artefacts[0];
+    const a4File = sheetChecks('a4', {
+      paper: 'a4', result: pdfA4, bytes: readFileSync(a4Row.path),
+    });
+    const letterRow = pdfLetter.artefacts[0];
+    const letterFile = sheetChecks('letter', {
+      paper: 'letter', result: pdfLetter, bytes: readFileSync(letterRow.path),
+    });
+    // The two papers are the same invitation on two sheets. `render_config_hash` covers the paper and
+    // the print parameters, so it *has* to differ; `source_dto_digest` covers the parsed projection, so
+    // it must not. Saying which half moved is the only way to tell "we print on two papers" apart from
+    // "we print two different documents".
+    check('pdf-letter-and-a4-are-the-same-invitation',
+      pdfLetter.source_dto_digest === pdfA4.source_dto_digest,
+    `${pdfLetter.source_dto_digest?.slice(0, 12)} vs ${pdfA4.source_dto_digest.slice(0, 12)}`);
+    check('pdf-letter-is-a-different-sheet-from-a4',
+      a4File.ok === true && letterFile.ok === true
+      && JSON.stringify(letterFile.mediaBoxes) !== JSON.stringify(a4File.mediaBoxes)
+      && pdfLetter.artefacts[0].render_config_hash !== a4Row.render_config_hash,
+    `${JSON.stringify(a4File.mediaBoxes ?? null)} vs ${JSON.stringify(letterFile.mediaBoxes ?? null)}`);
+    // One document, two surfaces: `shortDoc` is the same object R-C drew into 1200×630, so the sheet and
+    // the teaser have to agree on which invitation they came from. The digest is over the *parsed*
+    // projection, which makes equality the statement that both surfaces' parsers read one document —
+    // not the statement that the caller passed the same object twice, which would be worth nothing.
+    check('pdf-and-the-teaser-come-from-one-invitation',
+      pdfA4.source_dto_digest === teaser.source_dto_digest,
+    `${pdfA4.source_dto_digest.slice(0, 12)} vs ${teaser.source_dto_digest ?? '(the teaser refused)'}`);
+
+    if (a4File.ok === true) {
+      // §11.7 puts a URL in exactly one place: the artefact that needs it. A sheet's link annotations are
+      // the venue maps a guest taps on a phone, so the addresses belong in *this* file's objects — and
+      // because the record only carries a count, the file is the sole witness of which addresses went in.
+      // A household `/g/` door or a family-review `/r/` door printed into an invitation a guest forwards
+      // around is the failure §9.3's plate route refuses to even draw, and it is refused here on the same
+      // terms: the annotation set must be the venues' own, https, and nothing else.
+      const declaredMaps = [...new Set(shortDoc.events.map((event) => event.venue.map_url))].sort();
+      check('pdf-a4-annotations-are-the-venues-own-addresses',
+        JSON.stringify([...a4File.linkTargets].sort()) === JSON.stringify(declaredMaps),
+      `${a4File.linkTargets.join(', ')} against ${declaredMaps.length} declared venue map(s)`);
+      check('pdf-a4-annotations-are-https-and-carry-no-private-door',
+        a4File.linkTargets.every((uri) => uri.startsWith('https://')
+          && !uri.includes('/g/') && !uri.includes('/r/') && !uri.includes(credential)),
+      a4File.linkTargets.join(', '));
+      // The record's own silence, asserted rather than assumed: `link_annotations` is a number, and no
+      // string in the row the caller gets should name an address at all.
+      check('pdf-a4-record-carries-a-count-not-an-address',
+        !JSON.stringify(pdfA4).includes('maps.example'),
+      `${a4File.linkTargets.length} annotation(s) in the file, `
+        + `${pdfA4.pdf.link_annotations} in the record`);
+    }
+
+    const a4Pages = extractedPages(a4Row.path, 'a4');
+    if (a4Pages === null) {
+      measured('pdf a4 text layer', 'SKIPPED: no text extractor available');
+    } else {
+      const a4Text = a4Pages.flat().join('\n');
+      check('pdf-a4-text-layer-has-one-block-per-sheet', a4File.ok === true
+        && a4Pages.length === a4File.pageCount,
+      `${a4Pages.length} extracted vs ${a4File.pageCount ?? 'unreadable'} in the page tree`);
+      check('pdf-a4-text-layer-carries-the-title-and-its-ceremony',
+        a4Text.includes(shortDoc.title) && a4Pages.some((lines) => lines.includes('Ceremony 1')),
+      a4Pages[0].slice(0, 3).join(' / '));
+      const a4Missing = [...codepoints(declaredText(shortDoc))]
+        .filter((ch) => !a4Text.includes(ch));
+      check('pdf-a4-declared-characters-reach-the-text-layer', a4Missing.length === 0,
+      `${a4Missing.length} absent: ${a4Missing.slice(0, 8).join('')}`);
+      measured('a4 sheets / lines / bytes',
+        `${a4File.pageCount ?? '?'} · ${a4Pages.map((lines) => lines.length).join(',')} · ${a4Row.bytes}`);
+    }
+  }
+
+  // The five scripts §6.3 names, each drawn with its own family and read back out of the file. This is
+  // the half of "correct Indic rendering" a DOM test cannot reach: `invitationScripts.test.tsx` proves
+  // React puts the glyphs on the page, and the raster tier proves the pixels carry them, but a PDF is
+  // only useful to a guest who can search it, copy a name into a message, or have a screen reader reach
+  // it — all three of which run off the embedded `/ToUnicode` maps rather than off painted pixels. The
+  // measured pair (`q9-logs/pdf-controls2-measured.txt` P4: page-only and file-only codepoint sets both
+  // empty for all five) is what makes set containment, rather than a hand-picked character, the claim.
+  for (const sample of SCRIPT_SAMPLES) {
+    const sheetDto = scriptDocument(sample);
+    const result = record(`pdf-script-${sample.code}`,
+      await worker.renderPdf({ dto: sheetDto, paper: 'a4' }));
+    check(`pdf-script-${sample.code}-rendered`, result.ok === true, failure(result));
+    if (result.ok === false) continue;
+    const sheetRow = result.artefacts[0];
+    const sheetFile = sheetChecks(sample.code, {
+      paper: 'a4', result, bytes: readFileSync(sheetRow.path),
+    });
+    if (sheetFile.ok === false) continue;
+    // The face the host chose has to be the face the sheet carries. `PlayfairDisplay` also turns up in
+    // the Indic sheets (the renderer's own UI chrome is set in it), so this is a `some`, not a
+    // "the only base font is" — the claim is that the chosen family arrived, which is what §5's
+    // "Indic text is never substituted by a fallback the product does not ship" asks.
+    check(`pdf-script-${sample.code}-drew-with-its-own-face`,
+      sheetFile.fonts.baseFonts.some((name) => familyOf(name) === sample.font.replace(/\s+/g, '')),
+    sheetFile.fonts.baseFonts.join(','));
+    const pages = extractedPages(sheetRow.path, `script-${sample.code}`);
+    if (pages === null) {
+      measured(`pdf script ${sample.code} text layer`, 'SKIPPED: no text extractor available');
+      continue;
+    }
+    const sheetText = pages.flat().join('');
+    const run = scriptRun(sample, declaredText(sheetDto));
+    const absent = [...run].filter((ch) => !sheetText.includes(ch)).map((ch) => ch.codePointAt(0));
+    check(`pdf-script-${sample.code}-reaches-the-text-layer`, run.size > 0 && absent.length === 0,
+      `${run.size} codepoint(s) · absent ${absent.map((cp) => cp.toString(16)).join(',') || 'none'}`);
+    measured(`script ${sample.code}`, `${run.size} codepoint(s) · ${sheetFile.fonts.fontFile2} `
+      + `embedded face(s) · ${sheetFile.fonts.toUnicode} /ToUnicode · ${sheetRow.bytes} bytes`);
+  }
+
+  // The paginated case: twenty ceremonies is a document no sheet holds, so §5's answer is more sheets
+  // with the reading order intact. The rules worth pinning are the ones a printer would notice: a
+  // ceremony whose venue directions fell onto the next sheet reads as a wrong address, a heading left
+  // alone at a foot reads as a section that never happened, and a missing ceremony reads as a
+  // truncated invitation while the file still says it is the whole document. Line shapes are read off
+  // the extraction of this exact document (`q9-logs/pdf-tier-lines-measured.txt`, `long-en.*`), not
+  // guessed — a venue name shares its line with the first address line, so the matcher has to be the
+  // prefix `/^Sri Kanchi Mahal (\d+) /` and an anchored `$` would silently match nothing and pass.
+  const longPdfDto = longDocument({ blocks: 1, eventCount: 20, language: 'en' });
+  const pdfLong = record('pdf-long', await worker.renderPdf({ dto: longPdfDto, paper: 'a4' }));
+  check('pdf-long-rendered', pdfLong.ok === true, failure(pdfLong));
+  if (pdfLong.ok) {
+    const longRow = pdfLong.artefacts[0];
+    const longFile = sheetChecks('long', {
+      paper: 'a4', result: pdfLong, bytes: readFileSync(longRow.path),
+    });
+    check('pdf-long-is-a-paginated-sheet-within-the-named-ceiling', longFile.ok === true
+      && longFile.pageCount > 1 && longFile.pageCount <= MAX_PDF_PAGES,
+    `${longFile.pageCount ?? '?'} sheet(s) against ceiling ${MAX_PDF_PAGES}`);
+    const pages = extractedPages(longRow.path, 'long');
+    if (pages === null) {
+      measured('pdf long text layer', 'SKIPPED: no text extractor available');
+    } else if (longFile.ok === true) {
+      check('pdf-long-text-layer-sheets-match-the-page-tree', pages.length === longFile.pageCount,
+      `${pages.length} extracted vs ${longFile.pageCount} in the tree`);
+      /** Which sheets a line pattern lands on, keeping every hit so a name printed twice is visible
+       *  rather than overwritten by the last one. */
+      const sheetsOf = (pattern) => {
+        const hits = new Map();
+        pages.forEach((lines, index) => {
+          for (const line of lines) {
+            const found = line.match(pattern);
+            if (found === null) continue;
+            const key = Number(found[1]);
+            hits.set(key, [...(hits.get(key) ?? []), index + 1]);
+          }
+        });
+        return hits;
+      };
+      const ceremonies = sheetsOf(/^Ceremony (\d+)$/);
+      const venues = sheetsOf(/^Sri Kanchi Mahal (\d+) /);
+      const once = (hits) => [...hits.entries()].filter(([, sheets]) => sheets.length !== 1);
+      const named = longPdfDto.events.length;
+      check('pdf-long-draws-every-declared-ceremony-exactly-once',
+        ceremonies.size === named && once(ceremonies).length === 0,
+      `${ceremonies.size} of ${named} · repeated ${JSON.stringify(once(ceremonies))}`);
+      check('pdf-long-draws-every-declared-venue-exactly-once',
+        venues.size === named && once(venues).length === 0,
+      `${venues.size} of ${named} · repeated ${JSON.stringify(once(venues))}`);
+      const split = [...ceremonies.entries()]
+        .filter(([key, sheets]) => JSON.stringify(venues.get(key) ?? []) !== JSON.stringify(sheets))
+        .map(([key, sheets]) => `${key}: ${sheets.join('/')} vs ${(venues.get(key) ?? []).join('/')}`);
+      check('pdf-long-never-breaks-between-a-ceremony-and-where-it-is', split.length === 0,
+      split.join(' | ') || `${named} ceremony/venue pair(s) share a sheet`);
+      const isHeading = (line) => line === 'The ceremonies' || /^Ceremony \d+$/.test(line);
+      const orphans = pages.slice(0, -1)
+        .map((lines, index) => [index + 1, lines[lines.length - 1]])
+        .filter(([, last]) => isHeading(last ?? ''));
+      check('pdf-long-never-leaves-a-heading-alone-at-the-foot-of-a-sheet', orphans.length === 0,
+      JSON.stringify(orphans) || pages.map((lines) => lines[lines.length - 1]).join(' | '));
+      const longText = pages.flat().join('\n');
+      const longMissing = [...codepoints(declaredText(longPdfDto))].filter((ch) => !longText.includes(ch));
+      check('pdf-long-declared-characters-reach-the-text-layer', longMissing.length === 0,
+      `${longMissing.length} absent: ${longMissing.slice(0, 8).join('')}`);
+      measured('long sheet', `${longFile.pageCount} sheet(s) · ${longRow.bytes} bytes · lines per `
+        + `sheet ${pages.map((lines) => lines.length).join(',')}`);
+    }
+  }
+
+  // Three refusals, each fingerprinted against the output directory rather than believed from the return
+  // value, because §5's promise about a sheet is the same promise it makes about a teaser: a document the
+  // pipeline cannot honour produces a reason and no file. A partial PDF is worse than a partial PNG —
+  // the first N sheets of a twenty-ceremony invitation look exactly like a complete ten-ceremony one.
+  const sheetFiles = fingerprints(artefactDir);
+  const wrongPaper = record('pdf-paper-legal', await worker.renderPdf({ dto: shortDoc, paper: 'legal' }));
+  check('pdf-unknown-paper-refuses-by-name', wrongPaper.ok === false
+    && wrongPaper.reason === 'paper-variant-unknown', JSON.stringify({
+    ok: wrongPaper.ok, reason: wrongPaper.reason, paper: wrongPaper.paper }));
+  const badSheet = record('pdf-broken-dto',
+    await worker.renderPdf({ dto: { title: 'no such shape' }, paper: 'a4' }));
+  check('pdf-refuses-an-unparseable-dto', badSheet.ok === false
+    && badSheet.reason === 'invitation-refused', badSheet.reason);
+  // The over-ceiling case is also the nested-page-tree case, and that is why it is kept rather than
+  // shrunk: Chrome 155 hands a five-, seven- or eight-sheet document a flat tree and builds a two-level
+  // one at sixteen (`q9-logs/pdf-count-investigated.txt`), so a reader that took the first `/Count` it
+  // saw would answer 8 for this file and let a sixteen-sheet invitation through the ≤12 gate. The
+  // refusal's own count is the read-back, and it is compared against the ceiling rather than a literal.
+  const tooLong = record('pdf-too-many-pages',
+    await worker.renderPdf({ dto: longDocument({ blocks: 1, eventCount: 45, language: 'en' }), paper: 'a4' }));
+  check('pdf-over-the-page-ceiling-refuses-with-its-true-count', tooLong.ok === false
+    && tooLong.reason === 'too-many-pages' && tooLong.pages > MAX_PDF_PAGES
+    && tooLong.ceiling === MAX_PDF_PAGES && tooLong.pdf?.page_count === tooLong.pages,
+  JSON.stringify({ reason: tooLong.reason, pages: tooLong.pages, ceiling: tooLong.ceiling }));
+  check('pdf-refusals-wrote-no-file', writtenSince(artefactDir, sheetFiles).length === 0,
+  writtenSince(artefactDir, sheetFiles).join(','));
+
   // ------------------------------------------------------------------- §11.4 bounds
   say('');
-  say('## R-G. §11.4 bounds: the deadline names a reason and stops a file');
+  say('## R-H. §11.4 bounds: the deadline names a reason and stops a file');
   const deadlineDir = join(SCRATCH, 'deadline');
   impatient = await openRenderWorker({
     origin: ORIGIN, outputDir: deadlineDir, renderDeadlineMs: 1, cdpPort: 9423 });
   const late = record('deadline', await impatient.renderOgTeaser({ dto: longDocument({ blocks: 1 }) }));
   check('deadline-refuses-instead-of-hanging', late.ok === false
     && late.reason === 'render-timeout', JSON.stringify({ ok: late.ok, reason: late.reason }));
-  // The caller was answered at 1 ms; the render itself is still running on the serialised chain. The
-  // file it would have written has to stay unwritten *after* that work lands, or §11.4's bound is a
-  // way of not looking at the artefact rather than a way of not making one.
+  // The sheet is bounded by the same gate and has the most to lose from it: printing takes longer than a
+  // screenshot, so a 1 ms deadline is answered before `Page.printToPDF` has even returned. §11.4's bound
+  // is only worth something if the abandoned print does not land a file afterwards — a timed-out render
+  // that still writes a PDF would hand the caller a reason *and* an artefact, which is how a stale sheet
+  // ends up in an output manifest.
+  const lateSheet = record('deadline-pdf',
+    await impatient.renderPdf({ dto: longDocument({ blocks: 1 }), paper: 'a4' }));
+  check('deadline-refuses-the-sheet-too', lateSheet.ok === false
+    && lateSheet.reason === 'render-timeout', JSON.stringify({
+    ok: lateSheet.ok, reason: lateSheet.reason }));
+  // The callers were answered at 1 ms; both renders are still running on the serialised chain. The files
+  // they would have written have to stay unwritten *after* that work lands, or §11.4's bound is a way of
+  // not looking at the artefact rather than a way of not making one. One directory holds both kinds, so
+  // one empty listing covers the teaser and the sheet.
   await sleep(20_000);
   check('deadline-wrote-nothing-even-after-the-abandoned-render-finished',
     listArtefacts(deadlineDir).length === 0, listArtefacts(deadlineDir).join(','));
@@ -666,12 +1076,28 @@ try {
 
   // ------------------------------------------------------------------- §13 L3
   say('');
-  say('## R-H. §13 L3: the same tuple re-rendered in-process, then by a second browser process');
+  say('## R-I. §13 L3: the same tuple re-rendered in-process, then by a second browser process');
   const l3Dto = longDocument({ blocks: 3 });
   const l3First = record('l3-first', await worker.renderOgTeaser({ dto: l3Dto }));
   const l3Second = record('l3-second-in-process', await worker.renderOgTeaser({ dto: l3Dto }));
   const l3Plate = record('l3-plate', await worker.renderQrPlate({
     variant: '40mm', target: PUBLIC_TARGET }));
+
+  // The same tuple through the sheet path, and its bytes read off the disk after *each* render: every
+  // render of one paper writes the same name (`pdf_a4_p1.pdf`), so the file is a live path that the next
+  // render replaces, and the byte set has to be captured while it is the one this render wrote.
+  //
+  // The gap between the two in-process renders is longer than the stamp's own resolution (the pattern
+  // the worker normalises carries whole seconds), which is what lets the tier say the stamp *moved*
+  // rather than merely that a normalisation was applied to it.
+  const l3SheetOne = record('l3-pdf-first', await worker.renderPdf({ dto: l3Dto, paper: 'a4' }));
+  const sheetOneBytes = l3SheetOne.ok === true
+    ? readFileSync(l3SheetOne.artefacts[0].path) : null;
+  await sleep(1200);
+  const l3SheetTwo = record('l3-pdf-second-in-process',
+    await worker.renderPdf({ dto: l3Dto, paper: 'a4' }));
+  const sheetTwoBytes = l3SheetTwo.ok === true
+    ? readFileSync(l3SheetTwo.artefacts[0].path) : null;
 
   networkLogs.push({ whose: 'first worker', entries: await worker.networkLog() });
   const firstClose = await worker.close();
@@ -684,6 +1110,10 @@ try {
   const l3Third = record('l3-cross-process', await secondWorker.renderOgTeaser({ dto: l3Dto }));
   const l3PlateAgain = record('l3-plate-cross-process', await secondWorker.renderQrPlate({
     variant: '40mm', target: PUBLIC_TARGET }));
+  const l3SheetThree = record('l3-pdf-cross-process',
+    await secondWorker.renderPdf({ dto: l3Dto, paper: 'a4' }));
+  const sheetThreeBytes = l3SheetThree.ok === true
+    ? readFileSync(l3SheetThree.artefacts[0].path) : null;
   networkLogs.push({ whose: 'second worker', entries: await secondWorker.networkLog() });
   const secondClose = await secondWorker.close();
   secondWorker = null;
@@ -717,9 +1147,70 @@ try {
     check('l3-renders-produced-artefacts', false, 'one of the three teaser renders or a plate failed');
   }
 
+  // §13's byte claim for the one artefact that cannot make it whole, and the design's three-way split
+  // (visual equivalence, content equivalence, byte-identity) applied where it actually bites: a produced
+  // PDF carries a creation stamp, so two honest renders of one invitation are *not* byte-identical and
+  // this tier does not claim they are. What it does claim is narrower and checkable — that the stamps are
+  // the only difference between the two (which is what a re-render means for a file), that the arithmetic
+  // behind `render_config_hash` keeps them out (so a sheet is not marked stale by its own clock), and
+  // that a second browser process answers the same as the first.
+  const sheetRaw = [sheetOneBytes, sheetTwoBytes, sheetThreeBytes];
+  const sheetNormalised = sheetRaw.map((bytes) => (bytes === null ? null : normalisePdfTimestamps(bytes)));
+  if (sheetNormalised.every((row) => row !== null && row.ok === true)) {
+    // `replaced === 2` is the measured shape (`q9-logs/pdf-controls2-measured.txt` P3: one
+    // `/CreationDate`, one `/ModDate`, and four differing bytes between two prints in the same second).
+    // A producer that stamps once, or in a shape the pattern does not know, would make "normalised
+    // equality" a comparison of two untouched files — so the count is asserted before the equality is
+    // worth anything.
+    check('pdf-sheets-carry-the-two-stamps-the-normaliser-names',
+      sheetNormalised.every((row) => row.replaced === 2),
+    JSON.stringify(sheetNormalised.map((row) => row.replaced)));
+    const apart = (a, b) => {
+      let differing = Math.abs(a.length - b.length);
+      for (let i = 0; i < Math.min(a.length, b.length); i += 1) if (a[i] !== b[i]) differing += 1;
+      return differing;
+    };
+    check('pdf-creation-stamp-actually-moved-between-the-two-renders',
+      !sheetRaw[0].equals(sheetRaw[1]) && apart(sheetRaw[0], sheetRaw[1]) > 0,
+    `${apart(sheetRaw[0], sheetRaw[1])} byte(s) differ across the gap`);
+    check('pdf-stamps-are-the-only-difference-in-process',
+      sheetNormalised[0].bytes.equals(sheetNormalised[1].bytes),
+    `${apart(sheetNormalised[0].bytes, sheetNormalised[1].bytes)} byte(s) differ after normalisation`);
+    check('pdf-stamps-are-the-only-difference-across-processes',
+      sheetNormalised[0].bytes.equals(sheetNormalised[2].bytes),
+    `${apart(sheetNormalised[0].bytes, sheetNormalised[2].bytes)} byte(s) differ after normalisation`);
+    const rows = [l3SheetOne, l3SheetTwo, l3SheetThree].map((result) => result.artefacts[0]);
+    check('l3-pdf-config-hash-identical-across-processes',
+      rows[0].render_config_hash === rows[2].render_config_hash
+      && rows[0].render_config_hash === rows[1].render_config_hash,
+    `${rows[0].render_config_hash.slice(0, 16)} vs ${rows[2].render_config_hash.slice(0, 16)}`);
+    check('l3-pdf-content-digest-moves-with-the-stamp-and-nothing-else',
+      rows[0].content_digest !== rows[1].content_digest
+      && rows[0].render_config_hash === rows[1].render_config_hash,
+    `${rows[0].content_digest.slice(0, 16)} vs ${rows[1].content_digest.slice(0, 16)}`);
+    check('l3-pdf-same-source-dto-three-times',
+      [l3SheetOne, l3SheetTwo, l3SheetThree].every((result) =>
+        result.source_dto_digest === l3SheetOne.source_dto_digest),
+    [l3SheetOne, l3SheetTwo, l3SheetThree]
+      .map((result) => result.source_dto_digest.slice(0, 12)).join(' vs '));
+    // Cross-*kind* identity, which is the design's "consistency across outputs" claim in its cheapest
+    // provable form: the teaser above and these three sheets came from one object, and all four surfaces
+    // report the same digest of it.
+    check('l3-pdf-and-teaser-share-one-invitation-digest',
+      l3First.ok === true && l3First.source_dto_digest === l3SheetOne.source_dto_digest,
+    `${l3First.source_dto_digest ?? '(no teaser)'} vs ${l3SheetOne.source_dto_digest}`);
+    measured('pdf normalised digest',
+      createHash('sha256').update(sheetNormalised[2].bytes).digest('hex').slice(0, 32));
+    measured('pdf raw bytes across processes',
+      `${sheetRaw[0].length} vs ${sheetRaw[2].length} · ${apart(sheetRaw[0], sheetRaw[2])} differ`);
+  } else {
+    check('l3-pdf-renders-produced-sheets', false,
+    [l3SheetOne, l3SheetTwo, l3SheetThree].map((r) => r.reason).join(','));
+  }
+
   // ------------------------------------------------------------------- §11.2 / §11.7 network
   say('');
-  say('## R-I. §11.2/§11.7 the render sessions asked nothing off this machine, and leaked nothing');
+  say('## R-J. §11.2/§11.7 the render sessions asked nothing off this machine, and leaked nothing');
   const log = networkLogs.flatMap((whose) => whose.entries);
   const seenBy = networkLogs.map((whose) => `${whose.whose}: ${whose.entries.length}`).join(', ');
   const hosts = [...new Set(log.map((entry) => {
@@ -794,7 +1285,7 @@ try {
 
   // ------------------------------------------------------------------- output census
   say('');
-  say('## R-J. what was written, and where');
+  say('## R-K. what was written, and where');
   for (const dir of [artefactDir, secondDir, deadlineDir]) {
     const names = listArtefacts(dir).sort();
     say(`  ${dir.replace(EVIDENCE_DIR, 'q9-logs')} (${names.length} file(s))`);
@@ -808,24 +1299,57 @@ try {
   // render happened, and each case's own `artefacts` check is the witness for its bytes; what this
   // check can say is that the directory holds exactly the outputs the tier asked for, with
   // `share_image_1080x1620_*` the one pair no other case can produce.
+  //
+  // The two PDF names are the sheet's whole footprint: paper is in the name and page one is the only
+  // page a `renderPdf` call writes (§5's sheet is one file with N pages inside it, not N files), so
+  // eleven A4 renders — the two papers' cases and the five scripts and the long document and the three
+  // refusals that produced nothing — are two names. Which is exactly why the census is paired with
+  // `writtenSince` fingerprints on the refusals: a name set cannot see an unwanted overwrite, and the
+  // refusal cases are the ones where an overwrite would be the defect.
   const expectedArtefacts = [
     'og_image_1200x630_p1.png', 'og_image_1200x630_p1.webp',
     'share_image_1080x1350_p1.png', 'share_image_1080x1350_p1.webp',
     'share_image_1080x1620_p1.png', 'share_image_1080x1620_p1.webp',
     'qr_25mm_p1.png', 'qr_40mm_p1.png', 'qr_60mm_p1.png',
+    'pdf_a4_p1.pdf', 'pdf_letter_p1.pdf',
   ].sort().join(',');
   check('artefacts-are-exactly-the-cases-this-tier-ran',
     listArtefacts(artefactDir).sort().join(',') === expectedArtefacts,
   listArtefacts(artefactDir).sort().join(','));
-  // The second worker was opened for one purpose: re-render the same teaser and the same plate in a
-  // different browser process. Anything else in its directory would mean a render that was never
-  // asked for, and the missing plate is as much a finding as an extra one — `L3` claims byte identity
-  // for a QR too, so it has to have been drawn there.
+  // The second worker was opened for one purpose: re-render the same teaser, the same plate and the same
+  // sheet in a different browser process. Anything else in its directory would mean a render that was
+  // never asked for, and the missing plate is as much a finding as an extra one — `L3` claims byte
+  // identity for a QR too, so it has to have been drawn there, and the same holds for the sheet's
+  // normalised identity.
   check('rerun-directory-holds-only-the-l3-renders',
     listArtefacts(secondDir).sort().join(',')
-    === 'og_image_1200x630_p1.png,og_image_1200x630_p1.webp,qr_40mm_p1.png',
-  listArtefacts(secondDir).join(','));
-  check('deadline-directory-is-empty', listArtefacts(deadlineDir).length === 0);
+    === 'og_image_1200x630_p1.png,og_image_1200x630_p1.webp,pdf_a4_p1.pdf,qr_40mm_p1.png',
+  listArtefacts(secondDir).sort().join(','));
+  // Re-confirmed at the end of the run, after every abandoned render has had minutes to land: the
+  // bounded worker drew a teaser and a sheet, both refused, and its directory holds neither.
+  check('deadline-directory-is-empty', listArtefacts(deadlineDir).length === 0,
+  listArtefacts(deadlineDir).join(','));
+
+  // §11.7 applied to this tier's own two output files. The report's lines and every recorded result are
+  // the exact bytes that go to `report.txt` and `records.json`, so grepping them here is the same
+  // statement as grepping the files, made before either can be read by anybody else: the credential this
+  // run minted appears in neither, in any form. The masking rules above are what make that true, and this
+  // is what makes the rules *checked* rather than trusted.
+  const reportBytes = `${lines.join('\n')}\n`;
+  check('report-lines-carry-no-credential', !reportBytes.includes(credential),
+  `${reportBytes.length} byte(s)`);
+  const recordBytes = JSON.stringify(records);
+  check('record-bodies-carry-no-credential', !recordBytes.includes(credential),
+  `${records.length} record(s), ${recordBytes.length} byte(s)`);
+  // And the canary's own cost, measured: a check id that happens to be 43 characters of the credential's
+  // alphabet **including a digit** (`pdf-a4-…`) is indistinguishable from a token to the shaped sweep, so
+  // it is redacted and the line loses its name. Left alone, that turns a privacy rule into the reason a
+  // finding cannot be read. The assertion is on the shape of the failure (`PASS <credential>`: a verdict
+  // with nothing named on it) rather than on a list of ids, because the ids keep growing.
+  const nameless = lines.filter((row) => /^(PASS|FINDING) <credential>/.test(row));
+  check('every-assertion-kept-its-name', nameless.length === 0,
+  nameless.join(' | ')
+    || `${lines.filter((row) => /^(PASS|FINDING) /.test(row)).length} named assertion(s)`);
 } catch (error) {
   say(`\nHARNESS FAILURE: ${mask(String(error.stack ?? error)).split('\n').slice(0, 6).join('\n')}`);
   for (const open of [worker, impatient, secondWorker]) {
