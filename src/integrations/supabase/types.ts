@@ -1,5 +1,5 @@
-// Database types for the canonical Stage 5 schema: the RLS-governed tables in `public`,
-// and the nineteen browser-callable RPCs in `api`.
+// Database types for the canonical Stage 9 schema: the RLS-governed tables in `public`,
+// and the twenty-one browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -103,6 +103,32 @@
 // so the part of this file that `dbtypes:check` actually verifies is untouched and still generator-derived.
 // That check does not read `api.Functions`, which is why the label lives in this header rather than only
 // in a commit message — a mistake in these six entries is a diff at the next regeneration, not a red gate.
+//
+// Stage 9 adds one table and two RPCs, and it is the regeneration the paragraph above promised:
+// `supabase gen types typescript --local --schema public --schema api` was run against the migrated
+// `localvivaahvarnam` stack and its stdout captured, so the two new entries below —
+// `list_invitation_outputs` and `render_invitation_document`, both host reads granted to
+// `authenticated` and to no anonymous caller — are the generator's own text, and so are the Stage 8
+// six. Comparing that stdout with this file found one divergence in `api.Functions`, and it was in a
+// Stage 8 entry, not a Stage 9 one: `issue_guest_invitations` carried its `Args` keys in the wrapper
+// DDL's parameter order rather than the generator's alphabetical order. The keys are now the
+// generator's. Everything else in the twenty-one entries agrees character for character once
+// whitespace, the generator's quoted keys, its `;` and `,` separators and its `(string)[]` spelling
+// are normalised away — which is what the two edits above mean by "mechanical", and this file is now
+// re-derivable on that claim rather than merely tidy.
+//
+// A third suppression belongs to that list rather than being smoothed over it. CLI 2.120.0 — the
+// version on this machine now, where Stages 6 and 7 recorded 2.119.0 — prints `ComputedFields: never`
+// for every one of the twenty `public` tables, and this file has never carried that line for any of
+// them. The Stage 9 table was written without it to match the nineteen around it, so a fresh
+// regeneration diffed against this file will show exactly three things: twenty `ComputedFields`
+// lines, `invitation_outputs`, and the two function entries. `npm run dbtypes:check` compares column
+// names, so none of the three can hide a schema change from it.
+//
+// `invitation_outputs` appearing here describes a table RLS already governs; it is not an invitation
+// to query it. No client file names it at this head, and the read path Stage 9 builds is
+// `api.list_invitation_outputs`, because a canonical table read straight out of the adapter is what
+// `npm run product:check` refuses.
 export type Json =
   | string
   | number
@@ -138,10 +164,14 @@ export type Database = {
       }
       issue_guest_invitations: {
         Args: {
-          p_household_ids: string[]
           p_expires_at?: string
+          p_household_ids: string[]
           p_wedding_id: string
         }
+        Returns: Json
+      }
+      list_invitation_outputs: {
+        Args: { p_wedding_id: string }
         Returns: Json
       }
       preview_invitation: { Args: { p_wedding_id: string }; Returns: Json }
@@ -155,6 +185,10 @@ export type Database = {
           p_version_id: string
           p_wedding_id: string
         }
+        Returns: Json
+      }
+      render_invitation_document: {
+        Args: { p_version_id: string }
         Returns: Json
       }
       request_family_review: {
@@ -530,6 +564,93 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "weddings"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      invitation_outputs: {
+        Row: {
+          attempt_count: number
+          content_digest: string | null
+          created_at: string
+          format: string
+          id: string
+          invalidated_at: string | null
+          invalidation_reason: string | null
+          last_error: string | null
+          object_key: string
+          output_kind: string
+          page_number: number
+          ready_at: string | null
+          render_config_hash: string
+          source_dto_digest: string
+          status: string
+          storage_domain: string
+          target_url_digest: string | null
+          updated_at: string
+          variant: string
+          version_id: string
+          wedding_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          content_digest?: string | null
+          created_at?: string
+          format: string
+          id?: string
+          invalidated_at?: string | null
+          invalidation_reason?: string | null
+          last_error?: string | null
+          object_key: string
+          output_kind: string
+          page_number?: number
+          ready_at?: string | null
+          render_config_hash: string
+          source_dto_digest: string
+          status?: string
+          storage_domain: string
+          target_url_digest?: string | null
+          updated_at?: string
+          variant: string
+          version_id: string
+          wedding_id: string
+        }
+        Update: {
+          attempt_count?: number
+          content_digest?: string | null
+          created_at?: string
+          format?: string
+          id?: string
+          invalidated_at?: string | null
+          invalidation_reason?: string | null
+          last_error?: string | null
+          object_key?: string
+          output_kind?: string
+          page_number?: number
+          ready_at?: string | null
+          render_config_hash?: string
+          source_dto_digest?: string
+          status?: string
+          storage_domain?: string
+          target_url_digest?: string | null
+          updated_at?: string
+          variant?: string
+          version_id?: string
+          wedding_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invitation_outputs_wedding_id_fkey"
+            columns: ["wedding_id"]
+            isOneToOne: false
+            referencedRelation: "weddings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitation_outputs_wedding_id_version_id_fkey"
+            columns: ["wedding_id", "version_id"]
+            isOneToOne: false
+            referencedRelation: "invitation_versions"
+            referencedColumns: ["wedding_id", "id"]
           },
         ]
       }
