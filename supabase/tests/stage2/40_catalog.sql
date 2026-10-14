@@ -139,7 +139,15 @@ DECLARE
     'invitation_versions','publications','guest_households','household_event_scopes',
     'rsvp_responses','approval_requests','approval_feedback','wedding_assets',
     'entitlements','design_templates','tradition_packs','tradition_pack_releases',
-    'profiles','user_roles'];
+    'profiles','user_roles']
+    -- Stage 9's render manifest, declared as the head's addition rather than folded into the base.
+    -- The reason is the one every later name here has: `supabase/tests/stage2/run.sh` stops its chain
+    -- at Stage 4, so a table that does not exist yet in that chain must not be expected by it — and a
+    -- Stage 9 chain that failed to create it must not be told it is absent. The list is an
+    -- inventory *of the head*, which is what makes C05 a tripwire instead of a snapshot.
+    || CASE WHEN pg_temp.st2_at_least('stage9')
+            THEN ARRAY['invitation_outputs']
+            ELSE ARRAY[]::text[] END;
   -- The one table on that list whose customer read path is a *column* projection rather than a
   -- table grant, and the seven columns it opens. Stage 4 §9 narrowed it: the reviewer record,
   -- the authorship and machine-assistance disclosure, the source reference, the changelog and
@@ -158,7 +166,14 @@ DECLARE
   scoped_tbls     text[] := ARRAY[
     'wedding_people','venues','wedding_events','invitation_drafts','invitation_versions',
     'publications','guest_households','household_event_scopes','rsvp_responses',
-    'approval_requests','approval_feedback','wedding_assets','entitlements'];
+    'approval_requests','approval_feedback','wedding_assets','entitlements']
+    -- Stage 9's manifest carries its own `wedding_id`, is NOT NULL on it, is indexed on it, and its
+    -- one policy resolves ownership through `public.weddings` exactly as C25b requires — so it joins
+    -- this list, which is what makes C49, C50 and C25b look at it. A table added to `public_tbls`
+    -- without joining this one would pass C05 and be unscoped.
+    || CASE WHEN pg_temp.st2_at_least('stage9')
+            THEN ARRAY['invitation_outputs']
+            ELSE ARRAY[]::text[] END;
   -- Tables a customer may insert into, update and delete, subject to RLS.
   owner_crud_tbls text[] := ARRAY[
     'weddings','wedding_people','venues','wedding_events','invitation_drafts',
@@ -179,7 +194,16 @@ DECLARE
   server_only_tbls text[] := ARRAY[
     'invitation_versions','publications','approval_requests','approval_feedback',
     'entitlements','design_templates','tradition_packs','tradition_pack_releases',
-    'user_roles'];
+    'user_roles']
+    -- Stage 9's output manifest: readable by its owner, written only by the trusted backend, with no
+    -- INSERT/UPDATE/DELETE grant and therefore no write policy that a later convenience could add
+    -- without noticing. Joining this list is what makes C22 look at it (no write policy may exist) and
+    -- C33 look for the guard trigger that enforces the grant (it has one). It is *not* on
+    -- `append_only_tbls`: a render row's status and evidence columns are exactly what its lifecycle
+    -- transition writes, so it is server-authored and mutable rather than immutable.
+    || CASE WHEN pg_temp.st2_at_least('stage9')
+            THEN ARRAY['invitation_outputs']
+            ELSE ARRAY[]::text[] END;
   -- Rows that are never edited and never removed by a client.
   append_only_tbls text[] := ARRAY[
     'invitation_versions','approval_feedback','access_tokens','audit_events'];
@@ -234,7 +258,17 @@ DECLARE
     'wedding_people(wedding_id)->weddings=CASCADE',
     'weddings(design_template_id)->design_templates=RESTRICT',
     'weddings(owner_user_id)->auth.users=CASCADE',
-    'weddings(tradition_pack_release_id)->tradition_pack_releases=RESTRICT'];
+    'weddings(tradition_pack_release_id)->tradition_pack_releases=RESTRICT']
+    -- Stage 9's two edges, and both are NO ACTION for the reason the rest of the render path is:
+    -- deleting a wedding out from under a manifest row would orphan the record of an artefact a guest
+    -- may still be holding a link to, and deleting a *version* would do the same to the outputs frozen
+    -- against it. CASCADE was the wrong candidate twice over — it would erase the evidence trail that
+    -- says which bytes were served, and a cascade runs as the child's owner, so the lifecycle guard
+    -- below could not see it (the general rule is C35).
+    || CASE WHEN pg_temp.st2_at_least('stage9')
+            THEN ARRAY['invitation_outputs(wedding_id)->weddings=NOACTION',
+                       'invitation_outputs(wedding_id+version_id)->invitation_versions=NOACTION']
+            ELSE ARRAY[]::text[] END;
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
   -- unindexed foreign key has to arrive here with a reason of its own before it can
@@ -299,7 +333,9 @@ BEGIN
                  WHERE n.nspname = 'legacy'));
 
   -- =========================================================== 2. primary keys, shape
-  PERFORM pg_temp.st2_ok('C05 every public table is one of the nineteen canonical ones',
+  PERFORM pg_temp.st2_ok('C05 every public table is one of the '
+    || CASE WHEN pg_temp.st2_at_least('stage9') THEN 'twenty' ELSE 'nineteen' END
+    || ' canonical ones',
     (SELECT array_agg(c.relname::text ORDER BY c.relname)
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'public') = (SELECT array_agg(x ORDER BY x) FROM unnest(public_tbls) x));
@@ -402,7 +438,8 @@ BEGIN
   PERFORM pg_temp.st2_ok('C15 service_role can reach the canonical and server schema',
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname IN ('public','private')
-        AND has_table_privilege('service_role', c.oid, 'SELECT, INSERT, UPDATE, DELETE')) = 21::bigint);
+        AND has_table_privilege('service_role', c.oid, 'SELECT, INSERT, UPDATE, DELETE'))
+      = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 22::bigint ELSE 21::bigint END));
   PERFORM pg_temp.st2_ok('C16 service_role holds nothing in legacy',
     NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                  WHERE c.relkind = 'r' AND n.nspname = 'legacy'
@@ -488,7 +525,8 @@ BEGIN
     (SELECT count(*) FROM pg_policy pol
       JOIN pg_class c ON c.oid = pol.polrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public' AND pol.polcmd = 'r') = 19::bigint);
+     WHERE n.nspname = 'public' AND pol.polcmd = 'r')
+      = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 20::bigint ELSE 19::bigint END));
   PERFORM pg_temp.st2_ok('C21 write policies exist on exactly the customer set',
     (SELECT array_agg(x.relname::text ORDER BY x.relname)
        FROM (SELECT DISTINCT c.relname FROM pg_policy pol
@@ -623,6 +661,18 @@ BEGIN
                            'internal_api.revoke_guest_invitation',
                            'internal_api.rotate_guest_invitation',
                            'internal_api.submit_guest_rsvp']
+                ELSE ARRAY[]::text[] END
+        -- Stage 9 adds two, and neither is a write. Both are definers for the standing reason rather
+        -- than by convenience: `render_invitation_document` reads a frozen version's snapshot out of
+        -- `invitation_versions` and hands back the public DTO, and a host has no column-level SELECT on
+        -- the snapshot it froze; `list_invitation_outputs` reads the manifest, which no browser role may
+        -- write and therefore should not read through a table policy alone. Neither can be reached by a
+        -- server key (`service_role` holds no USAGE on `api` or `internal_api`, C17c/C17e), so the
+        -- renderer that writes the manifest writes it as the trusted backend over the table, and these
+        -- two names stay read-only.
+        || CASE WHEN pg_temp.st2_at_least('stage9')
+                THEN ARRAY['internal_api.list_invitation_outputs',
+                           'internal_api.render_invitation_document']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -653,13 +703,15 @@ BEGIN
   -- test can show, and it is the shape C63b's limitation makes worth watching.
   --
   -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the document
-  -- preview, thirteen from Stage 7, which added the five family-review verbs, and nineteen from
-  -- Stage 8, which added the six household-invitation verbs. Every wrapper still has to be one
+  -- preview, thirteen from Stage 7, which added the five family-review verbs, nineteen from
+  -- Stage 8, which added the six household-invitation verbs, and twenty-one from Stage 9, which added
+  -- the two read doors over the render contract and its manifest. Every wrapper still has to be one
   -- line, whatever the number is.
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage8') THEN 19
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 21
+                                       WHEN pg_temp.st2_at_least('stage8') THEN 19
                                        WHEN pg_temp.st2_at_least('stage7') THEN 13
                                        WHEN pg_temp.st2_at_least('stage5') THEN 8
                                        ELSE 7 END)
@@ -734,6 +786,17 @@ BEGIN
                            'revoke_guest_invitation',
                            'rotate_guest_invitation',
                            'submit_guest_rsvp']
+                ELSE ARRAY[]::text[] END
+        -- Stage 9's two, and the point of writing them out is the same as Stage 8's: these are *paired*
+        -- names, so this census, C26d's twenty-one and C26f's twenty-one are one twenty-one-name set
+        -- seen three ways. A render body with no wrapper would be a way to read a frozen document that
+        -- no request can reach — dead code to one reader and a hole to the next, which is the shape
+        -- this asymmetry is only allowed for the eleven maintenance bodies Stage 5 took on purpose.
+        -- Rendering is a product act, so both halves belong on the exposed surface, and the
+        -- maintenance surface stays at eleven.
+        || CASE WHEN pg_temp.st2_at_least('stage9')
+                THEN ARRAY['list_invitation_outputs',
+                           'render_invitation_document']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -746,7 +809,8 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage8') THEN 19
+      = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 21
+              WHEN pg_temp.st2_at_least('stage8') THEN 19
               WHEN pg_temp.st2_at_least('stage7') THEN 13
               WHEN pg_temp.st2_at_least('stage5') THEN 8
               ELSE 7 END)
@@ -804,6 +868,14 @@ BEGIN
     -- unauthenticated caller cannot mint a link for somebody else's family, withdraw one, or learn
     -- which households a wedding has invited. A guest that arrives with `anon` and a stolen token can
     -- read and answer; it cannot open the door for anyone else.
+    --
+    -- Stage 9 moves nothing here, and that is an assertion about the render architecture rather than an
+    -- accident of it: the two names it adds take a `p_version_id` / `p_wedding_id` and are refused to
+    -- `anon`, because deciding what a wedding's artefacts look like is a host act. What a crawler sees
+    -- is an Open Graph *image*, served by the application from a bucket object, and serving it does not
+    -- require anybody to be able to call `render_invitation_document` without a session. If a later
+    -- head decides that an unauthenticated caller may ask for a rendered artefact, that decision arrives
+    -- on this line as a name — which is the whole reason this census is a set rather than a count.
     (SELECT array_agg(x ORDER BY x) FROM unnest(
         ARRAY['api.resolve_public_invitation',
               'internal_api.resolve_public_invitation']
@@ -826,8 +898,8 @@ BEGIN
         WHERE n.nspname IN ('public','api','private','legacy','internal_api')
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
     -- Fourteen names when this was written, sixteen from Stage 5, which paired one more wrapper
-    -- with one more body, twenty-six from Stage 7, which paired five, and thirty-eight from Stage 8,
-    -- which paired six. The pack-maintenance
+    -- with one more body, twenty-six from Stage 7, which paired five, thirty-eight from Stage 8,
+    -- which paired six, and forty-two from Stage 9, which paired two. The pack-maintenance
     -- bodies are absent from every version of this list because they are granted to nobody a
     -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
     -- appeared for one of them would show up as a diff in this set.
@@ -887,6 +959,17 @@ BEGIN
                            'internal_api.revoke_guest_invitation',
                            'internal_api.rotate_guest_invitation',
                            'internal_api.submit_guest_rsvp']
+                ELSE ARRAY[]::text[] END
+        -- Stage 9's four. Both of its names are counted twice, wrapper and body, and both are
+        -- signed-in only: a caller that owns the wedding asks what was rendered and asks for a frozen
+        -- document's DTO. Nothing here is a door a crawler walks through — the Open Graph image a
+        -- crawler fetches is served by the application, not by an RPC that takes a version id — which
+        -- is why C28a does not move for Stage 9 while this line does by exactly four.
+        || CASE WHEN pg_temp.st2_at_least('stage9')
+                THEN ARRAY['api.list_invitation_outputs',
+                           'api.render_invitation_document',
+                           'internal_api.list_invitation_outputs',
+                           'internal_api.render_invitation_document']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -937,6 +1020,13 @@ BEGIN
                            'revoke_guest_invitation',
                            'rotate_guest_invitation',
                            'submit_guest_rsvp']
+                ELSE ARRAY[]::text[] END
+        -- Stage 9's two, named rather than counted for the same reason: `render_invitation_document` is
+        -- the one callable on this boundary that takes a *version* rather than a wedding, because the
+        -- artefact a host reprints has to be the document that was frozen, not the draft beside it.
+        || CASE WHEN pg_temp.st2_at_least('stage9')
+                THEN ARRAY['list_invitation_outputs',
+                           'render_invitation_document']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
   -- "the credential never appears in a query string": with no parameter to name, a
@@ -1074,6 +1164,22 @@ BEGIN
                   'storage.buckets.protect_buckets_delete=protect_delete',
                   'storage.objects.protect_objects_delete=protect_delete',
                   'storage.objects.update_objects_updated_at=update_updated_at_column']
+                ELSE ARRAY[]::text[] END
+        -- Stage 9's six on the manifest row, listed in the order that explains them rather than in
+        -- collation order. Three are the house pattern every server-authored table carries —
+        -- `reject_client_write`, `reject_client_delete`, `touch_updated_at` — and the timestamp trigger
+        -- is named `set_updated_at` with no table prefix precisely because C37 identifies it by that
+        -- name. The other three are this stage's own: the key minter, which refuses a presented key and
+        -- writes one the caller cannot choose, and the pair of lifecycle guards that decide what a
+        -- status transition may touch. All six are INVOKER, which is what C32 keeps them.
+        || CASE WHEN pg_temp.st2_at_least('stage9')
+                THEN ARRAY[
+                  'public.invitation_outputs.invitation_outputs_mint_object_key=mint_invitation_output_key',
+                  'public.invitation_outputs.invitation_outputs_guard_update=guard_invitation_output_update',
+                  'public.invitation_outputs.invitation_outputs_guard_delete=guard_invitation_output_delete',
+                  'public.invitation_outputs.invitation_outputs_no_client_write=reject_client_write',
+                  'public.invitation_outputs.invitation_outputs_no_client_delete=reject_client_delete',
+                  'public.invitation_outputs.set_updated_at=touch_updated_at']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
@@ -1217,7 +1323,8 @@ BEGIN
                                           ~ (a.attname || ' *(>=|>) *(0|1)'))));
   -- ... and the bounded set is the one expected, so a column cannot dodge C42 by
   -- being renamed out of the pattern while still pretending to be a quantity.
-  PERFORM pg_temp.st2_set('C42b the quantity columns are exactly the eight expected',
+  PERFORM pg_temp.st2_set('C42b the quantity columns are exactly the '
+    || CASE WHEN pg_temp.st2_at_least('stage9') THEN 'ten' ELSE 'eight' END || ' expected',
     (SELECT array_agg(x ORDER BY x) FROM (
        SELECT c.relname || '.' || a.attname AS x
          FROM pg_attribute a
@@ -1231,11 +1338,33 @@ BEGIN
     -- Stage 4's entry is not a bookkeeping number: `release_number` is the ordinal that
     -- makes "revise this pack" mean *insert a row* rather than edit one, so a bound on it
     -- (and the UNIQUE (pack_id, release_number) key) is part of the immutability claim.
-    ARRAY['guest_households.expected_party_size','invitation_versions.version_number',
-          'rsvp_responses.party_size','tradition_pack_releases.release_number',
-          'wedding_assets.size_bytes',
-          'wedding_events.display_order','wedding_people.display_order',
-          'weddings.estimated_guest_count']);
+    --
+    -- Stage 9's two are bounded for reasons that are each part of a claim rather than bookkeeping.
+    -- `page_number` is a one-based ordinal, so a row claiming page zero or a negative page would be a
+    -- row no document could contain; its *ceiling* is deliberately not here, because twelve-page and
+    -- four-page limits live in `src/render/outputGeometry.ts` and a schema that restates them is a
+    -- second source that can disagree with the first. `attempt_count` is bounded above because a
+    -- renderer that retries without a ceiling is a queue that never drains, and the number a host is
+    -- shown when a render has failed is the number this column keeps.
+    --
+    -- Both lists are written in the order the measured side sorts them, because this assertion is
+    -- array equality, not set equality: a name that exists but sits in the wrong position is the same
+    -- failing line as one that is missing, and that is the stricter reading.
+    CASE WHEN pg_temp.st2_at_least('stage9') THEN
+      ARRAY['guest_households.expected_party_size',
+            'invitation_outputs.attempt_count','invitation_outputs.page_number',
+            'invitation_versions.version_number',
+            'rsvp_responses.party_size','tradition_pack_releases.release_number',
+            'wedding_assets.size_bytes',
+            'wedding_events.display_order','wedding_people.display_order',
+            'weddings.estimated_guest_count']
+    ELSE
+      ARRAY['guest_households.expected_party_size','invitation_versions.version_number',
+            'rsvp_responses.party_size','tradition_pack_releases.release_number',
+            'wedding_assets.size_bytes',
+            'wedding_events.display_order','wedding_people.display_order',
+            'weddings.estimated_guest_count']
+    END);
   -- Phase 66: the domain has no place for inherited or assumed identity. This is the
   -- domain contract as an executable statement, not a sentence in a document.
   PERFORM pg_temp.st2_ok('C43 no column encodes caste, community, religion or inferred identity',
@@ -1697,9 +1826,14 @@ BEGIN
   -- the inventories that grew in place — one more public table, one more read policy, one
   -- more server-authored table, five more triggers, three more foreign keys, one more
   -- bounded quantity — changed no assertion count, which is worth saying because a reader
-  -- comparing totals would otherwise look for a change that is not there. Re-measure and
-  -- say so whenever a check is added or removed: a floor nobody re-measures stops
-  -- meaning anything.
+  -- comparing totals would otherwise look for a change that is not there. Stage 9 re-measured at its
+  -- own head and the total is still 103 for the same reason: one more public table, one more read
+  -- policy, one more server-authored table, six more triggers, two more foreign keys, two more bounded
+  -- quantities and two more paired callables were all absorbed by the inventories above, which are
+  -- lists rather than counts. What Stage 9 asserts about the *shape* of a render row — that a key
+  -- cannot be presented, that a status may only move along a registered edge, that a `ready` row
+  -- carries the digest of bytes it did not invent — belongs to its own battery, not here. Re-measure
+  -- and say so whenever a check is added or removed: a floor nobody re-measures stops meaning anything.
   IF (current_setting('st2.passed'))::int < 103 THEN
     RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 103',
       (current_setting('st2.passed'))::int;

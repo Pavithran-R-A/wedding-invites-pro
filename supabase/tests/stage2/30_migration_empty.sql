@@ -78,12 +78,43 @@ BEGIN
   RETURN code;
 END $$;
 
+-- Which head this file is being read at. Same idiom as `40_catalog.sql`, and it is here for the same
+-- reason: E01 and E02 compare against a *declared* inventory, so a stage that adds a canonical table
+-- has to say so without changing what the older chains are expected to contain. Unset means the
+-- pre-Stage-5 runners, which keep their own numbers.
+CREATE FUNCTION pg_temp.st2_head() RETURNS text
+LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(current_setting('app.stage_head', true), 'stage4') $fn$;
+
+-- Ordinal, not equality, because heads are cumulative: a check keyed on `= 'stage9'` would hand the
+-- Stage 9 chain the pre-Stage-9 expectation the moment a Stage 10 appeared. A malformed head raises
+-- instead of choosing a branch, so a typo in PGOPTIONS reports itself rather than passing.
+CREATE FUNCTION pg_temp.st2_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.st2_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 'st2_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.st2_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.st2_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$fn$;
+
 DO $EMPTY$
 DECLARE
   r record;
   n bigint;
+  rels text;
   -- Every table the Stage 2 chain owns. `profiles` and `user_roles` are absent on
   -- purpose: they predate Stage 2 and remain live account tables.
+  --
+  -- Head-aware because E01 is a set comparison and E02 loops this same list: a stage that
+  -- legitimately adds a canonical table must say so here, and a chain that does not have it
+  -- must not be handed the later expectation. The Stage 9 manifest is the first arrival since
+  -- Stage 4's catalogue tables.
   canonical text[] := ARRAY[
     'public.approval_feedback', 'public.approval_requests', 'public.design_templates',
     'public.entitlements', 'public.guest_households', 'public.household_event_scopes',
@@ -95,7 +126,9 @@ DECLARE
     'legacy.activity_logs', 'legacy.guests', 'legacy.migration_findings',
     'legacy.orders', 'legacy.payments', 'legacy.printers', 'legacy.projects',
     'legacy.templates'
-  ];
+  ] || CASE WHEN pg_temp.st2_at_least('stage9')
+            THEN ARRAY['public.invitation_outputs']
+            ELSE ARRAY[]::text[] END;
 BEGIN
 
   -- ============================================== 1. the inventory is declared
@@ -141,19 +174,28 @@ BEGIN
 
   -- ==================================================== 3. the schema is still there
 
-  PERFORM pg_temp.st2_count('E09 every base table the chain owns exists (27 canonical + profiles + user_roles)',
+  -- Derived rather than remembered: E01 has just proved that the live inventory equals
+  -- `canonical`, so the only thing this check adds is that the two account tables are still
+  -- present alongside it. Asking for a literal here would mean this line moves every time a
+  -- stage declares a table, and a line that always moves is a line nobody checks.
+  PERFORM pg_temp.st2_count('E09 every base table the chain owns exists ('
+      || cardinality(canonical) || ' canonical + profiles + user_roles)',
     'information_schema.tables WHERE table_schema IN (''public'',''private'',''legacy'')
-       AND table_type = ''BASE TABLE''', 29);
+       AND table_type = ''BASE TABLE''', cardinality(canonical) + 2);
 
   -- RLS state is identical whether or not rows arrived: an empty table with RLS off is
   -- still a hole waiting for its first INSERT.
+  --
+  -- The name list is built from `canonical` instead of being typed out a second time, which
+  -- is what keeps the two halves of this file able to disagree. Stage 9's manifest is
+  -- server-written and read by its owner over exactly one SELECT policy, so an INSERT
+  -- landing on it from a browser role would have nowhere to hide.
+  SELECT string_agg(quote_literal(replace(x, 'public.', '')), ',' ORDER BY x)
+    INTO rels FROM unnest(canonical) x WHERE x LIKE 'public.%';
   PERFORM pg_temp.st2_count('E10 RLS is enabled on every canonical public table',
     'pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = ''public'' AND c.relrowsecurity = false
-       AND c.relname IN (''approval_feedback'',''approval_requests'',''design_templates'',
-         ''entitlements'',''guest_households'',''household_event_scopes'',''invitation_drafts'',
-         ''invitation_versions'',''publications'',''rsvp_responses'',''tradition_pack_releases'',
-         ''tradition_packs'',''venues'',''wedding_assets'',''wedding_events'',''wedding_people'',''weddings'')', 0);
+       AND c.relname IN (' || rels || ')', 0);
 
   PERFORM pg_temp.st2_count('E11 the browser roles can name only the public schema',
     '(VALUES (''anon''),(''authenticated'')) x(rolname)
@@ -195,15 +237,16 @@ $EMPTY$;
 
 -- A suite whose assertions can all be deleted one at a time still prints "PASSED", so
 -- the floor is checked before that word is used. The floor is derived, not remembered:
--- 1 inventory check (E01) + one emptiness check per canonical table (E02, 27 of them)
--- + the 14 fixed probes (E03-E16) = 42, so declaring a new table must move this number
--- and deleting an assertion must break it.
+-- 1 inventory check (E01) + one emptiness check per canonical table (E02) + the 14 fixed
+-- probes (E03-E16). E02's count is the declared inventory's size, so declaring a new
+-- canonical table moves this number by exactly one and deleting an assertion breaks it.
 DO $FLOOR$
-DECLARE n int;
+DECLARE n int; floor int;
 BEGIN
   n := coalesce(current_setting('st2.passed', true), '0')::int;
-  IF n < 42 THEN
-    RAISE EXCEPTION 'Stage 2 clean-chain suite ran only % assertions (floor 42)', n;
+  floor := 1 + 14 + CASE WHEN pg_temp.st2_at_least('stage9') THEN 28 ELSE 27 END;
+  IF n < floor THEN
+    RAISE EXCEPTION 'Stage 2 clean-chain suite ran only % assertions (floor %)', n, floor;
   END IF;
 END
 $FLOOR$;
