@@ -26,6 +26,10 @@
 //     `teaser-does-not-fit`, and share content taller than the last quantised box is `paginate`. Neither
 //     produces a file: §5 makes "never cropped" and "never a complete document" two different promises,
 //     and both are kept by refusing to hand over the wrong artefact rather than handing it over quietly.
+//   * **A sheet that is not the paper it was asked for.** `Page.printToPDF` is sent the inches
+//     `pdfPrintParams()` states and the answer is read back out of the file's own `/MediaBox` and
+//     `/Count`. Wrong numbers, a page tree the reader cannot settle, or more sheets than §5's bound is
+//     `pdf-box-mismatch`, `pdf-page-count-*` and `too-many-pages`, and none of them reaches disk.
 //   * **A byte past the ceiling, a render past its deadline, a plate that is not an integer box.**
 //     §11.4's bounds are arithmetic here — one serialised chain, one page in one context, a wall-clock
 //     race, a size test on the bytes before they reach disk — and each overrun is a named reason with
@@ -38,15 +42,19 @@
 // font bytes, the encoder settings, the box and the applied plan — which is what turns §13's "is this
 // artefact stale?" from a conversation into a query.
 //
-// What is deliberately NOT here yet, because a slice boundary is a claim and not a silence: PDF output
-// (the paper boxes and the `@page`-precedence measurement in §6.3), the second page of a paginated
-// share set, Storage upload, and the `invitation_outputs` rows. The record this file returns already
-// carries the manifest's columns, so the migration changes where a record goes, not what it says.
+// What is deliberately NOT here yet, because a slice boundary is a claim and not a silence: the second
+// page of a paginated share set, Storage upload, and the `invitation_outputs` rows. PDF output *is* here
+// — the whole document on either paper, with the sheet size and page count read back from the produced
+// bytes before they are written — and §6.3's text-layer and per-script glyph checks are the output
+// tier's, because they belong to the artefact a guest will hold rather than to the call that made it.
+// The record this file returns already carries the manifest's columns, so the migration changes where a
+// record goes, not what it says.
 //
 // Usage (as a module — the entry point is `scripts/stage9-render-raster.mjs`):
 //
 //   const worker = await openRenderWorker({ origin: 'http://127.0.0.1:4173', outputDir });
 //   const teaser = await worker.renderOgTeaser({ dto });
+//   const sheet = await worker.renderPdf({ dto, paper: 'a4' });
 //   await worker.close();
 
 import { createHash } from 'node:crypto';
@@ -59,10 +67,14 @@ import { parseInvitationObject } from '../src/lib/publicInvitation.ts';
 import { QR_SURFACE } from '../src/lib/renderSurfaces.ts';
 import {
   BYTE_CEILINGS,
+  MAX_PDF_PAGES,
   OG_BOX,
   OG_DROP_ORDER,
+  PDF_MEDIA_BOX_PT,
   SHARE_WIDTH,
   chooseShareBox,
+  isPaperVariant,
+  pdfPrintParams,
   planOgFit,
 } from '../src/render/outputGeometry.ts';
 
@@ -191,6 +203,151 @@ export function withinByteCeiling(bytes, format) {
   return bytes.length <= ceiling
     ? { ok: true, ceiling }
     : { ok: false, reason: 'bytes-over-ceiling', bytes: bytes.length, ceiling };
+}
+
+const PT_PER_MM = 72 / 25.4;
+const mmFromPt = (points) => Number((points / PT_PER_MM).toFixed(3));
+const asPdfText = (bytes) => (typeof bytes === 'string' ? bytes : bytes.toString('latin1'));
+
+/** The empty answer every refusal shape carries, so a caller reading `out.pageCount` after a failure
+ *  gets `null` rather than `undefined` and cannot mistake "unreadable" for "no pages". */
+const NO_PDF_STRUCTURE = {
+  mediaBoxes: [],
+  pageCount: null,
+  pageTreeCounts: [],
+  pageObjectCount: null,
+  fonts: { baseFonts: [], fontFile2: 0, fontFile3: 0, type3: 0, toUnicode: 0 },
+  linkTargets: [],
+  producer: null,
+  dates: { creation: null, modified: null },
+  hasDocumentId: false,
+  tagged: false,
+};
+
+/** What a produced PDF says about itself, read out of its own bytes.
+ *
+ *  This is a description, not a verdict: it never says "wrong paper" or "too many pages". Those are
+ *  refusals, and a refusal has to happen at the one place that can still avoid putting a file on disk
+ *  (`writeArtefact`), so a reader that also refused would make the guard possible to walk around.
+ *
+ *  It reads the uncompressed object dictionaries and nothing else, which is a measurement rather than
+ *  an assumption: every key asked for here answers in plain text in Chrome 155's output —
+ *  `q9-logs/pdf-probe/{c2-a4,p2-long-a4,p4-ta}.pdf` carry `/ObjStm` zero times, and the raw bytes of
+ *  those files contain `/MediaBox`, `/Count`, `/Producer`, `/FontFile2`, `/ToUnicode`, `/URI`,
+ *  `/StructTreeRoot` and `/CreationDate` (`q9-logs/pdf-controls2-measured.txt` counted them). A future
+ *  producer that moved the page tree into a compressed object stream would therefore produce
+ *  `pdf-page-count-unreadable` and no file, which is the right half of the bargain: an unreadable
+ *  artefact is a refusal, never a silent one-pager.
+ *
+ *  `/MediaBox` is *deduplicated* because Chrome writes one per page — five occurrences in the
+ *  five-page probe file, all the same numbers. Keeping them distinct is what lets a document that
+ *  changes paper mid-run be seen as two boxes instead of averaged into whichever sheet was read first.
+ */
+export function readPdfStructure(bytes) {
+  const text = asPdfText(bytes);
+  if (/^%PDF-[0-9]/.test(text) === false) {
+    return { ok: false, reason: 'pdf-header-missing', ...NO_PDF_STRUCTURE };
+  }
+
+  const mediaBoxes = [];
+  for (const found of text.matchAll(/\/MediaBox\s*\[\s*([-\d.]+\s+[-\d.]+\s+[-\d.]+\s+[-\d.]+)\s*\]/g)) {
+    const numbers = found[1].trim().split(/\s+/).map(Number);
+    const box = {
+      widthPt: numbers[2], heightPt: numbers[3],
+      widthMm: mmFromPt(numbers[2]), heightMm: mmFromPt(numbers[3]),
+    };
+    if (mediaBoxes.some((seen) => seen.widthPt === box.widthPt && seen.heightPt === box.heightPt)) {
+      continue;
+    }
+    mediaBoxes.push(box);
+  }
+
+  const pageTreeCounts = [...text.matchAll(/\/Count\s+(\d+)/g)].map((found) => Number(found[1]));
+  const pageObjectCount = (text.match(/\/Type\s*\/Page(?![s])/g) || []).length;
+  if (pageTreeCounts.length === 0 || pageObjectCount === 0) {
+    return {
+      ok: false, reason: 'pdf-page-count-unreadable',
+      ...NO_PDF_STRUCTURE, mediaBoxes, pageTreeCounts, pageObjectCount,
+    };
+  }
+  // Two independent readings of "how many sheets", and both have to answer.
+  //
+  // The leaf dictionaries are one per sheet by construction. The `/Count` values are the producer's own
+  // arithmetic, and measured on this browser they are **not** one number per file: a document of five and
+  // of seven sheets is a flat tree (`/Count 5`, `/Count 7`), but a sixteen-sheet document nests —
+  // `/Count 8`, `/Count 8` and a root `/Count 16` (`q9-logs/pdf-count-investigated.txt`, files in
+  // `q9-logs/pdf-count-probe/`). The root total is therefore the largest value, and the earlier shape of
+  // this guard ("all `/Count` must be equal") refused legitimate long invitations as ambiguous — a false
+  // refusal is as much a broken export as a silent wrong count, and it also hid §5's sheet bound behind
+  // the wrong reason. What neither reading can settle on its own, the pair can: if the biggest `/Count`
+  // is not the number of page objects, the tree does not add up to its own leaves.
+  const pageCount = Math.max(...pageTreeCounts);
+  if (pageCount !== pageObjectCount) {
+    return {
+      ok: false, reason: 'pdf-page-count-ambiguous',
+      ...NO_PDF_STRUCTURE, mediaBoxes, pageTreeCounts, pageObjectCount, pageCount,
+    };
+  }
+
+  return {
+    ok: true,
+    mediaBoxes,
+    pageCount,
+    pageTreeCounts,
+    pageObjectCount,
+    fonts: {
+      baseFonts: [...new Set([...text.matchAll(/\/BaseFont\s*\/([^\s/>]+)/g)]
+        .map((found) => `/${found[1]}`))],
+      fontFile2: (text.match(/\/FontFile2/g) || []).length,
+      fontFile3: (text.match(/\/FontFile3/g) || []).length,
+      type3: (text.match(/\/Subtype\s*\/Type3/g) || []).length,
+      toUnicode: (text.match(/\/ToUnicode/g) || []).length,
+    },
+    linkTargets: [...new Set([...text.matchAll(/\/URI\s*\(([^)]*)\)/g)].map((found) => found[1]))],
+    producer: text.match(/\/Producer\s*\(([^)]*)\)/)?.[1] ?? null,
+    dates: {
+      creation: text.match(/\/CreationDate\s*\(([^)]*)\)/)?.[1] ?? null,
+      modified: text.match(/\/ModDate\s*\(([^)]*)\)/)?.[1] ?? null,
+    },
+    hasDocumentId: /\/ID\s*\[/.test(text),
+    tagged: /\/StructTreeRoot/.test(text),
+  };
+}
+
+/** The stamp `readPdfStructure` writes into both date keys, exactly as long as what Skia writes
+ *  (`D:` + 14 digits + a `±HH'MM'` offset) so the replacement cannot move a byte offset. */
+const PDF_DATE_EPOCH = `D:19700101000000+00'00'`;
+const PDF_DATE = /(\/(?:CreationDate|ModDate)\s*\()D:\d{14}[+-]\d{2}'\d{2}'(?=\))/g;
+
+/** The metadata half of §13's determinism question, taken out of the comparison.
+ *
+ *  A produced PDF carries a creation time, so two honest renders of the same invitation minutes apart
+ *  are not byte-identical and never claimed to be (the design separates visual equivalence, content
+ *  equivalence and byte-identity for exactly this reason). Measured on this browser
+ *  (`q9-logs/pdf-override-measured.txt`): two cycles of the worker's own print sequence differed in
+ *  four bytes, which is the `CreationDate`/`ModDate` digit pair and nothing else.
+ *
+ *  So the determinism check compares normalised bytes, and a normalisation that changed the file's
+ *  length would be worse than no normalisation: a PDF's cross-reference table is absolute offsets, so
+ *  the instrument would then be comparing two broken files. That is why the pattern is strict —
+ *  a stamp in an unexpected shape is left alone and the whole call refuses as `no-pdf-timestamps`
+ *  rather than quietly returning the input and reading as a successful normalisation. */
+export function normalisePdfTimestamps(bytes) {
+  const text = asPdfText(bytes);
+  let replaced = 0;
+  const normalised = text.replace(PDF_DATE, (whole, prefix) => {
+    replaced += 1;
+    return `${prefix}${PDF_DATE_EPOCH}`;
+  });
+  if (replaced === 0) {
+    return { ok: false, reason: 'no-pdf-timestamps', replaced: 0, bytes };
+  }
+  if (normalised.length !== text.length) {
+    // Unreachable through the pattern above, and kept as a named refusal rather than an assertion
+    // because the consequence — an unopenable file that compares "deterministic" — is silent.
+    return { ok: false, reason: 'pdf-normalisation-changed-length', replaced, bytes };
+  }
+  return { ok: true, replaced, bytes: Buffer.from(normalised, 'latin1') };
 }
 
 /** SHA-256 over the face bytes **as they are on disk now**, plus each family's pinned package, version
@@ -528,8 +685,10 @@ export async function openRenderWorker({
 
     /** Bytes → ceiling → dimension read-back → disk → digests. The dimension check is not paranoia
      *  about Chromium: §5's contract is a *box*, and a 1199×630 file is a different artefact wearing
-     *  the same content digest. The gate is checked here, at the one point where bytes would reach a
-     *  filesystem, so a render whose caller already got `render-timeout` cannot leave a file behind. */
+     *  the same content digest. For a PDF the read-back is the `/MediaBox` the producer wrote and the
+     *  `/Count` in its page tree, which is the same idea applied to the one artefact kind that states
+     *  its own size. The gate is checked here, at the one point where bytes would reach a filesystem,
+     *  so a render whose caller already got `render-timeout` cannot leave a file behind. */
     const writeArtefact = async ({
       kind, variant, format, pageNumber, box, bytes, derivation, gate,
     }) => {
@@ -543,15 +702,43 @@ export async function openRenderWorker({
       if (ceiling.ok === false) {
         return { ok: false, reason: ceiling.reason, bytes: ceiling.bytes, ceiling: ceiling.ceiling };
       }
-      const dims = imageDimensions(bytes, format);
-      if (dims.ok === false) return { ok: false, reason: `image-header-${dims.reason}` };
-      if (dims.width !== box.width || dims.height !== box.height) {
-        return {
-          ok: false,
-          reason: 'artefact-box-mismatch',
-          expected: `${box.width}x${box.height}`,
-          found: `${dims.width}x${dims.height}`,
-        };
+      if (format === 'pdf') {
+        // A PDF has no IHDR, so its "did I get the box I asked for" question is answered by the
+        // `/MediaBox` the producer wrote — which is the browser's own account of the sheet, not this
+        // worker's request. Compared exactly: `PDF_MEDIA_BOX_PT` holds the numbers Chrome answers with
+        // (`q9-logs/pdf-controls2-measured.txt` P1, five decimal places on both papers), so a future
+        // producer that rounds differently has changed the artefact and should say so in a refusal
+        // rather than be absorbed by a tolerance.
+        const expected = PDF_MEDIA_BOX_PT[variant];
+        if (expected === undefined) return { ok: false, reason: 'pdf-paper-unknown', variant };
+        const pdf = readPdfStructure(bytes);
+        if (pdf.ok === false) return { ok: false, reason: pdf.reason };
+        if (pdf.mediaBoxes.length !== 1
+          || pdf.mediaBoxes[0].widthPt !== expected.width
+          || pdf.mediaBoxes[0].heightPt !== expected.height) {
+          return {
+            ok: false,
+            reason: 'pdf-box-mismatch',
+            expected: `${expected.width}x${expected.height}`,
+            found: pdf.mediaBoxes.map((b) => `${b.widthPt}x${b.heightPt}`).join(', ') || 'none',
+          };
+        }
+        if (pdf.pageCount > MAX_PDF_PAGES) {
+          // §5's bounded sheet count. Refusing rather than clipping is what makes "the whole
+          // invitation, paginated" and "a truncated invitation" two different answers.
+          return { ok: false, reason: 'too-many-pages', pages: pdf.pageCount, ceiling: MAX_PDF_PAGES };
+        }
+      } else {
+        const dims = imageDimensions(bytes, format);
+        if (dims.ok === false) return { ok: false, reason: `image-header-${dims.reason}` };
+        if (dims.width !== box.width || dims.height !== box.height) {
+          return {
+            ok: false,
+            reason: 'artefact-box-mismatch',
+            expected: `${box.width}x${box.height}`,
+            found: `${dims.width}x${dims.height}`,
+          };
+        }
       }
       const name = `${kind}_${variant}_p${pageNumber}.${format}`;
       const path = join(outputDir, name);
@@ -743,6 +930,96 @@ export async function openRenderWorker({
             ...derivation,
             artefacts: artefacts.map(({ config_inputs, ...row }) => row),
             config_inputs: artefacts[0].config_inputs,
+          };
+        });
+      },
+
+      /** The whole document on paper: §5's paginated sheet, at the host's own lead size, with nothing
+       *  scaled and nothing dropped — the same restraint the share image obeys, for the same reason.
+       *
+       *  The paper is stated in inches to the browser and read back in points from the file, because
+       *  those are two different facts: `pdfPrintParams(paper)` is the request, `PDF_MEDIA_BOX_PT` is
+       *  the answer Chrome 155 gives to that request, and the guard in `writeArtefact` compares the
+       *  answer against the latter so a mismatch refuses rather than delivering a differently-sized
+       *  sheet (`q9-logs/pdf-controls2-measured.txt` P1: A4 comes out 595.91998 × 841.91998 pt —
+       *  0.227 mm wider than nominal, from both the exact metric inches and the rounded 8.27 × 11.69).
+       *
+       *  No device-metrics reset happens here, and that is a measurement rather than an omission: the
+       *  raster path leaves a viewport override on this page, so the obvious defence was to clear it
+       *  before printing. It changes nothing. Printing the same document with a 1200×630 override
+       *  active, after clearing, and again after a 1080×2160 override produced byte-identical one-pagers
+       *  and the same `/Count 5` for the five-page one — 0 differing bytes across every state, at both
+       *  document lengths (`q9-logs/pdf-override-measured.txt`, `q9-logs/pdf-override-long-measured.txt`).
+       *  `Page.printToPDF` lays out against the paper it is given. A `clearDeviceMetricsOverride` call
+       *  whose stated reason the browser contradicts would be superstition in worker clothing, and it
+       *  would also widen §6.4's capability list with a method this stage's contract does not depend on. */
+      async renderPdf({ dto, paper }) {
+        if (isPaperVariant(paper) === false) {
+          return { ok: false, reason: 'paper-variant-unknown', paper: String(paper) };
+        }
+        const parsed = parseGate(dto);
+        if (parsed.ok === false) return parsed;
+        return withDeadline(async (deadline) => {
+          await clearApplied();
+          const mounted = await mount({ surface: 'pdf', dto });
+          if (mounted.ok === false) return mounted;
+          const printed = await serialised(() => page.cdp('Page.printToPDF', pdfPrintParams(paper)));
+          const bytes = Buffer.from(printed.data, 'base64');
+          const structure = readPdfStructure(bytes);
+          state.renders += 1;
+
+          // Two shapes, split on whether the field can move while the document does not. Everything in
+          // `derivation` is hashed into `render_config_hash`, so it holds the file's geometry, its font
+          // structure and its page count — the facts that say *this* artefact came from *this*
+          // arithmetic. The creation stamps cannot go in there: `readPdfStructure` reads them because
+          // §13's determinism check has to normalise them, and a timestamp inside a staleness hash
+          // would mark every PDF stale the second it was printed. `pdf_metadata` therefore travels in
+          // the record and not in the digest.
+          const derivation = {
+            fit_plan: null,
+            paper,
+            print_params: pdfPrintParams(paper),
+            pdf: {
+              media_box: structure.mediaBoxes,
+              page_count: structure.pageCount,
+              fonts: structure.fonts,
+              tagged: structure.tagged,
+              has_document_id: structure.hasDocumentId,
+              // A count, not the addresses: §11.7 keeps a URL out of every place the product writes
+              // except the artefact that needs it, and the output tier that has to prove the
+              // annotations are public reads them out of the file itself.
+              link_annotations: structure.linkTargets.length,
+            },
+          };
+          if (structure.ok === false) {
+            return { ...structure, ...derivation, pdf_metadata: null };
+          }
+
+          const expected = PDF_MEDIA_BOX_PT[paper];
+          const written = await writeArtefact({
+            kind: 'pdf',
+            variant: paper,
+            format: 'pdf',
+            pageNumber: 1,
+            box: { width: expected.width, height: expected.height, dpr: 1 },
+            bytes,
+            derivation,
+            gate: deadline,
+          });
+          if (written.ok === false) return { ...written, ...derivation };
+          return {
+            ok: true,
+            kind: 'pdf',
+            paper,
+            source_dto_digest: parsed.source_dto_digest,
+            ...derivation,
+            pdf_metadata: {
+              producer: structure.producer,
+              dates: structure.dates,
+              has_document_id: structure.hasDocumentId,
+            },
+            artefacts: [written].map(({ config_inputs, ...row }) => row),
+            config_inputs: written.config_inputs,
           };
         });
       },
