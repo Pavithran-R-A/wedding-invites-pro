@@ -42,9 +42,14 @@ describe("domain contract", () => {
     // The inventory below is only as trustworthy as this line: an unparsed statement would mean
     // the assertions are looking at a schema with holes in it.
     expect(unparsed).toEqual([]);
-    // 19 since Stage 4 added `tradition_pack_releases`; the count is the tripwire that makes
-    // the inventory assertions below worth reading.
-    expect(publicKeys.length).toBe(19);
+    // 20 since Stage 9 added `public.invitation_outputs`, the render manifest; 19 before that, from
+    // Stage 4's `tradition_pack_releases`. The count is the tripwire that makes the inventory
+    // assertions below worth reading, and it is not the only one: the line after it names the new
+    // table, and `declares to the client exactly the public canonical tables` compares this whole set
+    // against the generated client types — so a table that arrived from nowhere cannot pass by only
+    // moving the number.
+    expect(publicKeys.length).toBe(20);
+    expect(publicKeys).toContain("public.invitation_outputs");
     expect(privateKeys.sort()).toEqual(["private.access_tokens", "private.audit_events"]);
     expect(legacyKeys.length).toBe(8);
   });
