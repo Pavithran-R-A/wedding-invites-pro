@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   verify:
-    name: Install, lint, typecheck, product contract, test, build
+    name: Install, lint, typecheck, product contract, test, build, bundle boundary
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -48,6 +48,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Bundle boundary
+        # Reads the chunks the step above just emitted, so it cannot run earlier: §9.4's promise is
+        # about the bytes a guest's phone downloads, which no source-side rule can prove.
+        run: npm run bundle:check
 
   security:
     name: Secret and dependency hygiene

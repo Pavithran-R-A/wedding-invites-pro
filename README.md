@@ -776,8 +776,8 @@ document promises once it gets to the screen.
 ## GitHub CI note
 
 `.github/workflows/ci.yml` runs `verify` (clean install, lint, typecheck, product contract check,
-unit tests, build) and `security` (env-file and credential scanning, production `npm audit`) on
-pushes and pull requests targeting `main`.
+unit tests, build, bundle boundary check) and `security` (env-file and credential scanning,
+production `npm audit`) on pushes and pull requests targeting `main`.
 
 Hosted-runner verification is currently **deferred**: this private repository's monthly runner
 allocation is exhausted, so some runs conclude `failure` after zero steps with no runner ever

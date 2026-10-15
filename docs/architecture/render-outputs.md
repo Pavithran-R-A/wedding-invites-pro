@@ -185,8 +185,11 @@ come out" — the encoder cannot refuse on the caller's behalf. `qrcode` is ther
 `1.5.4` and imported **only** as `qrcode/lib/core/qrcode.js`, which is what keeps the reachable graph
 at the middle column rather than at 35 files / 84,275 bytes (the browser entry pulls in `pngjs` and
 `yargs` for renderers the harness never calls, because Chromium paints the plate). The import is
-reachable only from `dist/render.*`; the bundle instrument reports the render entry and the guest
-bundle separately, so a QR library in a guest's download is caught rather than hoped away.
+reachable only from `dist/render.*`, and that is measured rather than asserted:
+`scripts/check-bundle-boundary.mjs` (`npm run bundle:check`, the CI step that follows Build) reads the
+emitted chunks and their preload lists, and reports the render entry, each guest door, the host editor
+and the plate affordance separately — so a QR library in a guest's download is a finding with the edge
+that brought it, not a hope.
 
 ## 7. Bounds (§11.4)
 

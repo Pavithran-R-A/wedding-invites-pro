@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "product:check": "node scripts/check-product-contract.mjs",
     "render:check": "node scripts/check-render-assets.mjs",
+    "bundle:check": "node scripts/check-bundle-boundary.mjs",
     "dbtypes:check": "node scripts/check-db-contract.mjs"
   },
   "dependencies": {
