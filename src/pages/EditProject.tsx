@@ -86,6 +86,7 @@ import TraditionPackPanel from '@/components/invitation/TraditionPackPanel';
 import WeddingAssetsPanel from '@/components/invitation/WeddingAssetsPanel';
 import FamilyReviewPanel from '@/components/invitation/FamilyReviewPanel';
 import PublicationPanel from '@/components/invitation/PublicationPanel';
+import InvitationOutputsPanel from '@/components/invitation/InvitationOutputsPanel';
 import GuestInvitationPanel from '@/components/invitation/GuestInvitationPanel';
 import GuestRepliesPanel from '@/components/invitation/GuestRepliesPanel';
 
@@ -413,6 +414,12 @@ const EditProject = () => {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /** Bumped by the three acts that decide what the recorded files mean: a republish puts an older
+   *  version's artefacts behind the live document, a rotation moves the address a QR points at, and a
+   *  take-down closes the door both open onto (§9.2). The panel re-reads from this number rather than
+   *  being handed rows, because it is the only thing that can ask for a signed address later. */
+  const [outputsRefreshKey, setOutputsRefreshKey] = useState(0);
+  const refreshOutputs = () => setOutputsRefreshKey(value => value + 1);
 
   const dirty = design !== null && editKey(editor, draft) !== baseline;
   const absolutePath = (path: string) => `${window.location.origin}${path}`;
@@ -557,6 +564,7 @@ const EditProject = () => {
           : 'This version is published.');
       }
       void refreshState();
+      refreshOutputs();
     });
   };
 
@@ -566,6 +574,7 @@ const EditProject = () => {
       setShareUrl(absolutePath(rotated.path));
       setMessage('A new address was created and the old one was retired. Copy it now.');
       void refreshState();
+      refreshOutputs();
     });
   };
 
@@ -579,6 +588,7 @@ const EditProject = () => {
           : 'There was no live link to take down.',
       );
       void refreshState();
+      refreshOutputs();
     });
   };
 
@@ -888,6 +898,14 @@ const EditProject = () => {
             onRotate={handleRotate}
             onRevoke={handleRevoke}
           />
+
+          <Separator />
+
+          {/* Stage 9's files come next because they are derived from the step above: every one of them
+              was drawn from a frozen version and, for a QR, from the address that panel just minted.
+              The panel reads the manifest and hands out 60-second signed addresses; it cannot start a
+              render, which is what its empty state says out loud. */}
+          <InvitationOutputsPanel weddingId={id} refreshKey={outputsRefreshKey} />
 
           <Separator />
 

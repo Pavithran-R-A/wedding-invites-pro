@@ -17,7 +17,7 @@
 // frozen stays readable, and publishing it is still offered.
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import PublicationPanel from "@/components/invitation/PublicationPanel";
 import type {
   PublicationState,
@@ -246,5 +246,50 @@ describe("an invitation standing on a retired release", () => {
     // `deprecated` is the column's word, and `status_is_current` the JSON key it came from. A
     // host reading either has been shown a schema rather than an invitation.
     expect(container.textContent).not.toMatch(/deprecated|status_is_current|release_id|isCurrent/);
+  });
+});
+
+// Stage 9's two additions to this panel, tested where the affordance lives rather than in
+// `shareQrPlate.test.tsx`: when the plate is offered at all, and what the panel says about paper.
+describe("the QR plate a host can scan", () => {
+  const LOCAL = 'http://localhost:5173/i/abcdefghijabcdefghijabcdefghijabcdefghijabcde';
+
+  it("offers a plate only in the session that is holding the address", () => {
+    renderPanel({ state: LIVE });
+    // No address on screen means nothing to encode, so the control is absent rather than a button
+    // that would answer "there is no address" — §9.1's rule that a plate cannot be re-minted from
+    // the store, which keeps only a digest.
+    expect(screen.queryByRole('button', { name: /QR plate/i })).toBeNull();
+
+    renderPanel({ state: LIVE, shareUrl: LOCAL });
+    expect(screen.getByRole('button', { name: 'Show a QR plate to scan' })).toBeEnabled();
+    expect(screen.getByText(/A plate is drawn only while this page still holds the address/)).toBeInTheDocument();
+  });
+
+  it("loads the plate on the host's press and refuses to draw one for a local address, in words", async () => {
+    const { container } = renderPanel({ state: LIVE, shareUrl: LOCAL });
+    fireEvent.click(screen.getByRole('button', { name: 'Show a QR plate to scan' }));
+    // The encoder is a lazily loaded chunk, so the answer arrives asynchronously. What must not
+    // arrive is a square of modules: §9.3 refuses a `http` origin outright, and the local run has
+    // to see the reason rather than a plate that would scan on this machine and nowhere else.
+    expect(await screen.findByText(/not an https one/)).toBeInTheDocument();
+    expect(container.querySelector('canvas')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Hide the QR plate' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it("warns about printed paper beside the two buttons that end an address, and claims nothing else", () => {
+    const { container } = renderPanel({ state: LIVE });
+    expect(screen.getByText(/If you have printed this QR, reprint it from the new address/)).toBeInTheDocument();
+    // Where the recorded files are described, named so a host can find them — and the honest limit:
+    // no code in this build retires a manifest row when a token turns over, so the panel says what
+    // it cannot do instead of promising the files go away.
+    expect(container.textContent).toContain('Files made from your invitation');
+    expect(container.textContent).toContain('nothing on this page can withdraw a sheet that left the room');
+    expect(container.textContent).not.toMatch(/will be deleted|are retired when you (rotate|take)/i);
+  });
+
+  it("says nothing about reprinting while there is no live address to reprint from", () => {
+    const { container } = renderPanel({ state: RENDERED });
+    expect(container.textContent).not.toMatch(/If you have printed this QR/);
   });
 });

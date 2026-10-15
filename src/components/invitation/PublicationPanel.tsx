@@ -22,7 +22,7 @@
 //     because a host who is told their pack is out of date will otherwise assume the page their
 //     guests are reading is about to change under them.
 
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type {
   PublicationState,
@@ -30,6 +30,12 @@ import type {
 } from '@/integrations/supabase/publication';
 import type { StoredInvitationVersion } from '@/integrations/supabase/weddings';
 import { retiredReleaseNotice } from '@/lib/invitationAuthoring';
+
+// Loaded on the host's press, never at module scope. §9.4 confines the QR encoder to the render entry
+// and forbids it in the guest bundle; this panel is reached from the host's editor, whose chunk may
+// carry it, but a static import here would still put the encoder on the path the editor walks before a
+// guest ever exists. The built-chunk sweep reads `dist/` for exactly that.
+const ShareQrPlate = lazy(() => import('./ShareQrPlate'));
 
 export interface PublicationPanelProps {
   /** The address this session was handed, or null when none was minted. */
@@ -117,6 +123,9 @@ const PublicationPanel = ({
 }: PublicationPanelProps) => {
   const [versionId, setVersionId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** Whether the plate is on screen. Off by default: the encoder is a lazily loaded dependency, and a
+   *  host who never wants a printed code should not pay for the chunk. */
+  const [showQr, setShowQr] = useState(false);
   const selected = versionId ?? versions[0]?.id ?? null;
   const latest = versions[0] ?? null;
 
@@ -257,6 +266,29 @@ const PublicationPanel = ({
           <p role="status" aria-live="polite" className="text-[11px] text-muted-foreground">
             {copied ? 'Copied to the clipboard.' : 'Nothing has been sent. Copy it, or hand the link to a chat app yourself.'}
           </p>
+
+          <div className="space-y-2">
+            <Button type="button" size="sm" variant="outline" className="rounded-lg h-11"
+              aria-expanded={showQr}
+              onClick={() => setShowQr(value => !value)}>
+              {showQr ? 'Hide the QR plate' : 'Show a QR plate to scan'}
+            </Button>
+            {showQr ? (
+              <Suspense fallback={<p className="text-[11px] text-muted-foreground">Drawing the plate…</p>}>
+                <ShareQrPlate url={shareUrl} />
+              </Suspense>
+            ) : (
+              // Why the affordance ends with the address: §9.1's ruling is that a plate cannot be
+              // re-drawn once the session has let go of the credential, because the store keeps only
+              // its digest. Saying that here, at the moment the host is offered a code, is the place
+              // they will read it — a rotation button press has no reason to explain itself first.
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                A plate is drawn only while this page still holds the address. It cannot be brought
+                back after a reload, because the database keeps only a one-way fingerprint of the
+                link — a new code comes from making a new link below.
+              </p>
+            )}
+          </div>
         </div>
       ) : state?.linkActive ? (
         <p className="text-[11px] text-muted-foreground">
@@ -279,6 +311,26 @@ const PublicationPanel = ({
         A new link retires the old one; guests holding it will be told the invitation is
         not available. A link taken down cannot be reactivated.
       </p>
+      {/* §9.2 names this sentence part of the deliverable rather than a footnote: paper cannot be
+          recalled, so the two buttons above each carry a warning about what is already printed. It is
+          printed only while a link is live, because that is the only moment both buttons can be
+          pressed and the only one in which "reprint it from the new address" describes something a
+          host can do. Republishing a new version deliberately has no such sentence — the address does
+          not move, so a plate that scanned before still scans.
+          What this sentence will not say is that pressing either button retires the recorded files.
+          §9.2 assigns those manifest writes to the render worker's privileged path, and no code in
+          this build retires a row when a token turns over: the panel under the buttons reports the
+          retirement only for rows that are recorded as retired. Claiming the moment here would put a
+          guarantee on screen that the substrate does not yet give. */}
+      {state?.linkActive ? (
+        <p className="text-[11px] leading-snug text-warning">
+          If you have printed this QR, reprint it from the new address. Paper cannot be recalled: a
+          plate you have already put on a door, a sweet box or a notice points at the address as it
+          stands now, and either button above makes that paper point at a door that no longer opens.
+          Files already drawn are listed under <em>Files made from your invitation</em>, where each
+          retired one says why; nothing on this page can withdraw a sheet that left the room.
+        </p>
+      ) : null}
 
       {message !== null ? (
         <p role="status" aria-live="polite" className="text-sm text-foreground">{message}</p>
