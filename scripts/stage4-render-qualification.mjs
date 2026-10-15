@@ -28,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { closeChrome } from './stage5-browser-driver.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -771,9 +772,17 @@ async function openBrowser() {
     dialogSeen() { return death.dialog; },
     async close() {
       try { await send('Target.closeTarget', { targetId: target.targetId }); } catch { /* already gone */ }
-      ws.close();
-      child.kill();
-      rmSync(userData, { recursive: true, force: true });
+      // The same teardown the shared driver uses: this harness spawns its own Chromium, and a bare
+      // `child.kill()` plus an immediate `rmSync` loses the race against the children that survive
+      // the parent and hold the profile open.
+      return closeChrome({
+        child,
+        userData,
+        graceful: async () => {
+          try { await send('Browser.close'); } catch { /* already gone */ }
+          ws.close();
+        },
+      });
     },
     async viewport(v) {
       await s('Emulation.setDeviceMetricsOverride', {
@@ -1300,7 +1309,11 @@ async function main() {
       await network(browser, docs['3-reviewed-tamil']);
       if (!SKIP_MATRIX) await matrix(browser, docs);
     } finally {
-      await browser.close().catch(() => {});
+      let closed = null;
+      try { closed = await browser.close(); } catch { /* recorded as a finding below */ }
+      check('teardown', 'browser profile that held the host session deleted',
+        closed?.profileRemoved === true,
+        closed?.profileRemoved ? 'removed' : `still present at ${closed?.profilePath ?? 'unknown'}`);
     }
   } finally {
     console.log(`\n==> rows this run owned: ${ownedRows()}`);

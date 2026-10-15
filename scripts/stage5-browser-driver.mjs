@@ -26,7 +26,7 @@
 // It creates accounts and rows in the local stack and cleans them up by run tag. Nothing here can
 // reach a hosted project: the caller passes an origin this module checks for loopback first.
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -193,22 +193,80 @@ export async function openBrowser({ cdpPort = 9411 } = {}) {
       for (const page of open) {
         try { await send('Target.closeTarget', { targetId: page.targetId }); } catch { /* gone */ }
       }
-      ws.close();
-      child.kill();
-      // The profile directory holds the signed-in host's tokens, so leaving it behind is a
-      // credential-bearing scratch directory. Windows keeps the last file locked briefly after
-      // the process is signalled, so the delete is retried and, if it still refuses, the exact
-      // path is reported rather than silently kept.
-      await sleep(1_500);
-      try {
-        rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
-        return { profileRemoved: true, profilePath: userData };
-      } catch {
-        return { profileRemoved: false, profilePath: userData };
-      }
+      // The profile holds the signed-in host's tokens, so the harness's contract with the caller is
+      // that it is gone by the time `close()` resolves — see `closeChrome` for why that takes more
+      // than a signal.
+      return closeChrome({
+        child,
+        userData,
+        graceful: async () => {
+          try { await send('Browser.close'); } catch { /* already gone */ }
+          ws.close();
+        },
+      });
     },
     profilePath: userData,
   };
+}
+
+/**
+ * Shut down a Chromium this harness spawned and delete the profile directory it was given.
+ *
+ * `child.kill()` signals only the process this file spawned. On Windows the gpu, utility and
+ * renderer children outlive that parent by seconds, and while any of them holds a file inside the
+ * profile open the delete refuses — which is how the §32 tier recorded "the browser profile that held
+ * the host session was deleted by the driver" as a finding, with 15 live processes behind a directory
+ * it could not remove. So the graceful close gets a short window to finish on its own, and only if
+ * the path is still there does this escalate to a process-tree kill.
+ *
+ * The kill is skipped once the spawned child has exited, because Windows recycles pids: a force kill
+ * through a stale pid could reach a process this harness has nothing to do with. The condition
+ * awaited is the one that matters — the path is gone — not a fixed sleep, which a loaded host has
+ * been observed to outrun. A refusal returns the exact path rather than pretending.
+ */
+export async function closeChrome({ child, userData, graceful }) {
+  let exited = false;
+  const markExited = () => { exited = true; };
+  child.once('exit', markExited);
+  try {
+    if (graceful) await graceful();
+  } catch { /* the browser was already gone */ }
+
+  const tryRemove = () => {
+    try {
+      rmSync(userData, { recursive: true, force: true });
+      return existsSync(userData) ? new Error('the directory is still present') : null;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  const graceDeadline = Date.now() + 8_000;
+  const deadline = Date.now() + 30_000;
+  let refusal = null;
+  let escalated = false;
+  for (;;) {
+    refusal = tryRemove();
+    if (refusal === null) break;
+    if (!escalated && Date.now() >= graceDeadline) {
+      escalated = true;
+      if (!exited) {
+        if (process.platform === 'win32') {
+          try {
+            execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+          } catch { /* the tree was already gone */ }
+        } else {
+          child.kill('SIGKILL');
+        }
+      }
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(500);
+  }
+  child.removeListener('exit', markExited);
+  return refusal === null
+    ? { profileRemoved: true, profilePath: userData }
+    : { profileRemoved: false, profilePath: userData, reason: refusal.message };
 }
 
 function makePage(name, targetId, s, session, requests, open) {
