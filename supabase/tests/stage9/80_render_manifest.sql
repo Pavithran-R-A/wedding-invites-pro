@@ -1134,6 +1134,109 @@ BEGIN
     '23514', '%invitation_outputs_invalidation_reason_check%');
 END $E2$;
 
+-- --------------------------------------------------------------------------- E3: §4's attempt ceiling
+-- The lifecycle above is complete only if every state it can reach has a legal exit. Until
+-- `20261016120000_stage9_attempt_ceiling_exit.sql` it was not: a row in `uploading` whose
+-- attempt_count had already reached the domain ceiling could not fail (the CHECK admits no sixth
+-- attempt), could not be retired (the whitelist has no `uploading -> invalidated` edge) and could not
+-- be deleted (the in-flight guard refuses it, and points at the two states this group proves are
+-- unreachable from there). The only way out was to walk the row to `ready` with a digest nobody earned.
+-- These cells measure the repair from both sides — the doomed retry is refused, and the retry that is
+-- still meaningful is not — and then show that the row each cell leaves behind is deletable.
+--
+-- The setup has to be legal or the measurement is a tautology, so attempts are recorded one at a time
+-- through the edges group E already accepts.
+CREATE FUNCTION pg_temp.s9f_attempts(p_id uuid, p_n integer) RETURNS void
+LANGUAGE plpgsql AS $fn$
+DECLARE v_step integer;
+BEGIN
+  FOR v_step IN 1..p_n LOOP
+    UPDATE public.invitation_outputs SET status = 'uploading' WHERE id = p_id;
+    UPDATE public.invitation_outputs
+       SET status = 'failed', attempt_count = attempt_count + 1,
+           last_error = 'the renderer said no'
+     WHERE id = p_id;
+  END LOOP;
+  IF (SELECT o.status || '=' || o.attempt_count::text FROM public.invitation_outputs o
+       WHERE o.id = p_id) IS DISTINCT FROM 'failed=' || p_n::text THEN
+    RAISE EXCEPTION 'FAIL: the ceiling setup reached failed=% instead of failed=%',
+      (SELECT o.attempt_count::text FROM public.invitation_outputs o WHERE o.id = p_id), p_n;
+  END IF;
+END $fn$;
+
+DO $E3$
+DECLARE v_id uuid; v_other uuid; v_err text; v_def text;
+BEGIN
+  -- Two literals in two files: the number this repair compares against and the number the domain
+  -- asserts. Read from the catalog rather than restated, so a ceiling raised on one side without the
+  -- other lands here instead of becoming a stranded row six months later.
+  SELECT pg_get_constraintdef(oid) INTO v_def
+    FROM pg_constraint
+   WHERE conrelid = 'public.invitation_outputs'::regclass
+     AND conname = 'invitation_outputs_attempt_count_check';
+  PERFORM pg_temp.s9f_eq('E36 the ceiling the guard compares against is the ceiling the CHECK states',
+    v_def, 'CHECK (((attempt_count >= 0) AND (attempt_count <= 5)))');
+
+  v_id := pg_temp.s9f_row('e37:ceiling');
+  PERFORM pg_temp.s9f_attempts(v_id, 5);
+  PERFORM pg_temp.s9f_eq('E37 five attempts recorded one legal edge at a time still reach the top of '
+    'the budget, so the setup below is the state the defect was found in rather than an unreadable one',
+    ARRAY[(SELECT o.status FROM public.invitation_outputs o WHERE o.id = v_id),
+          (SELECT o.attempt_count::text FROM public.invitation_outputs o WHERE o.id = v_id)]::text[],
+    ARRAY['failed', '5']::text[]);
+
+  BEGIN
+    UPDATE public.invitation_outputs SET status = 'uploading' WHERE id = v_id;
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLSTATE || ' ' || SQLERRM;
+  END;
+  PERFORM pg_temp.s9f_eq('E38 the sixth attempt is refused where it is chosen, and the sentence names '
+    'the exit that exists instead of the one that does not',
+    v_err, '42501 the attempt budget is spent: a failed output at attempt_count 5 may not be retried');
+
+  PERFORM pg_temp.s9f_eq('E39 the refusal is a refusal, not a partial write: the row is still failed, '
+    'still at five, and still names the failure that got it there',
+    ARRAY[(SELECT o.status FROM public.invitation_outputs o WHERE o.id = v_id),
+          (SELECT o.attempt_count::text FROM public.invitation_outputs o WHERE o.id = v_id),
+          (SELECT o.last_error FROM public.invitation_outputs o WHERE o.id = v_id)]::text[],
+    ARRAY['failed', '5', 'the renderer said no']::text[]);
+
+  -- The whole point of the repair: this row now has an exit that does not ask it to lie.
+  DELETE FROM public.invitation_outputs WHERE id = v_id;
+  PERFORM pg_temp.s9f_unled(v_id);
+  PERFORM pg_temp.s9f_eq('E40 and a failed row at the ceiling is deletable by the trusted cleanup that '
+    'the in-flight guard had refused — the state with no exit is gone from the lifecycle',
+    (SELECT count(*)::text FROM public.invitation_outputs WHERE id = v_id), '0');
+
+  -- The repair must not quietly shorten the budget. A row with one attempt left in it retries exactly as
+  -- it did, and its next failure is still recordable — which is how a legal row reaches five in the
+  -- first place, so this pair of cells is also the proof that E37''s setup is the product path.
+  v_other := pg_temp.s9f_row('e41:below-ceiling');
+  PERFORM pg_temp.s9f_attempts(v_other, 4);
+  UPDATE public.invitation_outputs SET status = 'uploading' WHERE id = v_other;
+  PERFORM pg_temp.s9f_eq('E41 a failed row at four attempts still retries: the door closes on the '
+    'budget, not on the state',
+    ARRAY[(SELECT o.status FROM public.invitation_outputs o WHERE o.id = v_other),
+          (SELECT o.attempt_count::text FROM public.invitation_outputs o WHERE o.id = v_other)]::text[],
+    ARRAY['uploading', '4']::text[]);
+
+  UPDATE public.invitation_outputs SET status = 'failed', attempt_count = attempt_count + 1,
+         last_error = 'the renderer said no' WHERE id = v_other;
+  PERFORM pg_temp.s9f_eq('E42 and its fifth failure is still recordable, so the ceiling E36 pinned is '
+    'the number of attempts a worker really gets rather than one fewer',
+    ARRAY[(SELECT o.status FROM public.invitation_outputs o WHERE o.id = v_other),
+          (SELECT o.attempt_count::text FROM public.invitation_outputs o WHERE o.id = v_other)]::text[],
+    ARRAY['failed', '5']::text[]);
+  DELETE FROM public.invitation_outputs WHERE id = v_other;
+  PERFORM pg_temp.s9f_unled(v_other);
+
+  PERFORM pg_temp.s9f_eq('E43 with both cleared, no artefact row anywhere in this file''s residue is in '
+    'the state that used to be a dead end: uploading at the ceiling is now unrepresentable, because the '
+    'only edge into it from a spent budget is refused',
+    (SELECT count(*)::text FROM public.invitation_outputs
+      WHERE status = 'uploading' AND attempt_count >= 5), '0');
+END $E3$;
+
 -- Identity: the columns that say what the artefact *is*, each moved from a verified ready row. The
 -- guard answers first, which is the point: an FK or a CHECK underneath would refuse some of these for
 -- a reason a reader could not tell apart from the rule they are testing.
@@ -1732,13 +1835,15 @@ DO $L$
 DECLARE ran integer;
 BEGIN
   ran := coalesce(nullif(current_setting('s9f.passed', true), ''), '0')::int;
-  -- 125 is counted from this file at this head and is re-derivable from it: 28 probe rows (K=8, C=15,
-  -- P=3, N=1, G=1) + 25 `s9f_edge` cells + 18 `s9f_stmt` cells + 5 `s9f_del` cells + 34 inline
-  -- `s9f_eq` calls + 16 inline `s9f_ok` calls = 126 assertions in the file, and this cell is the last
-  -- of them, so 125 have been counted when the counter is read above. (`s9f_eq` is counted at its call
-  -- sites only: the one call inside `s9f_has_keys` belongs to a helper this file does not use.)
-  IF ran <> 125 THEN
-    RAISE EXCEPTION 'FAIL: the floor moved — % assertions had run, this file declares 125 before its '
+  -- 133 is counted from this file at this head and is re-derivable from it: 28 probe rows (K=8, C=15,
+  -- P=3, N=1, G=1) + 25 `s9f_edge` cells + 18 `s9f_stmt` cells + 5 `s9f_del` cells + 42 inline
+  -- `s9f_eq` calls + 16 inline `s9f_ok` calls = 134 assertions in the file, and this cell is the last
+  -- of them, so 133 have been counted when the counter is read above. (`s9f_eq` is counted at its call
+  -- sites only: the one call inside `s9f_has_keys` belongs to a helper this file does not use. The 42
+  -- includes the eight group-E3 cells the attempt-ceiling repair added; the helper it defines to set
+  -- those rows up raises instead of counting, so it is not an assertion.)
+  IF ran <> 133 THEN
+    RAISE EXCEPTION 'FAIL: the floor moved — % assertions had run, this file declares 133 before its '
       'own last cell. A skipped group, a deleted cell or an added one all land here, and the number is '
       'what has to be re-derived from the call sites listed above, not guessed', ran;
   END IF;
