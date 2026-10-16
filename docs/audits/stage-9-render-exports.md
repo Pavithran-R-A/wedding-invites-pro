@@ -572,3 +572,280 @@ outside this repository. No npm install, build, or Docker work was attempted at 
 should be until headroom is re-measured; my own container `vivaahvarnam-s9probe` is `Exited (0)` with a
 16.4 kB writable layer, so retiring it buys nothing and is left for the cleanup pass rather than
 pretending to be a mitigation. Nothing belonging to `dueweave` was touched.
+
+## 22. The Stage 9 HTTP tier now exists: §10 and two §18 rows are superseded
+
+This section supersedes, it does not delete. §10 and §18 stay as they were written, because they were
+true when written and the reading that made them true is the reason the new file is shaped as it is.
+
+**§10's bold sentence is no longer true.** There *is* a Stage 9 HTTP file:
+`supabase/tests/api/stage9_render_outputs.test.mjs`, **1,693 lines, 30 cases**. It is not named
+`stage9_publish.test.mjs` as §18 item 4 predicted, because the tier turned out to be about delivery
+rather than only about publishing. `supabase/tests/api/run.sh` discovers suites with
+`ls supabase/tests/api/*.test.mjs`, so the chain picked it up with no runner change — which is worth
+saying out loud, because a suite that only the author's shell can find is not a gate.
+
+The seven groups and what each pins: **TRANSPORT** (T-01, T-02) which schema answers, and that an
+unexposed `internal_api` body is not reachable as a request body; **PRIVILEGES AND SCOPE** (P-01..03)
+the host reads its own rows, a second wedding's owner reads nothing, the anonymous visitor reads
+nothing; **RENDER SOURCE** (R-01..03) what a draw is permitted to read; **MANIFEST PROJECTION**
+(M-01..03) the shape the host panel consumes; **REGISTRATION AND KEYS** (K-01..04) the object key the
+database mints and no client may name; **LIFECYCLE** (L-01..05) `staged → uploading → ready`, the
+invalidation edges and the attempt ceiling; **DELIVERY** (E-00..E-08) a short-lived signed URL whose
+fetched bytes hash to the `content_digest` on the row that promised them, plus the stranger's refusal.
+`Z-01` closes the file.
+
+Measured at this head — `q9-logs/live/s9-http-run-10.txt`, nine suites over the live
+`localvivaahvarnam` stack through Kong/PostgREST:
+
+| suite | tests | pass | fail |
+|---|---|---|---|
+| stage3_publication | 38 | 38 | 0 |
+| stage3_security | 56 | 56 | 0 |
+| stage4_tradition_packs | 28 | 28 | 0 |
+| stage5_admin_cli | 36 | 36 | 0 |
+| stage5_pack_driven_http | 28 | 28 | 0 |
+| stage6_storage | 34 | 34 | 0 |
+| stage7_family_approval | 61 | 61 | 0 |
+| stage8_guest_rsvp | 56 | 56 | 0 |
+| **stage9_render_outputs** | **30** | **30** | **0** |
+
+337 historical + 30 new = **367**, `fail 0` in every suite, `==> RESULT: PASS`, `chain_exit=0`, and
+**17** post-run census read-backs all `ok` — including `invitation_outputs back to 8 rows`,
+`storage.objects(invitation-outputs) back to 8 rows` and `storage.objects(invitation-previews) back to
+0 rows`, which is the residue §19's baseline demands. The run's own header records
+`working_tree_delta=supabase/tests/stage7/80_family_review.sql,pnpm-lock.yaml,pnpm-workspace.yaml,
+supabase/tests/api/stage9_render_outputs.test.mjs`, so a reader can see exactly which bytes were under
+test; the two pnpm files are the untracked workspace artefacts and were staged in neither commit.
+
+**§18 item 2 and item 4 are closed. Items 1, 3, 5–10 are not**, and item 1 is now an instrument
+blocked on a host rather than work nobody tried:
+
+* item 4 closed — the tier exists, and upload → registry → signed download → verified bytes is now a
+  battery rather than one live publisher run plus reasoning.
+* item 2 closed *on the wire* — P-02 and P-03 refuse a second wedding's owner and an anonymous
+  visitor through the HTTP surface, and E-08 asks for a stranger's signed URL and measures the
+  refusal. §18's own wording keeps its value: the SQL and Storage halves were already measured, and
+  still are.
+* item 1 (the host's own screen clicked by a real session) and item 3 (a deliberately-expired link
+  requested after 60 s) **remain open**. §23 records why, and it is not a quiet omission.
+* items 5–10 are unchanged by anything in this section.
+
+**A flake that was a real defect in a historical battery.** `mode=family` failed on some runs
+(`q9-logs/live/s9-ceiling-sql-modes-02.txt`, `mode_family_exit=1`) and it was not Stage 9's code
+moving. Case K4 asserts that a household credential with a mangled alphabet is refused at the guest
+door, and it mangled with `translate(tok1, 'abc', '!!!')`. A 43-character base64url credential
+contains none of a, b or c about one run in eight — `(61/64)^43 = 12.69%` in theory, and 24,945 and
+25,062 of 200,000 `randomBytes(32).toString('base64url')` mints when measured — so for those runs the
+mangle was the identity: the case handed the door its *own valid credential*, the door correctly said
+`available=true`, and the battery reported that as a product failure. The repair makes the mangle
+positional (`'!' || right(tok1, 42)`): still 43 characters, still refused by the alphabet half of the
+shape check alone, no longer a coin toss. `family` re-run after the repair: 80_family_review **255**,
+90_review_boundary **116**, `mode_family_exit=0`. The case's executable line has not moved since that
+run; only the comment above it was rewritten to carry both measured samples, and the chain has not been
+re-run since, which §23 states as an open item rather than folding into the totals above.
+
+**The retry guard, and why its classification was proved rather than asserted.** Run 07's E-00 died
+with `[TypeError: fetch failed]` / `SocketError: other side closed` / `cause.code=UND_ERR_SOCKET`
+while three throwaway SQL chains competed for the host; Kong's access log held no line for the
+request, so it never reached PostgREST. That is host contention, not a product refusal, and reporting
+it as one would have been the same mistake K4 made in reverse. Idempotent reads
+(`GET`/`HEAD`, and the two read RPCs) are now sent at most twice through `withReadRetry`; writes keep a
+single shot, because the harness cannot distinguish a socket that died before the request from one that
+died after the server applied it. Rather than trust the predicate in the comment, it was measured
+against a real `node:net` server that destroys the socket mid-request
+(`q9-logs/live/s9-retry-guard-probe.mjs`, capture `s9-retry-guard-probe-01.txt`, `PROBE RESULT: PASS`,
+`probe_exit=0`), including three negatives — a cause-less `TypeError`, an unrelated `cause.code`, and a
+non-`TypeError` — none of which may be retried. `transport_retries` is printed at the end of every
+suite, so a capture states whether the branch was walked: run-10 printed `transport_retries=0`, which
+means no contention was met, **not** that the path is untested.
+
+**A tooling blind spot this file inherits.** `eslint.config.js` sets `ignores: ["dist"]` and its one
+rules block is scoped `files: ["**/*.{ts,tsx}"]`. No `.mjs` receives any rule — which includes every
+`scripts/*.mjs` instrument and every `supabase/tests/api/*.test.mjs` battery, this one included.
+`npx eslint some.mjs` exits 0 without examining the file, so a green lint has never meant "the
+instruments are linted"; their syntax is exercised by running them, which is what the chains do.
+Recorded rather than repaired: widening the rules block would apply rules to ~40 instruments at once,
+and that is its own piece of work with its own findings list, not a line in a closure section.
+
+**Node gates at the tree that contains both commits.** typecheck `gate_exit=0`; lint
+`✖ 9 problems (0 errors, 9 warnings)`, byte-for-byte the warning set §21 recorded; vitest
+`Test Files 58 passed` / `Tests 1236 passed`; `render:check` OK (6 families, 72 faces, 983 KiB, 0 CDN
+references in product-facing text); `product:check` **250 active file(s) scanned, 0 violation(s)**,
+re-run *after* the battery became a tracked file because a tracked file can move that count — it did
+not, and the number is measured rather than predicted.
+
+**The ledger continues** (§20 ends at `9fc4810`; both rows below were pushed immediately and read back
+twice, from the Git side and from GitHub's own ref API, never from a stale `origin/<branch>` tracking
+ref):
+
+| commit | what | remote read-back |
+|---|---|---|
+| `04f94b1f742729019fadff42da633a5aa995b28d` | the K4 determinism repair, 1 file +7 −1 | `git ls-remote` = same SHA; `gh api …/refs/heads/stage9/render-exports` = same SHA |
+| `24c3e383e93bc040dcfeb2d29b1ddec1f7aadf1b` | the Stage 9 HTTP battery, 1 file +1,693 (new) | `git ls-remote` = same SHA; `gh api` = same SHA; equals local HEAD |
+
+## 23. The host's own screen became a measurement: 51 browser cases green, and the one real defect was a design token
+
+§18 item 1 — "the host's own screen clicked by a real session" — is closed. §22 left it open as an
+instrument blocked on a host; the instrument now exists and has been walked:
+`scripts/stage9-browser-outputs.mjs`, **1,204 lines, 51 cases** in eight groups (PRELUDE 3 + 2 notes,
+HOST-LIST 6, DELIVERY 14, REFUSAL 11, A11Y 7, MOBILE 2, NETWORK 3, TEARDOWN 5), committed at
+`f7096ef`. It drives three real Chromium sessions against the production bundle served on
+`127.0.0.1:4173` and the live `localvivaahvarnam` API on `54400`, and it refuses to trust either:
+P-01 passes only when `GET /` returns an `index.html` byte-identical to the `dist/index.html` this
+checkout built, P-02 requires `/auth/v1/health` → 200, P-03 requires the fixture wedding to hold
+`8 row(s) recorded, 8 ready and private` with digests. The green run's own record spans
+`2026-10-16T11:18:33.215Z` → `11:20:26.642Z`, **113 s** end to end.
+
+**Four runs, and what each was worth.** Captures under `q9-logs/live/`, JSON records alongside them:
+
+| run | capture | cases | pass | fail | what it was |
+|---|---|---|---|---|---|
+| s9-01 | `browser-s9-01.txt` | 0 | — | — | refused at the preflight, one line: `refused: VIVAAHVARNAM_S9_HOST_PASSWORD is not set, so the host cannot sign in.` The fixture password arrives only as an env var named by `--host-password-env` (`scripts/stage9-browser-outputs.mjs:127-133`) because argv is not a credential store; an unset variable stops the run before a browser opens rather than silently falling back to a committed secret. |
+| s9-02 | `browser-s9-02.txt`, `browser-outputs-…T10-41-02-010Z.json` | 50 | 34 | **16** | first full walk; every failure classified below |
+| s9-03 | `browser-s9-03-negctl.txt`, `…T11-09-33-610Z.json` | 51 | 45 | **6** | the **negative control**: same instrument, same tree, `dist/` built *before* the token repair |
+| s9-04 | `browser-s9-04.txt`, `…T11-18-33-215Z.json` | 51 | **51** | 0 | `RESULT: PASS` |
+
+**The 16 split 15 to 1, and the one was real.** Not one repair moved an assertion to make a case pass;
+fifteen of them replaced a claim the instrument had *invented* with a claim it could read off the page
+or the wire, which is a strengthening.
+
+* 8 × `D-<kind>-<variant>-<page>` — the instrument asked the storage route for a **bucket-less** path,
+  an address the product never composes. Now every storage URL is bucket-qualified, which is also what
+  made the refusal cases honest (below).
+* `H-04` matched an invented tally regex; it now compares the panel's own numbers against the manifest
+  read: `8 recorded, 8 openable against 8/8 in the manifest`.
+* `H-05` swept every `li` on the page rather than the panel's rows, so it scored the page's other lists
+  as unlabelled artefacts; it now reads the panel's 8 row elements and asserts each says
+  `"Ready to open."` — the status the row carries.
+* `H-06` asserted a warning the shipped code only draws for a *retired* row, so it could never pass on
+  an all-ready manifest. It now measures the branch that is reachable — `1 notice(s) with 0 invalidated
+  row(s) and 1 ready QR plate(s); 0 of them name a file as needing reprint` — and §18's note about why
+  the other branch is out of reach is in the header, not a deleted case.
+* `D-TTL-03` and `R-X1` expected a button where the panel swaps in an anchor once a link exists; the
+  case text now follows the affordance the host actually has.
+* `A-05` counted `h1` elements blanket-wise and so failed against the repository's own documented
+  exception: the editor embeds the guest document in the preview column and that document has its own
+  level-1 heading, a distinction `scripts/stage5-a11y-mobile.mjs:226-229` already carves out. The case
+  now separates the two populations — `page-chrome h1 1, preview-document h1 1, panel heading <H2>,
+  aria-labelledby resolves: true; panel levels [2,3,3,…]` with no skipped level.
+* `N-01` reported an empty hostname because it keyed on `url.hostname` for addresses whose host is in
+  the query or that have no peer at all. It now addresses by `host + pathname`, never the query, and
+  buckets `data:` URLs as `inline (no peer)` instead of calling them third parties; an unparseable URL
+  counts as an offender rather than vanishing.
+* `A-04` found the product defect.
+
+**The defect: `--warning` was not readable, in eight places at once.** A-04 measured every visible text
+run in the panel against its first opaque ancestor's background and reported
+`75 text node(s), lowest 3.83:1 on "A QR plate is a promise about an address" at 12px (needs 4.5:1); 1
+below the minimum`, while the dedicated sweep A-07 found `4 run(s) drawn from --warning, lowest 3.83:1
+on "If you have printed this QR, reprint it" in "Share with guests" at 11px`. Both are WCAG 1.4.3
+sentences, so this was not a taste question. `baf0f0e` moves the token from `hsl(32 78% 40%)` to
+`hsl(32 78% 34%)` in [src/index.css:37](file:///C:/Users/Pavithran%20R%20A/Documents/Qoder/2026-09-24/37be0a2a/s5qual/src/index.css#L37) — the lightness was chosen by
+computing the ratio at each candidate step in Node before touching the file, because one shared token
+feeds eight sites and eyeballing a swatch cannot answer "does this clear 4.5:1 on *every* surface it is
+drawn on": 40 % yields 3.64 on its own `bg-warning/5` tint / 3.83 on `--surface` / 3.48 on
+`--surface-strong` / 3.86 on `--paper`; 35 % yields 4.51 / 4.79 / 4.34 / 4.82; 34 % yields
+4.75 / 5.04 / 4.57 / 5.08. 34 % is the last step that keeps the amber hue and clears the floor on all
+four. The arithmetic, including which number belongs to the tint rather than to plain paper, is now a
+comment above the token. Re-measured on rendered pixels: A-04's lowest run went **3.83 → 4.99** (now
+`"files are"` at 12 px) and A-07's went **3.83 → 5.04**, each with `0` runs below the minimum. The
+`.dark` block below it (`src/index.css:83-99`) carries its own, lighter `--warning` and was **not**
+measured here, because nothing in `src/` ever sets that class — the two `dark`-referencing lines in the
+shadcn `chart.tsx`/`alert.tsx` primitives are inherited scaffolding, not a theme switch — so the numbers
+above describe the only theme this product renders.
+
+**Why the negative control is worth more than the pass.** A green instrument nobody has seen to fail is
+not evidence. The CSS change reaches a browser only through a rebuilt bundle, and the run taken before
+that rebuild — s9-03, same tree, pre-repair `dist/` — failed exactly `A-04` and `A-07` on contrast at
+3.83:1, the precise pre-repair number, alongside the four instrument cases that were still broken at
+that moment. The instrument bit on the bytes it claims to check.
+
+**A soundness finding that rewrote the privacy cases, and it applies to §22's battery too.** Three of
+the refusals were passing on the wrong address. A bucket-less storage path answers `NoSuchBucket`, and a
+PostgREST read shaped for an unexposed relation answers `PGRST202`; both are 4xx, and both mean *the
+name you typed does not exist* — which says nothing at all about the caller. The privacy property this
+tier claims is that a foreign object is invisible to a foreign session, and that has a specific,
+measured shape: **`NoSuchKey` / `"Object not found"`**, because `storage.objects` RLS hides the row
+rather than merely refusing the read. Each case now replays the address the application itself composed
+(captured from the page), is bucket-qualified, and is filtered by `refusalResolves`, whose comment
+carries that distinction so the next reader does not have to rediscover it. `R-A5` is deliberately
+exempt from the filter: the public route answering `NoSuchBucket` **is** the claim that the outputs
+bucket has no unauthenticated path.
+The refusals are anchored by positive controls inside the same run, which is what makes them mean
+something: `R-X1` reads the first host's object again *after* every refusal and gets
+`HTTP 200, 19184 bytes for og_image/1200x630`, so the refusals were about the caller and not about a
+file that had gone missing; `D-TTL-03` re-mints the same row and succeeds, so `D-TTL-02`'s
+`HTTP 400 … {"statusCode":"400","error":"InvalidJWT","message":"\"exp\" claim timestamp check failed"}`
+(110 bytes of JSON) is expiry rather than loss. The measured refusals: `R-A1` the panel does not mount
+anonymously at `/login`; `R-A2` an anonymous manifest read → 401 with `"code":"42501"`, `permission
+denied for function list_invitation_outputs`; `R-A3`/`R-A4` → 400 `NoSuchKey`; `R-B1` a second wedding's
+owner sees `0 row(s)` and an empty state that names the worker instead of offering a render button;
+`R-B2` `0 of 8 fingerprint(s)` visible when that host is pointed at the first wedding's edit route;
+`R-B3` → 403 `"the caller may not read this wedding"`; `R-B4`/`R-B5` → 400 `NoSuchKey`.
+
+**What the delivery half proved, byte by byte.** All eight artefacts: `D-P01` the path the client
+composes equals the `object_key` the database minted for all 8 rows; then for each of
+`og_image/1200x630` png (28,574 B) and webp (19,184 B), `pdf/a4` (24,970 B), `qr/40mm` (3,549 B), and
+`share_image/1080x2160` png p1/p2 (248,927 / 192,370 B) and webp p1/p2 (225,092 / 167,712 B) — HTTP 200,
+the format's own mime, and `sha256 … == the row's digest`. `D-TTL-01` reads the window out of the token
+payload (`58s from now`) rather than asserting a constant, and `D-HY-01`/`D-HY-02` establish that no
+signed address appears as text a host could copy — each exists only as an anchor `href` — and that
+nothing signed is persisted to `localStorage`. Accessibility and mobile: 9 controls, all ≥ 44 px on both
+axes, all named by their own text, 9/9 with a non-negative `tabIndex`, and a keyboard user stopping
+inside the panel sees `outline solid 2px` plus a ring; at 390×844 `document overflow 0 px` with the
+panel's right edge at 374. Network: **526** requests across the three sessions, all to `127.0.0.1`,
+plus inline `data:` URLs that have no peer — no third-party host was contacted, which is the mandate's
+privacy boundary observed rather than asserted.
+
+**Teardown, and the one failure that was the operating system's.** `T-01` the run's own second wedding is
+deleted (`DELETE → 204`, `0 row(s)` left), `T-02` 1/1 account carrying the `s9-delivery-host-b+` prefix
+is removed and its own address answers re-login with HTTP 400, `T-03` the census is exactly where it was
+found (`before 8/8/4, after 8/8/4`), `T-04` the fixture's 8 rows are still recorded and still ready, so
+the refusals above cost the owner nothing. `T-05` failed once, with
+`EPERM, Permission denied: \\?\C:\Users\PAVITH~1\AppData\Local\Temp\stage5-chrome-hOuChm`, and the root
+cause was measured rather than assumed: the same path deleted by hand moments later returned exit 0, so
+Windows holds a just-closed profile directory for a short interval — a timing property of the host, not a
+leaked browser. The case now retries removal within a bound and states its verdict from an existence
+read-back: `stage5-chrome-oGch10 exists: false`. At the time of writing, exactly one `stage5-chrome-*`
+profile remains under `%TEMP%` — `stage5-chrome-iusF4i`, mtime `2026-10-15 19:44:51 +0530`, which
+predates this tier and was left alone; 35 `chrome.exe` processes exist on this shared host and none of
+them belongs to a profile this tier created. Disk headroom at the same moment: **114 MB free of 486,459
+(100 % used)** — the reason no tier here rebuilds more than it must.
+
+**What this tier did not measure**, in the same register as §18 rather than as a footnote:
+
+* The reprint notices a retired artefact would draw (`token_rotated`, `publication_revoked`,
+  `superseded`). The transition `ready → invalidated` does exist
+  (`…stage9_render_outputs.sql:345`) and `service_role` can force it, but `invalidated` is terminal
+  there (`:332-333`), so retiring a fixture row would permanently retire the only eight artefacts this
+  tier *and* §22's battery read. H-06 measures the branch reachable without burning
+  the shared fixture; the retired-row copy stays unexecuted.
+* The QR rotation journey on the host's screen. `feature-readiness.md`'s QR row keeps its pending
+  clause for that reason, and this section does not close it.
+* A real crawler fetching a real hosted Open Graph page. Everything here is loopback. The distinction
+  the mandate asks for, stated plainly: **host downloads work locally and are measured end to end;
+  hosted Open Graph previews remain unverified.**
+* The `bash supabase/tests/stage9/run.sh family` re-run owed since §22's K4 determinism repair. That is
+  blocked, not quietly dropped: `timeout 30 docker ps -a` returns exit **124** with no output, there is
+  no `psql` on PATH, and `127.0.0.1:54320` answers ECONNREFUSED. Starting the Docker engine is a
+  human-only action under the standing rules, so the chain remains unre-run since that repair and the
+  367-test total in §22 does not include a post-repair `family` pass.
+
+**Node gates at `f7096ef`** (captures `q9-logs/live/s9-gates-f7096ef-*.txt`, each exit recorded adjacent
+to its own command): typecheck exit **0**; lint exit **0**, `✖ 9 problems (0 errors, 9 warnings)` —
+byte-for-byte the warning set §21 and §22 recorded; vitest exit **0**, `Test Files 58 passed (58)` /
+`Tests 1236 passed (1236)`, duration 151.33 s; `render:check` OK (6 families, 72 faces, 983 KiB of
+committed font bytes, 0 CDN references in product-facing text, 5 confined to test fixtures);
+`product:check` `250 active file(s) scanned, 0 violation(s)`. §22 also recorded 250, and this head added
+a tracked file, so the number is re-measured rather than inherited — and the docs slice that contains
+this section must re-derive it again after commit, because a tracked file can move it.
+
+**The ledger continues** (both rows pushed immediately, then read back from the Git side *and* from
+GitHub's own ref API — never from a stale `origin/<branch>` tracking ref; the third column below was
+re-confirmed at the time of writing):
+
+| commit | what | remote read-back |
+|---|---|---|
+| `baf0f0e…` | the `--warning` lightness repair, 1 file +13 −1 | `git ls-remote` = same SHA; `gh api …/git/refs/heads/stage9/render-exports` = same SHA |
+| `f7096efb2afbb6406c79927cb0eddfa3cbae17b4` | the host-panel browser tier, 1 file +1,204 (new) | `git ls-remote` = `gh api` = local HEAD = this SHA |
