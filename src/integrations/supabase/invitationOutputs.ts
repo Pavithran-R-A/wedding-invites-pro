@@ -33,10 +33,20 @@
 // WHERE THIS FILE HAS BEEN MEASURED. The unit tier is `src/test/invitationOutputs.test.ts` (the shape
 // layer, the path derivation and its refusals) and `src/test/invitationOutputsPanel.test.tsx` (both
 // functions against a recording stand-in for the client, including the refusal wording). The live tier
-// is the Stage 9 browser run over the local stack, which mints a URL for an artefact the render worker
-// actually uploaded and reads the bytes back; until that run is recorded, the statements above about
-// what Storage does are read off the migration and the Stage 6 battery, not measured through these
-// functions.
+// is `scripts/stage9-browser-outputs.mjs`, 51 cases in a real Chromium session against the local stack,
+// recorded green in `q9-logs/live/browser-s9-04.txt` (run record
+// `browser-outputs-2026-10-16T11-18-33-215Z.json`). Through these two functions it measured: the owner's
+// panel listing exactly the 8 rows the manifest holds, the address this file composes being equal to the
+// `object_key` the database minted for all 8 rows, every signed download answering HTTP 200 with its own
+// mime and hashing to its row's `content_digest`, the minted window reading 58 s out of the token's own
+// payload and that address refused as expired once the window passed (`InvalidJWT`), a fresh address for
+// the same row working again, and no signed address existing anywhere as copyable page text or in
+// `localStorage`. The same tier refused a second wedding's owner and an anonymous visitor at both doors.
+// Still read off the migration rather than measured through these functions: that a signed URL is never
+// written to a row, a draft or a snapshot — the browser tier can only see the page and the store it can
+// reach — and the reprint notices a retired artefact would draw, which the fixture cannot produce without
+// permanently invalidating the rows every Stage 9 tier reads. Stage 6's battery remains the measure of the
+// Storage half that predates this file.
 
 import { supabase } from './client';
 import { describe } from '@/lib/safeError';
