@@ -867,8 +867,16 @@ export async function mainCli({ argv = process.argv.slice(2), env = process.env,
       },
     });
   } finally {
-    const closed = await worker.close().catch(() => ({ profileRemoved: false, renders: null }));
-    log(`browser closed: profileRemoved=${closed.profileRemoved} renders=${closed.renders}`);
+    const closed = await worker
+      .close()
+      .catch((error) => ({ profileRemoved: false, renders: null, reason: String(error?.message ?? error) }));
+    // The driver answers a failed teardown with the `rm` refusal beside it, and a refusal is exactly
+    // the fact a later run has to root-cause, so it travels in the log line rather than being dropped.
+    log(
+      `browser closed: profileRemoved=${closed.profileRemoved} renders=${closed.renders}` +
+        (closed.profilePath ? ` profile=${closed.profilePath}` : "") +
+        (closed.reason ? ` reason=${closed.reason}` : ""),
+    );
   }
 
   mkdirSync(evidenceDir, { recursive: true });
