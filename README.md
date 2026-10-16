@@ -383,12 +383,23 @@ through Kong and PostgREST rather than inferred. See
 [`docs/audits/stage-3-public-invitation.md`](docs/audits/stage-3-public-invitation.md) §4–§6 for what
 that did and did not buy.
 
-What deliberately does **not** exist yet is a **product surface** for
-QR codes, PDF/image export, payment, GST handling, print ordering, and admin tooling. The people,
+What deliberately does **not** exist yet is a **product surface** for payment, GST handling, print
+ordering, and admin tooling. QR codes and PDF/image export left that list in Stage 9: the host's
+workbench lists the files made from one frozen version and asks Storage for a 60-second signed URL
+(`src/integrations/supabase/invitationOutputs.ts:53`), and the bytes behind those rows were uploaded,
+read back and re-hashed against the digests their own rows carry by the trusted local publisher —
+**8 artefacts delivered, 0 blocking findings**, then **21/21** from a verifier that does not read the
+publisher's log ([`docs/audits/stage-9-render-exports.md`](docs/audits/stage-9-render-exports.md) §13).
+The host's own half of that sentence is not yet measured on the wire: a signed-in host listing their
+outputs, taking that URL, and downloading exactly those bytes — with another wedding's owner and an
+anonymous visitor refused while trying the same — is implemented and unit-tested, but no HTTP or
+browser capture says it happened (§18). None of it has
+met a hosted project, a real crawler or a customer's chat app, which is why the Open Graph row stays
+`PARTIAL (local contract only)`. The people,
 venues and ceremonies of a wedding are now edited on screen as rows, so the fixtures behind Stage 3's
 host-to-guest run were entered through the product itself. Stage 2 gives several of the remaining
-capabilities tables and rules; a schema is not a feature. Where the UI mentions them, it labels them
-*Planned for V1*.
+capabilities tables and rules; a schema is not a feature. Where the UI mentions what is still unbuilt,
+it labels it *Planned for V1*.
 
 ## Target V1
 
@@ -551,31 +562,54 @@ disagrees with the manifest, a face whose bytes moved after review, a pinned ver
 any `index.html` or `src/` reference to a remote font host. `scripts/renderAssets.test.mjs` is its
 battery, and it is run by `npm test` like every other file here.
 
-`npm run product:check` is the contract guard: **31 rules** over the active surfaces this tree scans
-(**222 files** in this working tree at the Stage 9 head — of which a clean clone prints **220**, the
-two-file difference being `pnpm-lock.yaml` and `pnpm-workspace.yaml`, untracked scratch from a stray
-pnpm run that this stage never commits and that the walk counts anyway because it walks the tree, not
-the index; **213 files** at `d49cb94`, from `q8-logs/s8-productcheck6.log`, which is those same two
-pnpm files on top of 211 tracked; **186 files** at `8e62c38`, from `q6-logs/s6-head-cert-8e62c38.log`; the count has moved
-four times since the rule list was first written — once for the storage adapter and the host's file
-panel, once for the adapter's own unit battery, once for `8e62c38`'s panel tap-target test, which is
-the file that took it from the 185 every earlier certification printed, and once for Stage 9's
-typography surface).
-The nine that joined between `d49cb94` and here are Stage 9's design spec plus eight font-surface
-files: `public/fonts/fonts.css`, `public/fonts/font-manifest.json` and the six
-`public/fonts/licences/*.txt`. The other 75 files Stage 9 added are invisible to the walk for two
-named reasons — `scripts/` is an excluded prefix, so the checker, the fetcher and their 27-test
-battery do not move the count, and `.woff2` is not in `SCANNED_EXTENSIONS`, so 72 font binaries add
-nothing. What the rules refuse: retired brand names, fabricated social proof and per-guest pricing
+`npm run product:check` is the contract guard: **32 rules** over the active surfaces this tree scans
+(**249 files** in this working tree, from `q9-logs/gate-s99-productcheck-final.txt` — of which
+**247** are tracked, which is what a clone of this branch would walk, the two-file difference being
+`pnpm-lock.yaml` and `pnpm-workspace.yaml`, untracked scratch from a stray pnpm run that this stage
+never commits and that the walk counts anyway because it walks the tree, not the index. The 247 is not
+a remembered number: `q9-logs/s9-tracked-scope.mjs` feeds `git ls-tree -r --name-only <head>` through
+the checker's own exported `isScannedPath` and prints the whole list beside its count, and the two
+captures are `q9-logs/s9-tracked-scope-11e6ffc.txt` (**247** here) and
+`q9-logs/s9-tracked-scope-d49cb94.txt` (**211** at the merged Stage 8 head); **213 files** at
+`d49cb94` in a working tree, from `q8-logs/s8-productcheck6.log`, which is those same two pnpm files
+on top of those 211; **186 files** at `8e62c38`, from `q6-logs/s6-head-cert-8e62c38.log`).
+The count has moved since the rule list was first written — once for the storage adapter and the host's
+file panel, once for the adapter's own unit battery, once for `8e62c38`'s panel tap-target test, which
+is the file that took it from the 185 every earlier certification printed, once for Stage 9's
+typography surface, and once for Stage 9's render surface. Both Stage 9 moves are derived, not
+remembered: **36 in-scope files joined between `d49cb94` and `11e6ffc`** (211 → 247 tracked; the 127
+files added over that range split 36 in scope / 91 out of it, with the in-scope list and the
+out-of-scope reasons printed in `q9-logs/s9-tracked-delta-d49cb94-11e6ffc.txt`, and nothing deleted at
+all — `q9-logs/s9-tracked-deletions.txt` reads 0 of 0; the same `isScannedPath` the checker uses, not a
+re-implementation of it), of which **nine** joined between `d49cb94` and `5a64f81` —
+Stage 9's design spec plus eight font-surface files: `public/fonts/fonts.css`,
+`public/fonts/font-manifest.json` and the six `public/fonts/licences/*.txt` — and the other **27**
+joined between `5a64f81`, the head whose README published "222 files", and here: `render.html`,
+`docs/architecture/render-outputs.md`, the twelve-file `src/render/` subtree, `src/lib/ogMetadata.ts`,
+`src/lib/renderSurfaces.ts`, `src/lib/invitationOutputs.ts`,
+`src/integrations/supabase/invitationOutputs.ts`, `InvitationOutputsPanel.tsx`, `ShareQrPlate.tsx` and
+the seven `src/test/` batteries written over them. The remaining 91 files Stage 9 added are invisible
+to the walk for four named reasons: `scripts/` is an excluded prefix, so the checker, the fetcher, the
+render worker, the publisher and their test files (14 additions) do not move the count; `docs/audits/`
+is an excluded prefix, so this stage's audit document adds nothing; `.woff2` is not in
+`SCANNED_EXTENSIONS`, so 72 font binaries add nothing; and neither `.sql` nor `.sh` nor
+`.gitattributes` is, so the Stage 9 migration, `supabase/tests/stage9/80_render_manifest.sql`,
+`90_render_functions.sql`, that directory's `run.sh` and the `.gitattributes` line that pins those
+bytes to LF add nothing either. That is the whole 91: 72 + 14 + 3 + 1 + 1, as the delta capture lists
+it. What the rules refuse: retired brand names, fabricated social proof and per-guest pricing
 language, the retired scaffold vocabulary, which tables may be named outside the data adapter, the
 **ten** cultural-safety rules that refuse a tradition inferred from a name, a place or a language, a
 pack key branched on in application code, a ceremonial authority claim, and any wording that lets
 machine-assisted draft text read as though it had been reviewed, the three public-door rules that
 refuse a credential passed as an RPC argument (`guest-door-called-with-arguments`,
-`reviewer-door-called-with-arguments`, and Stage 8's `household-door-called-with-arguments`), and one
+`reviewer-door-called-with-arguments`, and Stage 8's `household-door-called-with-arguments`), one
 rule about writing HTML into
-the DOM. Nothing was removed to get from 23 to 31 (`git show 8e62c38` diffs to the current list as
-**+2 / −0**: `reviewer-door-called-with-arguments` in Stage 7 and `household-door-called-with-arguments` in Stage 8). Three of the five Stage 5 rules deliberately reach
+the DOM, and one about importing the QR encoder outside `src/render/qrPlate.ts`
+(`qr-encoder-imported-outside-its-owner`), which is what keeps §9.4's bundle claim enforced rather than
+merely narrated. Nothing was removed to get from the 29 ids at `8e62c38` to the 32 here
+(`git show 8e62c38` diffs to the current list as
+**+3 / −0**: `reviewer-door-called-with-arguments` in Stage 7, `household-door-called-with-arguments`
+in Stage 8, and Stage 9's `qr-encoder-imported-outside-its-owner`). Three of the five Stage 5 rules deliberately reach
 into `docs/product/` and `docs/content-review/`, because this matrix is itself under the rule that
 forbids calling the draft candidate shippable; the last of the three (`main-landmark-absence-claim`)
 was added while assembling the Stage 5 report, after that report's own truth pass had left a stale

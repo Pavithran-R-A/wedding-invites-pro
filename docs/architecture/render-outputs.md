@@ -240,10 +240,44 @@ requests whose default referrer is the CSS file. So three things follow.
    origin. `docs/product/feature-readiness.md`'s referrer row describes the *guest* page's
    document-level request and makes no claim about subresources, so nothing here contradicts it.
 
-Nothing in this stage uploads a byte: the buckets, the `invitation_outputs` rows and the upload path are
-§7–§8 work, so the worker's output today is bytes in a scratch directory **outside** the repository
-plus the record above. That is a slice boundary, not an omission — the digests and the hash inputs are
-already the manifest's columns, so the migration changes where the record goes, not what it says.
+**The worker's own output stops at a scratch directory outside the repository; the publisher is the next
+hop, and it is built.** `scripts/stage9-output-publisher.mjs` registers each drawn artefact in
+`public.invitation_outputs`, uses the object key the database minted for that row, uploads the bytes
+through the Storage API, reads them back, and only then steps the row to `ready`. Measured on the
+`localvivaahvarnam` stack for one frozen version: **8 artefacts delivered, 0 blocking findings**
+(`q9-logs/live/publish-1.txt`), re-run write-free on the tree that was committed as `11e6ffc` — 8
+`VERIFIED-IN-PLACE`, the same summary, `publisher_exit=0`, and the manifest snapshot
+byte-identical to run 1's across its 8 rows and 8 compared fields
+(`q9-logs/live/publish-4.txt`, audit §13). An independent verifier — a separate process that reads the
+manifest with fresh `psql` and re-hashes every signed download rather than trusting that log — reported
+**21/21**: all 8 served files hash to the `content_digest` their own row carries, all 8 arrive with
+their format's MIME type, the raster boxes read back as `1200x630` and `1080x2160` from the served
+bytes, the PDF's only MediaBox is `0 0 595.91998 841.91998`, the plate is a 640×640 square, the private
+bucket refuses both the public path and an anonymous read of the authenticated one (each **400**), a
+signed URL serves the bytes with no bearer attached, and neither a service key nor the guest's address
+appears in the run's log or its record — the plate contributes only its target's digest
+(`5aa7d5ca147a…`). Re-run with `node q9-logs/live/verify-bytes.mjs`; no credential travels in argv.
+
+The read-back is also what found a design error, and design §13's reproducibility contract is what makes
+it worth stating precisely. A repeat run must write nothing, so it re-reads each stored object and
+compares it against what this build just drew. Run 2 refused the PDF
+(`REFUSAL ready-object-differs-readback-digest-mismatch pdf_a4_p1.pdf`) and the cause was measured, not
+guessed: Chromium's print-to-PDF stamps `/CreationDate` and `/ModDate` into the document, so run 2's PDF
+differs from run 1's by two byte runs of five bytes each, at offsets 249..253 and 284..288, same length,
+same structure, same MediaBox — while all seven raster and plate draws reproduced byte-for-byte
+(`q9-logs/live/pdf-stamp-finding.md`). Using the fresh draw as the reference would refuse a correctly
+delivered PDF forever; ignoring the difference would hide a renderer that stopped being pure. For a row
+that already claims `ready`, the promise under test is therefore **the row's own `content_digest`** —
+the digest a host's signed download is served against and the one the SQL lifecycle guards — and a
+non-reproducing draw is named in the log and the record as `ready-object-not-reproduced-by-this-draw`.
+Nothing about the blocking half loosened: mime, byte ceiling, PNG IHDR, WebP box and PDF MediaBox are
+still measured over the bytes as served. Repaired in `932bbb5` with three battery cases written red
+first (`q9-logs/mutation/pre-fix-red.txt`: 78 tests, 3 named failures).
+
+What the stage still does not do is unchanged by all of this: the buckets stay private, no consented
+public preview is activated, and the hosting seams in §8 belong to a deployment this branch never
+touches. The per-slice evidence, the defects each tier found, and the list of what remains unexecuted
+are in [`../audits/stage-9-render-exports.md`](../audits/stage-9-render-exports.md).
 
 ## 8. The production seams this stage names (§10.2)
 
