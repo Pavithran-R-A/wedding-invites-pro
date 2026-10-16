@@ -849,3 +849,187 @@ re-confirmed at the time of writing):
 |---|---|---|
 | `baf0f0e…` | the `--warning` lightness repair, 1 file +13 −1 | `git ls-remote` = same SHA; `gh api …/git/refs/heads/stage9/render-exports` = same SHA |
 | `f7096efb2afbb6406c79927cb0eddfa3cbae17b4` | the host-panel browser tier, 1 file +1,204 (new) | `git ls-remote` = `gh api` = local HEAD = this SHA |
+
+## 24. The rotation was run for real, the owed SQL chains came back green, and one notice disagreed with its own count
+
+§23 left four things unmeasured on purpose. Three of them are closed below by runs that actually
+happened, and the fourth — a real crawler fetching a real hosted page — is restated at the end rather
+than quietly dropped. This section does not edit §18, §22 or §23; where a claim here replaces one of
+theirs it names the bullet it replaces.
+
+**Headroom first, because every heavy tier after it depends on it.** The window opened blocked:
+`q9-logs/live/headroom-2026-10-16.txt` recorded **78–139 MB free of 476 GB**, and §23's own tail had
+already written 114 MB. The first move was to measure what *this task* owns instead of reaching for a
+general cleaner — `node_modules` **549 MB**, `dist` **3 MB**, `.git` **7 MB**, `q9-logs` **56 MB**, the
+tier's Chromium profile **1–2 MB** — which together is less than a gigabyte and would have cost a
+reinstall to buy back. The gigabyte-scale reclaimable bytes were Docker's: **5.906 GB** of images and
+**11.34 GB** of volumes, all of them inside the shared `docker_data.vhdx` alongside DueWeave's and p3c's
+containers. `docker system prune`, a volume delete and a vhdx shrink were therefore **refused**, not
+deferred — those three commands are precisely what "never delete or reset another project's data"
+forbids, and a vhdx shrink is not reversible from inside a session. Starting the engine and freeing the
+host disk are human-only actions under the same rule, so this was the one ask made; the answer is
+recorded verbatim as **"You free host disk, I continue"** (2026-10-16T09:55:05.097Z) and the space came
+from outside this repository. Re-measured after the action, `q9-logs/live/headroom-2026-10-16-02.txt` at
+`2026-10-16T16:48:24Z`: `C: 498133316 493451316 4682000 100% /c` — **4.47 GB available of 476 GB** —
+`server=29.8.1 containers=20 running=7`, `docker_info_exit=0`, `docker_ps_exit=0`, six
+`*_localvivaahvarnam` containers healthy **plus** `supabase_db_dueweave` healthy and untouched. The SQL
+tier then carried its own headroom inside its own captures (`c_free_mb=6575`, `6513`) and the bundle
+rebuild ran at 4.6 GB free, so no tier here asserted a green result it had not first given room to
+produce.
+
+**§23's fourth bullet — the `family` re-run blocked on a down engine — is closed.**
+`bash supabase/tests/stage9/run.sh family`, head `091d0ed76a6ad53bb497d8979c534adb3f6f8357`,
+`2026-10-16T15:10:15Z`, capture `q9-logs/live/s9-sql-family-091d0ed-01.txt`, **`family_exit=0`**:
+`STAGE7 FAMILY REVIEW TESTS PASSED (255)` and `STAGE7 REVIEW BOUNDARY TESTS PASSED (116)`, with the
+closing census `API_NAMES=21`, `INTERNAL_NAMES=32`, `PUBLIC_TABLES=20`,
+`STORAGE_BUCKETS=3: invitation-outputs, invitation-previews, wedding-assets`. The runner's own boundary
+paragraph stays with the numbers: plain Postgres plus a role/auth shim and a storage-schema fixture, no
+PostgREST, no Auth, no Storage API, nothing rendered.
+
+**And the complete Stage 9 SQL chain ran as final regression evidence.** `run.sh all` at
+`2026-10-16T15:16:25Z` on the same head, capture `q9-logs/live/s9-sql-all-091d0ed-01.txt`,
+**`chain_exit=0`**, five chains (`render`, `guest`, `family`, `clean`, `legacy`), every suite green:
+Stage 9's own `80_render_manifest` **134** and `90_render_functions` **94**; Stage 8 **182** + **185**;
+Stage 7 **255** + **116**; Stage 6 **91** + **80**; Stage 5 **122** + **50** + **124**; Stage 4 **428** +
+**57**; Stage 3 publication boundary **284** and draft invariant **46** on one chain / **49** on the
+other; Stage 2 **464** RLS attacks, **103** catalogue conformance, **43** migration outcome (nothing
+invented) and **76** (historical rows). The draft invariant's two totals are not a contradiction — the
+runner replays the older suites on more than one chain and each chain answers for itself, which is the
+sentence §23's predecessor already carried. Both runs' `working_tree_delta` is the two untracked pnpm
+files, so these numbers describe committed source.
+
+**The QR rotation, run for real.** `q9-logs/live/probe-s9-rotation.mjs` → `rotation-s9-01.txt` drives the
+fixture wedding's plate through the only renderer in the repository (`scripts/stage9-render-worker.mjs`,
+reached through `scripts/stage9-output-publisher.mjs --kinds qr --qr-variants 40mm`) against the live
+stack, and asks the question §23 could not: what happens to a printed plate when the address moves.
+Before: row `0864303b…` `status=ready`, `content_digest 098f2a0da27a…`, `target_url_digest 5aa7d5ca147a…`,
+and the proof that the row means what it says — `sha256(old address) = 5aa7d5ca147a…`, equal;
+`sha256(new address) = afa3e12827b0…`, different. A signed URL was minted for the old object and served
+**200 / 3,549 bytes / image/png** hashing to that digest *before* the run. The publisher then drew a
+plate for the new address: log line `SUPERSEDED row=0864303b… reason=token_rotated`, then
+`REGISTERED`/`READY qr_40mm_p1.png row=47a215ce…` with `digest=a85f1faef383020c…`, `publisher_exit=0`,
+`1 artefact(s) delivered, 0 blocking finding(s)`, and the redactor's own answer `0 of 7 publisher
+line(s) named a plate address or the service key`. After: the census reads `invalidated=1 ready=8`; the
+old row is `invalidated/token_rotated` and the new one `ready/-` with `target_url_digest` equal to
+`sha256(new address)`. Then the boundary, on the wire: the **same URL minted before the run** now answers
+`400 {"code":"NoSuchKey"}`, the owner's authenticated read of the old key answers `400 NoSuchKey`, the new
+key answers **200 / 3,558 bytes** and hashes to its row, and the host's panel — parsed with the client's
+own `parseInvitationOutputs`, not a test double — flips that row from `state="Ready"` with a download
+offered to `state="Retired"`, `reason="the address it points at was rotated away"`,
+`downloadOffered=false`.
+
+**The reason had to be decided before the bytes went away, and it was not.** That run is also where the
+first defect was found: the retirement was stamped `superseded`, whose host-facing sentence blames "an
+older version of this invitation", when the paper shows the *same* invitation pointing at a dead address.
+`classifyRetirement()` (`scripts/stage9-publish-core.mjs:314`) now answers the reason from the two target
+digests — different destination → `token_rotated`, same destination re-drawn → `superseded`, not a plate
+→ `superseded` — and answers `null` for a `qr` row whose digest cannot be read, which makes
+`retireStale()` record `retirement-reason-unclassifiable` and **leave the object alone**, because a wrong
+reason stamped after a delete is not recoverable by the run that stamped it. `sqlSlotRows` gained
+`o.target_url_digest` for exactly this comparison — a digest, never an address, and the test pins that the
+panel-shaped read still withholds it (`expect(sql).not.toMatch(/target_url(?!_digest)/)`). The log line
+carries the verdict now (`SUPERSEDED row=… reason=…`). Seven new cases: three in
+`scripts/stage9-output-publisher.test.mjs` (the rotation, the same-address case, the refusal that keeps
+the bytes) and four in `scripts/stage9-publish-core.test.mjs` (the `it.each` over the three non-plate
+kinds counts as three, plus the vocabulary check that every answer is a member of
+`INVALIDATION_REASONS`). Committed as `0de1676f2a55ff2bce8d7573e97e3fe0f2965d9e`.
+
+**The retired-artefact boundary, probed with the owner's own session.**
+`q9-logs/live/s9-retired-boundary-01.txt` (probe `probe-s9-retired-boundary.mjs`, sign-in `HTTP 200`,
+token read but never printed): `Q1` the owner reading the retired key directly → **400 `NoSuchKey`**;
+`Q2` the same session reading a live key → **200, 28,574 bytes, image/png**; `Q3` minting a signed address
+for the retired key → **400, no address issued**, so the fetch was never attempted; `Q5` minting for a
+live key → **200 with an address**. `Q6` answered `404 {"message":"no Route matched with those values"}`,
+which is the probe's own spelling and not the product's: Storage returns the address as a path *under*
+`/storage/v1`, the probe fetched `${api}/storage${signedURL}` and so asked Kong to route
+`/storage/object/sign/…`. The shipped client and this tier compose `${api}/storage/v1${signedURL}` —
+`probe-s9-sign-scope.mjs` measured that form, `X-04` mints through it and reports the refusal, the eight
+`D-*` deliveries fetch live keys through it, and `D-P01` pins the
+composed path against the row's `object_key` for all eight deliverable artefacts. The read policy carries
+no status filter (`…stage9_render_outputs.sql:468-476`), so a retired row is empty because its object was
+deleted, not because access was withdrawn — which is the honest way to say it, and the tier says it in
+`X-03`'s own detail line rather than in this file's.
+
+**One notice disagreed with its own number, and a host would have read it.** The rotation capture closed
+with the panel's reprint warnings, and the first of them was
+`1 QR plate was retired when the address was rotated. Any printed copy of them now leads guests to a dead
+page — print fresh plates from the new address.` A singular count followed by two plural instructions —
+in the sentence whose whole job is to tell someone whether their printed plates are dead. Repaired
+test-first: `src/test/invitationOutputs.test.ts:285` `agrees each notice with the number of rows it
+prints` failed against the shipped wording (**1 failed | 47 passed**, the received string being the
+sentence above), the fix landed in `src/lib/invitationOutputs.ts:275-323` — each reason carries both
+forms and picks by the count it derived — and the file re-ran **48 passed** at exit **0**. The same edit
+removed a sentence the run had made false: the function's header comment claimed "nothing in this build"
+retires a rotated plate, which §24's own publisher run contradicts, so it now states who writes the
+notice and when. Committed as `536867199b24b1d3a8546df809b19983357e111e`, then rebuilt
+(`npm run build`, `✓ built in 41.75s`). The capture `q9-logs/live/build-s9-02.txt` carries an addendum
+against itself: its `build_exit=0` was read off `tail`'s status, not the build's — the known mistake,
+repeated — so the build's success is carried by `✓ built in 41.75s` in the same file and by the chunk
+proof, `dist/assets/EditProject-BMWG4nuM.js` containing
+`was":"plates were"} retired when the address was rotated. Any printed copy of ${i?"it":"them"} now leads
+guests to a dead page — print ${i?"a fresh plate":"fresh plates"} from the new address.`
+
+**The host's screen re-derived: 51 cases became 56.** §23's first two bullets — the reprint notices and
+the retired-row copy — were open because drawing a retired row would have permanently retired the only
+fixture every Stage 9 tier reads (`invalidated` is terminal, `…sql:331-333`). The rotation run above made
+the fixture carry one *by accident of real work*: the manifest now permanently holds eight `ready` rows
+and one `token_rotated` row, so the tier reads what is there instead of manufacturing and burning it.
+`scripts/stage9-browser-outputs.mjs` (**1,422 lines**, was 1,204) widened its census read to select
+`invalidation_reason`, derives its groups from rows rather than from assumptions, and gained
+`RETIRED X-01…X-04` (the row names the reason the manifest records; it offers no button and no anchor; the
+owner's own session reads nothing from the retired key and still reads the live one; a retired key issues
+no signed address at all) plus `H-06` and `H-07`. Run `s9-05` at the widened tree: **55/55**, exit 0.
+After the notice repair and the rebuild, `s9-06` and `s9-07`: **56/56**, `RESULT: PASS`,
+`browser_exit=0` read adjacent to the command, `s9-07`'s own record
+(`browser-outputs-2026-10-16T17-04-55-241Z.json`) spanning `17:04:55.241Z` → `17:06:28.952Z` with
+`failures: []` and the group split `PRELUDE 3/3, HOST-LIST 7/7, DELIVERY 14/14, RETIRED 4/4, REFUSAL 11/11,
+A11Y 7/7, MOBILE 2/2, NETWORK 3/3, TEARDOWN 5/5`. P-03 now reads
+`9 row(s) recorded, 8 ready and private, 1 retired, 9 carrying a digest`, H-02 matches 9 fingerprints to
+9 rows, H-05 splits 8 "Ready to open." against 1 retired, and H-07 quotes the notice itself (its first 150
+characters, so the sentence below ends where the capture's cut ends, not where the host's page does): `1 QR plate was retired when the address was rotated. Any printed copy of it now leads guests to a
+dead page — print a fresh plate from the new address`. A-07 re-measured the warning-coloured runs on that
+page: **5 runs, lowest 5.04:1**, none below the minimum. Teardown restored the census to exactly
+`9/8/4` and left the fixture's 9 rows in the statuses the run found them in.
+`h07-discrimination.txt` is the case's own negative control, derived rather than assumed: the H-07
+predicate applied to the defective sentence verbatim out of `rotation-s9-01.txt` **FAILS**, applied to the
+repaired sentence **PASSES**, and flips direction when the count becomes 2 — so the case is not green
+because it is easy. Committed as `78c2bca473596155b6a9999d5c21bad37de1cd8a`.
+
+**Node gates at the final tree** (`q9-logs/live/s9-gates-final-01.txt`, each exit recorded adjacent to its
+own command, working tree = `78c2bca`'s content): typecheck exit **0**; lint exit **0** with
+`✖ 9 problems (0 errors, 9 warnings)` — the same warning set §21, §22 and §23 carried; vitest exit **0**,
+`Test Files 58 passed (58)` / `Tests 1247 passed (1247)`, duration 146.58 s. The count is reconciled, not
+asserted: against `s9-gates-091d0ed-vitest.txt`'s **1236**, the three changed files moved
+`stage9-output-publisher.test.mjs 78 → 81`, `stage9-publish-core.test.mjs 51 → 58`,
+`invitationOutputs.test.ts 47 → 48`, and 1236 + 11 = 1247. `render:check` OK (6 families, 72 faces,
+983 KiB of committed font bytes, 0 CDN references in product-facing text, 5 confined to test fixtures);
+`product:check` `250 active file(s) scanned, 0 violation(s)` — re-measured, and no file joined or left the
+tracked set in these three commits. Both checkers then ran again with this section's and the readiness
+matrix's edits in the tree (`q9-logs/live/s9-gates-final-02.txt`, `product_exit=0`, `render_exit=0`, still
+**250** files scanned): §23's own warning is that "a tracked file can move it", so the count is re-derived
+after the docs edits rather than inherited from the code commits.
+
+**What still did not run, and why.** `publication_revoked` and `asset_deleted` notices stay unexecuted:
+no shipped writer retires a row for either reason, and this stage does not invent one. A QR plate
+superseded at the *same* address likewise stays unexercised in the browser tier — a plate's render config
+covers both its variant and its target digest, so on this build the only way one plate supersedes another
+is by rotating; the classification's same-address branch is pinned by the unit case
+`keeps superseded for a plate re-drawn at the same address`, which is a unit-tier fact, not a browser-tier
+one. A UI-driven rotation — the host pressing rotate on their own screen and a publisher run redrawing the
+plate afterwards — has not been walked end to end: the rotation above was driven by the maintenance tool
+with the new address supplied through the environment, which is the trusted path, not the host's path.
+And a real crawler fetching a public `/i/…` page from a deployed origin has still never happened: this
+window has one origin, loopback, and no crawler. Stated plainly, because the mandate asks for exactly this
+distinction: **host downloads work locally and are measured end to end, retired plates included; hosted
+Open Graph previews remain unverified.**
+
+**The ledger continues** (each row pushed the moment it was committed, then read back from the Git side
+*and* from GitHub's ref API — never from a stale `origin/<branch>` tracking ref; the third column was
+re-confirmed at the time of writing):
+
+| commit | what | remote read-back |
+|---|---|---|
+| `0de1676f2a55ff2bce8d7573e97e3fe0f2965d9e` | the rotation-reason repair in the trusted publisher, 4 files +187 −7 | `git ls-remote` = `gh api` = this SHA |
+| `536867199b24b1d3a8546df809b19983357e111e` | the reprint-notice agreement repair, 2 files +60 −18 | `git ls-remote` = `gh api` = this SHA |
+| `78c2bca473596155b6a9999d5c21bad37de1cd8a` | the browser tier widened to 56 cases, 1 file +262 −44 | `git ls-remote` = `gh api` = local HEAD = this SHA |
+| *this section's own commit* | §24 and the two readiness rows it forces | the docs commit is the head this section is pushed under; its SHA and its read-back belong to the next section's ledger, not to a claim made here before the push happened |
