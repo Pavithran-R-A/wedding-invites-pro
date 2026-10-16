@@ -656,8 +656,14 @@ BEGIN
   PERFORM pg_temp.s7f_eq('K3 a real credential truncated to 42 characters is refused by the shape '
     'check before anything is hashed — a URL copied short is not a partial read',
     (pg_temp.s7f_open(left(tok1, 42)) -> 'available')::boolean, false);
+  -- Mangled at a fixed position rather than by `translate(tok1, 'abc', …)`: a 43-character base64url
+  -- credential contains none of a, b or c about one run in eight — (61/64)^43 = 12.69% in theory, and
+  -- 24,945 and 25,062 of 200,000 `randomBytes(32).toString('base64url')` mints in measurement. For
+  -- those runs the old mangle was the identity: the case handed the door its own valid credential and
+  -- read the resulting `available=true` as a failure. Same property, now unconditional — 43 characters,
+  -- with a `!` no alphabet admits.
   PERFORM pg_temp.s7f_eq('K4 a credential whose alphabet has been mangled is refused',
-    (pg_temp.s7f_open(translate(tok1, 'abc', '!!!')) -> 'available')::boolean, false);
+    (pg_temp.s7f_open('!' || right(tok1, 42)) -> 'available')::boolean, false);
   PERFORM pg_temp.s7f_eq('K5 the stored *digest* presented as a credential is refused — the shape '
     'check alone rejects it, so a leaked database of hashes is not a set of links',
     (pg_temp.s7f_open(encode(extensions.digest(convert_to(tok1, 'UTF8'), 'sha256'), 'hex'))
