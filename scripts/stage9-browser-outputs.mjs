@@ -26,18 +26,20 @@
 //   outside the repository.
 //
 // What this tier does NOT measure, stated because the panel's own header comment claims it.
-//   The reprint warnings for a retired artefact (`token_rotated`, `publication_revoked`, `superseded`)
-//   need an `invalidated` row. The maintenance role can reach that state over HTTP — `ready → invalidated`
-//   is a legal edge (migration `:345`) and `service_role` bypasses RLS — but `invalidated` is terminal
-//   (`:332-333`), so retiring a row here would permanently retire the only eight artefacts this tier reads
-//   and every later run would find a manifest with nothing to deliver. Drawing a throwaway row to retire
-//   instead means a full register → upload → ready → invalidate → delete cycle, which is the publisher's
-//   job, not a browser tier's. So H-06 measures the branch that this manifest can show — no retirement
-//   sentence while nothing is invalidated, and the QR-limit sentence exactly when a ready plate exists —
-//   and says which half it did not reach. The retired-row sentences themselves are pinned by
-//   `src/test/invitationOutputs.test.ts`; that is a unit-tier fact, not a browser-tier one.
-//   Real hosted Open Graph preview (a crawler fetching a public `/i/…` page from the deployed origin) is
-//   likewise not measured here: this run has one origin, loopback, and no crawler.
+//   The retired-artefact half IS measured now, and not by manufacturing a row this run would have to
+//   destroy: the publisher's own rotation run retired its predecessor through delete-then-mark, and
+//   `invalidated` is terminal (migration `:332-333`), so the fixture manifest permanently carries both a
+//   ready QR plate and a retired one. H-06 derives the notice set from the reasons and counts the
+//   manifest itself holds, and the RETIRED group measures that row as the host sees it and then follows
+//   its key with the host's own session on the wire.
+//   What this run still cannot reach, and why: `publication_revoked` and `asset_deleted` notices, because
+//   no shipped writer retires a row for those reasons — `classifyRetirement()` in
+//   `scripts/stage9-publish-core.mjs` answers only `superseded` and `token_rotated`; a QR plate
+//   superseded at the *same* address, because a plate's render config covers its variant and its target
+//   digest, so on this build the only way one plate supersedes another is by rotating; and a real
+//   crawler fetching a public `/i/…` page from a deployed origin, because this run has one origin,
+//   loopback, and no crawler. The sentences for those cases are pinned by
+//   `src/test/invitationOutputs.test.ts`, which is a unit-tier fact, not a browser-tier one.
 //
 // Usage:
 //   node scripts/stage9-browser-outputs.mjs --fixture ../q9-logs/live/ids.json \
@@ -46,9 +48,9 @@
 //   `--cdp-port <n>`, `--evidence <dir>`, `--keep-second-host` (skip the second host's teardown while
 //   debugging a failure). Exit 0 every check passed, 1 a check failed, 2 the run could not start.
 //
-// Cases: PRELUDE P-01..03 · HOST-LIST H-01..06 · DELIVERY D-P01, one D-<kind>-<variant>-<format>-p<n>
-// per artefact, D-TTL-01..03, D-HY-01..02 · REFUSAL R-A1..A5, R-B1..B5, R-X1 · A11Y A-01..07 ·
-// MOBILE M-01..02 · NETWORK N-01..03 · TEARDOWN T-01..05.
+// Cases: PRELUDE P-01..03 · HOST-LIST H-01..07 · DELIVERY D-P01, one D-<kind>-<variant>-<format>-p<n>
+// per artefact, D-TTL-01..03, D-HY-01..02 · RETIRED X-01..04 · REFUSAL R-A1..A5, R-B1..B5, R-X1 ·
+// A11Y A-01..07 · MOBILE M-01..02 · NETWORK N-01..03 · TEARDOWN T-01..05.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -395,6 +397,54 @@ const download = async (href) => {
   return { status: res.status, buffer, bytes: buffer.length, contentType: res.headers.get('content-type') };
 };
 
+/** The two wordings the panel owes a retired row, stated here rather than imported.
+ *
+ *  `src/lib/invitationOutputs.ts:218-223` and `:275-323` are the product's own tables, and
+ *  `src/test/invitationOutputs.test.ts` pins them at the unit tier. Repeating the fragments this tier has
+ *  to look for is deliberate: if the library's words drift, the browser case fails loudly instead of
+ *  quietly agreeing with itself by calling the same function the component calls. Only the opening of a
+ *  sentence is needed — enough to tell which reason a notice describes and how many rows it counted. */
+const REASON_PHRASE = {
+  superseded: 'a newer version took its place',
+  token_rotated: 'the address it points at was rotated away',
+  publication_revoked: 'the publication was taken down',
+  asset_deleted: 'a file it was built from was removed',
+};
+
+/** The first sentence `reprintWarnings()` writes for `count` rows retired for `reason`, exactly as the
+ *  library composes it. null means this build has no notice for that reason, which is the case the
+ *  library handles by printing nothing. */
+const noticeStart = (reason, count) => {
+  if (reason === 'token_rotated') {
+    return `${count} QR ${count === 1 ? 'plate was' : 'plates were'} retired when the address was rotated`;
+  }
+  if (reason === 'publication_revoked') {
+    return `${count} ${count === 1 ? 'file was' : 'files were'} retired when the invitation was taken down`;
+  }
+  if (reason === 'superseded') {
+    return `${count} ${count === 1 ? 'file shows' : 'files show'} an older version of this invitation`;
+  }
+  return null;
+};
+
+const LIMIT_SENTENCE = 'A QR plate is a promise about an address';
+
+/** The clause each notice must carry once it has counted its rows, in both numbers.
+ *
+ *  A notice states a count and then talks about the rows behind it, so the pronoun is part of the fact
+ *  being reported: after "1 QR plate was retired", "any printed copy of them" describes plates the host
+ *  does not have. The rotation run that first put a single retired plate on this fixture's panel printed
+ *  exactly that (§24 of this stage's audit), which is why the agreement is checked here in the host's own
+ *  browser rather than only in the unit tier. */
+const NOTICE_AGREEMENT = {
+  token_rotated: { one: 'copy of it now leads', many: 'copy of them now leads' },
+  publication_revoked: { one: 'Nothing printed from it', many: 'Nothing printed from them' },
+  superseded: {
+    one: 'Its wording is the wording of the version it was drawn from',
+    many: 'Their wording is the wording of the version they were drawn from',
+  },
+};
+
 /** A manifest row as the database spells it, put through the client's own path builder. The builder
  *  takes the projection's camelCase fields, so this is the composition test the lib header promises:
  *  `outputDeliveryPath` must agree with the key `private.mint_invitation_output_key()` wrote, or a
@@ -591,18 +641,28 @@ export async function runTier({ opts, log, channels }) {
   if (!UUID.test(weddingId)) throw new Refusal(`refused: ${opts.fixturePath} names no wedding uuid.`);
   const dbRows = await sql.rows(`/rest/v1/invitation_outputs?wedding_id=eq.${weddingId}`
     + '&select=id,output_kind,variant,format,page_number,status,content_digest,storage_domain,'
-    + 'object_key,version_id,render_config_hash,attempt_count,created_at'
+    + 'object_key,version_id,render_config_hash,attempt_count,created_at,invalidation_reason'
     + '&order=output_kind,variant,format,page_number');
   const deliverable = dbRows.filter((r) => r.status === 'ready' && r.storage_domain === 'host_private');
+  // Rows carrying bytes, whether or not they are still openable. The schema forces the pair:
+  // `content_digest IS NOT NULL` exactly for `ready` and `invalidated` (migration `:163`), so a retired
+  // row still shows its fingerprint on the panel — the bytes were verified once, and the manifest keeps
+  // saying which bytes it pointed at even after the object is gone. Every on-screen comparison below is
+  // made against this set rather than against `deliverable`, which is the set of pressable rows.
+  const withDigest = dbRows.filter((r) => /^[0-9a-f]{64}$/.test(String(r.content_digest)));
+  const retired = dbRows.filter((r) => r.status === 'invalidated');
+  const rowsByReason = (reason) => dbRows.filter((r) => r.invalidation_reason === reason);
   if (deliverable.length === 0) {
     throw new Refusal(`refused: wedding ${weddingId} holds no ready, host-private artefact, so there is `
       + 'nothing for the panel to deliver. Run the publisher for this version first.');
   }
   check('PRELUDE', 'P-03 the fixture wedding holds ready, host-private artefacts with digests',
     deliverable.every((r) => /^[0-9a-f]{64}$/.test(String(r.content_digest))),
-    `${dbRows.length} row(s) recorded, ${deliverable.length} ready and private`);
+    `${dbRows.length} row(s) recorded, ${deliverable.length} ready and private, ${retired.length} retired, `
+    + `${withDigest.length} carrying a digest`);
   note('PRELUDE', `fixture version ${fixture.version_id}; artefacts: `
-    + deliverable.map((r) => `${r.output_kind}/${r.variant}/${r.format} p${r.page_number}`).join(', '));
+    + dbRows.map((r) => `${r.output_kind}/${r.variant}/${r.format} p${r.page_number}`
+      + `=${r.status}${r.invalidation_reason === null ? '' : `/${r.invalidation_reason}`}`).join(', '));
 
   const censusOf = async () => {
     const outputs = await sql.rows('/rest/v1/invitation_outputs?select=id,status');
@@ -635,16 +695,19 @@ export async function runTier({ opts, log, channels }) {
     // of the digest the publisher verified. A list that agreed with itself but not with the manifest
     // fails here rather than looking like a success.
     const onScreen = rows.filter((r) => r.fingerprint !== null).map((r) => r.fingerprint).sort();
-    const fromDb = deliverable.map((r) => r.content_digest.slice(0, 12)).sort();
+    const fromDb = withDigest.map((r) => r.content_digest.slice(0, 12)).sort();
     check('HOST-LIST', 'H-02 every recorded artefact appears, and nothing else does',
       onScreen.length === fromDb.length && onScreen.every((f, i) => f === fromDb[i]),
-      `${onScreen.length} fingerprint(s) on screen vs ${fromDb.length} row(s) in the manifest`);
+      `${onScreen.length} fingerprint(s) on screen vs ${fromDb.length} row(s) of ${dbRows.length} `
+      + 'that carry a digest (a retired row keeps its digest by migration `:163`)');
 
     const headings = await hostA.evaluate(`(() => {
       const s = document.querySelector('section[aria-labelledby="outputs-heading"]');
       return [...s.querySelectorAll('h3')].map((h) => h.textContent.trim());
     })()`);
-    const firstWords = [...new Set(deliverable.map((r) => r.output_kind))];
+    // Every kind the manifest holds, retired rows included: `groupsOf()` in the panel groups the whole
+    // list, so a kind whose only row was retired still gets its heading and its row.
+    const firstWords = [...new Set(dbRows.map((r) => r.output_kind))];
     const labelFor = { og_image: 'Link preview', share_image: 'Share images', pdf: 'Print-ready PDF', qr: 'QR plates' };
     const expected = firstWords.map((k) => labelFor[k] ?? `this build has no word for the kind “${k}”`);
     check('HOST-LIST', 'H-03 each kind the manifest holds gets its own group heading',
@@ -661,39 +724,90 @@ export async function runTier({ opts, log, channels }) {
       tallyMatch === null ? `no tally sentence on the page; said: ${bodyA.slice(0, 160)}`
         : `${tallyMatch[1]} recorded, ${tallyMatch[2]} openable against ${dbRows.length}/${deliverable.length} in the manifest`);
 
+    // Each artefact row's own sentence, classified by the two shapes this manifest can show. A row whose
+    // status is neither ready nor invalidated would land in `other` and fail the case, which is the right
+    // outcome for this fixture: the panel owes a `registered`/`uploading`/`failed` row a sentence the
+    // queue-state cases in `src/test/invitationOutputs.test.ts` describe, and a browser tier reading a
+    // manifest with such a row has to say what it saw rather than score it as a ready file.
     const statuses = await hostA.evaluate(`(() => {
       const s = document.querySelector('section[aria-labelledby="outputs-heading"]');
       return [...s.querySelectorAll('li')]
         .filter((li) => li.closest('[role="status"]') === null)
-        .map((li) => (/Ready to open\\./.test(li.innerText) ? 'ready' : 'other'));
+        .map((li) => (/Ready to open\\./.test(li.innerText) ? 'ready'
+          : /no longer offers a file to open/.test(li.innerText) ? 'retired' : 'other'));
     })()`);
-    check('HOST-LIST', 'H-05 every row says it is ready, which is what its status claims',
-      statuses.length === deliverable.length && statuses.every((x) => x === 'ready'),
-      `${statuses.length} row(s), ${statuses.filter((x) => x === 'ready').length} saying "Ready to open."`);
+    const readyShown = statuses.filter((x) => x === 'ready').length;
+    const retiredShown = statuses.filter((x) => x === 'retired').length;
+    const otherShown = statuses.filter((x) => x === 'other').length;
+    check('HOST-LIST', 'H-05 every row states its own status, and the two families split as the manifest does',
+      statuses.length === dbRows.length && readyShown === deliverable.length
+      && retiredShown === retired.length && otherShown === 0,
+      `${statuses.length} row element(s) for ${dbRows.length} manifest row(s); ${readyShown} saying `
+      + `"Ready to open." against ${deliverable.length} ready, ${retiredShown} saying they are retired `
+      + `against ${retired.length} invalidated, ${otherShown} saying something else`);
 
     // What the panel says *besides* the rows is decided by reprintWarnings() in
-    // src/lib/invitationOutputs.ts:272-313: a sentence per retired-row reason, plus one fixed
-    // sentence whenever a ready QR plate exists, because the projection deliberately carries no
-    // target-url digest for this read to compare against. On this manifest the first family must be
-    // silent (nothing is invalidated) and the second must be present. A check that merely counted
-    // live regions would have called the honest sentence a defect and the product would have been
-    // "repaired" into a lie.
+    // src/lib/invitationOutputs.ts:272-315: one sentence per reason the manifest holds retired rows for,
+    // counting the rows that carry it, plus one fixed sentence whenever a ready QR plate exists, because
+    // the projection deliberately carries no target-url digest for this read to compare against. The
+    // expectation is built from this manifest's own reasons and counts, so a retired row changes what the
+    // case demands instead of breaking it — and an implementation that stayed silent because retirement is
+    // awkward, or emitted one notice per row, or drew a notice for a reason no row carries, fails here
+    // rather than looking like a pass. A check that merely counted live regions would have called the
+    // honest sentence a defect and the product would have been "repaired" into a lie.
     const noticeList = await hostA.evaluate(`(() => {
       const s = document.querySelector('section[aria-labelledby="outputs-heading"]');
       return [...s.querySelectorAll('[role="status"] li')].map((li) => li.innerText.trim().replace(/\\s+/g, ' '));
     })()`);
-    const retiredSentences = noticeList.filter((text) => /retired|reprint|print again from the new/i.test(text)
-      && !text.startsWith('A QR plate is a promise about an address'));
-    const limitSentence = noticeList.find((text) => text.startsWith('A QR plate is a promise about an address'));
-    const qrReady = deliverable.filter((r) => r.output_kind === 'qr' && r.status === 'ready').length;
-    check('HOST-LIST', 'H-06 an all-ready manifest draws no reprint warning, only the sentence about what this list cannot see',
-      dbRows.every((r) => r.status === 'ready') && retiredSentences.length === 0
-      && noticeList.length === (qrReady > 0 ? 1 : 0) && (qrReady > 0) === (limitSentence !== undefined),
-      `${noticeList.length} notice(s) with ${dbRows.filter((r) => r.status === 'invalidated').length} `
-      + `invalidated row(s) and ${qrReady} ready QR plate(s); ${retiredSentences.length} of them name a `
-      + 'retirement'
+    const reasonGroups = [...new Set(retired.map((r) => r.invalidation_reason))];
+    const expectedStarts = reasonGroups.map((reason) => noticeStart(reason, rowsByReason(reason).length))
+      .filter((start) => start !== null);
+    const unclassifiable = reasonGroups.length - expectedStarts.length;
+    const qrReady = deliverable.filter((r) => r.output_kind === 'qr').length;
+    const limitSentence = noticeList.find((text) => text.startsWith(LIMIT_SENTENCE));
+    const presentOnce = expectedStarts.filter((start) => noticeList.filter((t) => t.startsWith(start)).length === 1);
+    const stray = noticeList.filter((text) => !expectedStarts.some((start) => text.startsWith(start))
+      && !(qrReady > 0 && text.startsWith(LIMIT_SENTENCE)));
+    check('HOST-LIST', 'H-06 the reprint notices are exactly the ones this manifest\'s reasons and counts support',
+      unclassifiable === 0 && presentOnce.length === expectedStarts.length && stray.length === 0
+      && noticeList.length === expectedStarts.length + (qrReady > 0 ? 1 : 0)
+      && (qrReady > 0) === (limitSentence !== undefined),
+      `${noticeList.length} notice(s) against ${retired.length} retired row(s) in `
+      + `${reasonGroups.length} reason group(s) [${reasonGroups.join(', ') || 'none'}] and ${qrReady} `
+      + `ready QR plate(s); ${presentOnce.length}/${expectedStarts.length} expected sentence(s) present `
+      + `exactly once${unclassifiable > 0 ? ` (${unclassifiable} reason(s) this harness has no sentence for)` : ''}`
+      + (stray.length === 0 ? '; nothing extra' : `; extra: ${stray.slice(0, 2).map((t) => `"${t.slice(0, 60)}…"`).join(' | ')}`)
       + (limitSentence === undefined ? '; the limit sentence is absent'
         : `; the limit sentence reads "${limitSentence.slice(0, 72)}…"`));
+
+    // H-06 asks which notices exist; this one asks whether each says how many files it means in the
+    // rest of its own sentence. The forms are checked in both directions, so a notice that agrees by
+    // accident (a plural on a two-row manifest passes only if the singular is absent too).
+    const agreements = reasonGroups
+      .filter((reason) => NOTICE_AGREEMENT[reason] !== undefined)
+      .map((reason) => {
+        const count = rowsByReason(reason).length;
+        const forms = NOTICE_AGREEMENT[reason];
+        const sentence = noticeList.find((t) => t.startsWith(noticeStart(reason, count)));
+        if (typeof sentence !== 'string') return { reason, count, ok: false, sentence: '', why: 'no notice to agree with' };
+        const wanted = count === 1 ? forms.one : forms.many;
+        const unwanted = count === 1 ? forms.many : forms.one;
+        return { reason, count, sentence, ok: sentence.includes(wanted) && !sentence.includes(unwanted),
+          why: `wanted "${wanted}": ${sentence.includes(wanted) ? 'present' : 'absent'}; `
+            + `"${unwanted}": ${sentence.includes(unwanted) ? 'present (wrong number)' : 'absent'}` };
+      });
+    const badlyAgreeing = agreements.filter((a) => a.ok !== true);
+    check('HOST-LIST', 'H-07 each reprint notice agrees its wording with the number of rows it counted',
+      badlyAgreeing.length === 0 && agreements.length > 0,
+      agreements.length === 0
+        ? 'no reason group in this manifest has a notice whose wording this harness knows'
+        : `${agreements.length}/${reasonGroups.length} reason group(s) checked`
+          + ` [${agreements.map((a) => `${a.reason} x${a.count}`).join(', ') || 'none'}]`
+          + (badlyAgreeing.length === 0 ? ', all agreeing'
+            : `; disagreeing: ${badlyAgreeing.map((a) => `${a.reason} (${a.why})`).join(' | ')}`)
+          // Quote the sentence itself, not only the verdict: the repair this case exists to hold was
+          // found by reading these words, and a future pass should be able to read them too.
+          + `; as the host reads it: ${agreements.map((a) => `"${a.sentence.slice(0, 150)}"`).join(' | ')}`);
 
     // ---- DELIVERY ---------------------------------------------------------------
     const drift = deliverable.filter((r) => composedPath(weddingId, r) !== r.object_key);
@@ -809,6 +923,102 @@ export async function runTier({ opts, log, channels }) {
       for (const name of ['D-TTL-01', 'D-TTL-02', 'D-TTL-03']) {
         check('DELIVERY', name, false, 'no artefact produced a link, so no window was ever minted');
       }
+    }
+
+    // ---- RETIRED: what the publisher's own rotation left behind ---------------------
+    // The mandate asks for retired-artefact behaviour and the signed-URL boundary. This fixture carries a
+    // real one rather than a manufactured state: the rotation run retired its predecessor through
+    // delete-then-mark, and `invalidated` is terminal (migration `:332-333`), so the row below is a
+    // permanent part of the wedding this tier reads.
+    //
+    // The half worth stating plainly, because it is easy to claim wrongly: §8's storage read policy
+    // (`wedding_members_read_output_objects`, migration `:468-477`) carries **no status filter**, so a
+    // retired row does not become unreadable by RLS. The bytes are gone because retirement deletes the
+    // object, and the affordance is gone because `isDeliverable()` answers false for a non-`ready` row.
+    // X-03 and X-04 measure exactly that split with the owner's own session, so the claim is a
+    // measurement rather than a reading of the migration.
+    if (retired.length === 0) {
+      for (const name of ['X-01', 'X-02', 'X-03', 'X-04']) {
+        check('RETIRED', name, false,
+          'the manifest this run read holds no retired row, so this half has nothing to measure — '
+          + 'point --fixture at a wedding whose publisher has rotated once');
+      }
+    } else {
+      const hostToken = await hostA.authHeader();
+      if (hostToken === null) {
+        throw new Refusal('refused: the fixture host\'s own session token could not be read, so the '
+          + 'retired-key checks would be a maintenance role talking about its own privileges.');
+      }
+      const hostGet = { apikey: anonKey, Authorization: `Bearer ${hostToken}` };
+      for (const row of retired) {
+        const fp = String(row.content_digest ?? '').slice(0, 12);
+        await hostA.evaluate(MARK_ROWS);
+        const scope = `li[data-s9row="${fp}"]`;
+        const said = await hostA.evaluate(`(() => {
+          const li = document.querySelector(${JSON.stringify(scope)});
+          return li ? li.innerText.replace(/\\s+/g, ' ') : null;
+        })()`);
+        const words = row.invalidation_reason === null ? null : REASON_PHRASE[row.invalidation_reason] ?? null;
+        check('RETIRED', `X-01 the retired row names the reason the manifest records (${fp})`,
+          typeof said === 'string' && words !== null
+          && said.includes(`Retired — ${words} — so this row no longer offers a file to open.`),
+          said === null ? `no row marked ${fp} is on the page, so the manifest's retired row is invisible`
+            : words === null
+              ? `this harness has no words for the reason “${row.invalidation_reason}”; the row said: ${said.slice(0, 180)}`
+              : `the row said: ${said.slice(0, 200)}`);
+        const affordance = await hostA.evaluate(`(() => {
+          const li = document.querySelector(${JSON.stringify(scope)});
+          return li ? [...li.querySelectorAll('button,a[href]')]
+            .map((el) => el.tagName + ' "' + (el.textContent || '').trim().slice(0, 24) + '"') : null;
+        })()`);
+        check('RETIRED', `X-02 that retired row offers nothing a host can press (${fp})`,
+          Array.isArray(affordance) && affordance.length === 0,
+          affordance === null ? 'the row is not on the page'
+            : affordance.length === 0 ? 'no button and no anchor inside the row'
+              : `control(s) inside the row: ${affordance.join(', ')}`);
+      }
+
+      const retiredKey = retired[0].object_key;
+      const liveKey = deliverable[0].object_key;
+      const deadDirect = await hostA.fetchFromPage(`${api}/storage/v1/object/${OUTPUT_BUCKET}/${retiredKey}`,
+        { method: 'GET', headers: hostGet });
+      const liveDirect = await hostA.fetchFromPage(`${api}/storage/v1/object/${OUTPUT_BUCKET}/${liveKey}`,
+        { method: 'GET', headers: hostGet });
+      check('RETIRED', 'X-03 the owner\'s own session reads nothing from a retired key, and still reads the bytes of a live one',
+        deadDirect.status !== 200 && refusalResolves(deadDirect.text)
+        && /RIFF|%PDF-|PNG/.test(deadDirect.text) === false
+        && liveDirect.status === 200 && liveDirect.text.length > 0,
+        `retired key → HTTP ${deadDirect.status} (${deadDirect.text.slice(0, 110)}); live key → HTTP `
+        + `${liveDirect.status}, ${liveDirect.text.length} byte(s) of reply. The read policy has no status `
+        + 'filter, so the retired row is absent because its object was deleted, not because access was withdrawn');
+
+      // A signed address is minted from the key, not from the object, on some Storage builds — so the
+      // question this case answers is whether an address that *exists* can still carry bytes. Measured on
+      // this stack (`q9-logs/live/s9-retired-boundary-01.txt`): the mint itself refuses a retired key with
+      // `NoSuchKey` at HTTP 400, so the first branch is the one that fires here. The case accepts either
+      // answer — a refusal to mint, or an address that delivers nothing — because which of the two happens
+      // is Storage's business; what is the product's claim is that no retired key yields bytes to anybody,
+      // its own owner included.
+      const mint = await hostA.fetchFromPage(`${api}/storage/v1/object/sign/${OUTPUT_BUCKET}/${retiredKey}`, {
+        method: 'POST', headers: { ...hostGet, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresIn: 60 }) });
+      const mintJson = (() => { try { return JSON.parse(mint.text); } catch { return null; } })();
+      const signedPath = typeof mintJson?.signedURL === 'string' ? mintJson.signedURL : null;
+      // Storage answers the address as a path under `/storage/v1`, which the panel's own anchor already
+      // carries and this hand-built read has to compose — `q9-logs/live/probe-s9-sign-scope.mjs` measured
+      // the form; a `/storage` prefix alone reaches Kong's `no Route matched`, which would look like a
+      // delivery failure and is only a harness spelling.
+      const got = signedPath === null ? null : await download(`${api}/storage/v1${signedPath}`);
+      const said = got === null ? mint.text.slice(0, 140) : got.buffer.toString('utf8', 0, 200);
+      const saysMissing = ['nosuchkey', 'object not found', 'not_found']
+        .some((marker) => said.toLowerCase().includes(marker));
+      check('RETIRED', 'X-04 a retired key gives its owner no bytes through the signed door either',
+        (signedPath === null ? mint.status !== 200 : got.status !== 200 && got.bytes === 0)
+        && saysMissing && /RIFF|%PDF-|PNG/.test(said) === false,
+        `mint → HTTP ${mint.status}${signedPath === null
+          ? ', no address issued' : ` with an address at ${new URL(`${api}/storage/v1${signedPath}`).pathname}`}; `
+        + `read → ${got === null ? 'not attempted, there was no address to fetch' : `HTTP ${got.status}, ${got.bytes} byte(s)`}; `
+        + `body ${said.slice(0, 120)}`);
     }
 
     // ---- REFUSAL: an anonymous visitor -------------------------------------------
@@ -1102,10 +1312,18 @@ export async function runTier({ opts, log, channels }) {
         + `${censusAfter.outputs}/${censusAfter.ready}/${censusAfter.weddings} `
         + '(manifest rows / ready rows / weddings)');
       const ownerStill = await sql.rows(`/rest/v1/invitation_outputs?wedding_id=eq.${weddingId}&select=id,status`);
+      // Compared row by row with the statuses the run *found*, because this manifest is no longer
+      // uniformly ready: a retired row is expected to still be retired at the end, and a check that
+      // demanded `ready` of every row would score the fixture's own history as a defect.
+      const statusNow = new Map(ownerStill.map((r) => [r.id, r.status]));
+      const moved = dbRows.filter((r) => statusNow.get(r.id) !== r.status);
       check('TEARDOWN', 'T-04 the fixture wedding and its artefacts are untouched by the refusals',
-        ownerStill.length === dbRows.length && ownerStill.every((r) => r.status === 'ready'),
-        `${ownerStill.length} row(s) still recorded for ${weddingId.slice(0, 8)}, `
-        + `${ownerStill.filter((r) => r.status === 'ready').length} of them ready`);
+        ownerStill.length === dbRows.length && moved.length === 0,
+        `${ownerStill.length} row(s) still recorded for ${weddingId.slice(0, 8)}, in the statuses the run `
+        + `found them in (${dbRows.filter((r) => r.status === 'ready').length} ready, `
+        + `${retired.length} retired)`
+        + (moved.length === 0 ? '' : `; moved: ${moved.map((r) => `${r.id.slice(0, 8)} `
+          + `${r.status}→${statusNow.get(r.id) ?? 'gone'}`).join(', ')}`));
     }
   } finally {
     const closed = await browser.close()
