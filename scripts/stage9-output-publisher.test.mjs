@@ -452,7 +452,7 @@ describe('a run over work that is already delivered', () => {
     expect(run.outcome.ok).toBe(true);
   });
 
-  it('refuses when the stored object is not the bytes this build draws, and changes nothing', async () => {
+  it('refuses an object that is not the bytes the row promises, and changes nothing', async () => {
     const ready = readyRow();
     const run = await drive({
       artefacts: [readyArtefacts[0]],
@@ -460,7 +460,7 @@ describe('a run over work that is already delivered', () => {
       rowsById: { [id]: ready },
       objects: { [key]: { bytes: pngBytes(1200, 630, 44), mime: 'image/png' } },
     });
-    expect(reasons(run.outcome)).toContain('ready-object-differs-readback-size-mismatch');
+    expect(reasons(run.outcome)).toContain('ready-object-differs-readback-digest-mismatch');
     expect(run.writes).toHaveLength(0);
     expect(run.outcome.ok).toBe(false);
     expect(run.outputs.get(id).status).toBe('ready');
@@ -477,6 +477,46 @@ describe('a run over work that is already delivered', () => {
     });
     expect(reasons(run.outcome)).toContain('ready-object-differs-readback-digest-mismatch');
     expect(run.writes).toHaveLength(0);
+  });
+
+  // Measured on the live stack (q9-logs/live/pdf-stamp-finding.md): Chromium stamps /CreationDate into a
+  // printed PDF, so the second run of an identical command draws bytes that differ by five characters.
+  // A `ready` row's own digest is therefore the reference for an in-place check — it is the promise a
+  // host's signed download is served against — and the draw is reported, not trusted.
+  it('refuses a ready row whose recorded digest is not the object in the bucket, even when this run draws that object', async () => {
+    const lyingRow = readyRow({ content_digest: seed('a-digest-the-bucket-has-no-bytes-for') });
+    const run = await drive({
+      artefacts: [readyArtefacts[0]],
+      slotRows: [lyingRow],
+      rowsById: { [id]: lyingRow },
+      objects: { [key]: { bytes: readyArtefacts[0].raw, mime: 'image/png' } },
+    });
+    expect(reasons(run.outcome)).toContain('ready-object-differs-readback-digest-mismatch');
+    expect(run.outcome.results).toHaveLength(0);
+    expect(run.writes).toHaveLength(0);
+    expect(run.outcome.ok).toBe(false);
+  });
+
+  it('verifies a stamped draw against the row digest and names the difference instead of hiding it', async () => {
+    const secondDraw = artefactOf({
+      name: 'og_image_1200x630_p1.png', bytes: pngBytes(1200, 630, 41),
+      hash: readyArtefacts[0].render_config_hash,
+    });
+    const ready = readyRow();
+    const run = await drive({
+      artefacts: [secondDraw],
+      slotRows: [ready],
+      rowsById: { [id]: ready },
+      objects: { [key]: { bytes: readyArtefacts[0].raw, mime: 'image/png' } },
+    });
+    expect(run.outcome.results).toEqual([
+      { name: 'og_image_1200x630_p1.png', kind: 'og_image', variant: '1200x630', format: 'png', page: 1,
+        action: 'verify', row_id: id, status: 'ready', content_digest: readyArtefacts[0].content_digest,
+        size_bytes: 73, properties: { ok: true, width: 1200, height: 630 } },
+    ]);
+    expect(reasons(run.outcome)).toContain('ready-object-not-reproduced-by-this-draw');
+    expect(run.writes).toHaveLength(0);
+    expect(run.outcome.ok).toBe(true);
   });
 
   it('refuses a ready row that carries no object key to read', async () => {

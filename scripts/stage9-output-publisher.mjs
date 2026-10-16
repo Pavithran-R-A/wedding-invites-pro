@@ -706,9 +706,13 @@ async function retireStale({ row, invalidating, sql, storage, log, record }) {
   log(`RECLAIMED row=${row.id}`);
 }
 
-/** The object behind a row that already claims `ready` is re-read and compared with the bytes this run
- *  just drew. For a deterministic renderer this is a no-op; it is also the instrument that catches the
- *  run where it stopped being one. */
+/** What a `ready` row promises is its own `content_digest`, so that is what an in-place check reads the
+ *  object against — it is the digest a host's signed download is served against, and the one the SQL
+ *  lifecycle guards. The fresh draw is still compared and still reported, because Chromium stamps
+ *  `/CreationDate`/`/ModDate` into a printed PDF, so the second run of an identical command draws a PDF
+ *  whose bytes differ by five characters while every raster and plate draw reproduces exactly. Using the
+ *  draw as the reference would refuse a correctly delivered PDF forever; ignoring the difference would
+ *  hide a renderer that stopped being pure. */
 async function verifyExisting({ row, expected, storage, record, label, log }) {
   if (typeof row.object_key !== 'string' || row.object_key === '') {
     record('refusal', 'ready-row-carries-no-key', { ...label, row_id: row.id });
@@ -719,14 +723,24 @@ async function verifyExisting({ row, expected, storage, record, label, log }) {
     record('failure', 'ready-object-cannot-be-read', { ...label, row_id: row.id, status: back.status });
     return { ok: false };
   }
-  const checked = verifyReadBack({ bytes: back.bytes, expected, contentType: back.contentType });
+  const checked = verifyReadBack({
+    bytes: back.bytes,
+    expected: { kind: expected.kind, format: expected.format, variant: expected.variant, content_digest: row.content_digest },
+    contentType: back.contentType,
+  });
   if (checked.ok !== true) {
-    // The row promises bytes that do not match what this build draws. Neither `superseded` nor a retry
-    // describes that, so the run names it and changes nothing for an operator to decide.
+    // The row promises bytes that are not in the bucket. Neither `superseded` nor a retry describes
+    // that, so the run names it and changes nothing for an operator to decide.
     record('refusal', `ready-object-differs-${checked.reason}`, { ...label, row_id: row.id });
     return { ok: false };
   }
-  log(`VERIFIED-IN-PLACE ${label.name} row=${row.id}`);
+  const reproduced = expected.content_digest === row.content_digest;
+  if (reproduced !== true) {
+    record('note', 'ready-object-not-reproduced-by-this-draw', {
+      ...label, row_id: row.id, row_digest: row.content_digest, draw_digest: expected.content_digest,
+    });
+  }
+  log(`VERIFIED-IN-PLACE ${label.name} row=${row.id}${reproduced ? '' : ' draw-not-reproduced'}`);
   record('note', 'ready-object-verified', { ...label, row_id: row.id });
   return { ok: true, ...checked };
 }
