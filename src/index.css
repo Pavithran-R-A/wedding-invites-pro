@@ -22,7 +22,19 @@
     --green: 156 56% 28%;        /* deep green */
 
     --success: 156 45% 27%;
-    --warning: 32 78% 40%;
+    /* Measured, not eyeballed. At the old 40% lightness this amber reached 3.83:1 on `--surface` and
+     * 3.64:1 on the `bg-warning/5` tint its own notices sit on, so every `text-warning` sentence at
+     * 11-12px failed WCAG 1.4.3's 4.5:1 floor — the browser tier recorded it at 3.83:1 on
+     * "A QR plate is a promise about an address". Each step below is the HSL→RGB ratio against the
+     * three light-theme grounds text actually lands on; 34% is the last one that clears 4.5:1 on all
+     * three, because 35% answers 4.75 / 5.04 / 4.34 and `--surface-strong` falls under the floor:
+     *   40%  tint 3.64   surface 3.83   surface-strong 3.48   paper 3.86
+     *   35%  tint 4.51   surface 4.79   surface-strong 4.34   paper 4.82
+     *   34%  tint 4.75   surface 5.04   surface-strong 4.57   paper 5.08
+     * `scripts/stage9-browser-outputs.mjs` measures the rendered pixels (A-04, A-07) and re-found
+     * 5.04:1 lowest across the four warning runs on the page, so this arithmetic is a rationale, not
+     * the evidence. */
+    --warning: 32 78% 34%;
     --danger: 0 72% 40%;
 
     /* Script-safe stacks: Latin first, then one Noto face per supported
