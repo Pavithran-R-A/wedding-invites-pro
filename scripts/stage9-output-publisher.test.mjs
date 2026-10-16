@@ -975,6 +975,68 @@ describe('a QR plate', () => {
     expect(reasons(run.outcome)).toContain('local-readback-plate-not-square');
     expect(run.writes).toHaveLength(0);
   });
+
+  // §12's rotation row: the old plate's address was rotated away, so its pixels point at a dead page.
+  // The reason the run writes is what the host reads on the panel, and `superseded` would tell them their
+  // paper shows an older *invitation* — which it does not.
+  const stalePlate = (over = {}) => {
+    const id = '99999999-9999-4999-8999-999999999991';
+    return {
+      id,
+      object_key: `outputs/${WEDDING}/qr/40mm/${id}`,
+      status: 'ready',
+      content_digest: seed('old-plate-bytes'),
+      render_config_hash: seed('previous-plate-config'),
+      attempt_count: 0, last_error: null, invalidation_reason: null,
+      ready_at: null, created_at: null,
+      target_url_digest: seed('https://vivaahvarnam.in/i/BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'),
+      ...over,
+    };
+  };
+  const plateSlotRun = (old) => {
+    const artefacts = [plateOf()];
+    return drive({
+      artefacts,
+      kinds: ['qr'],
+      qrVariants: ['40mm'],
+      qrTarget: PLATE_TARGET,
+      renderKinds: { qr: { artefacts } },
+      slotRows: [old],
+      rowsById: { [old.id]: old },
+      objects: { [old.object_key]: { bytes: pngBytes(440, 440, 20), mime: 'image/png' } },
+    });
+  };
+
+  it('retires a plate whose encoded address moved as token_rotated, object first', async () => {
+    const old = stalePlate();
+    const run = await plateSlotRun(old);
+    expect(firstIndexOf(run.timeline, 'storage', (text) => text === 'remove'))
+      .toBeLessThan(firstIndexOf(run.timeline, 'sql', (text) => /status = 'invalidated'/.test(text)));
+    expect(run.writes[0]).toMatch(/status = 'invalidated'/);
+    expect(run.writes[0]).toMatch(/invalidation_reason = 'token_rotated'/);
+    expect(run.outputs.get(old.id).invalidation_reason).toBe('token_rotated');
+    expect(run.outcome.results[0].status).toBe('ready');
+  });
+
+  it('still calls a same-address plate superseded', async () => {
+    // Same destination, different config: fonts, geometry or the engine moved. Nothing about the printed
+    // address changed, so the rotation sentence would be a false alarm.
+    const old = stalePlate({ target_url_digest: seed(PLATE_TARGET) });
+    const run = await plateSlotRun(old);
+    expect(run.writes[0]).toMatch(/invalidation_reason = 'superseded'/);
+  });
+
+  it('refuses to name a retirement reason it cannot read, and leaves the bytes alone', async () => {
+    // The stale row arrived without a target digest, so this run cannot tell whether the address moved.
+    // Deleting the object and then guessing the reason is the one order that cannot be undone.
+    const old = stalePlate({ target_url_digest: null });
+    const run = await plateSlotRun(old);
+    expect(reasons(run.outcome)).toContain('retirement-reason-unclassifiable');
+    expect(run.storage.calls.filter((call) => call.op === 'remove' && call.key === old.object_key)).toHaveLength(0);
+    expect(invalidatedWrite(run.writes)).toHaveLength(0);
+    expect(run.outputs.get(old.id).status).toBe('ready');
+    expect(run.outcome.ok).toBe(false);
+  });
 });
 
 // ------------------------------------------------------------------ the surface

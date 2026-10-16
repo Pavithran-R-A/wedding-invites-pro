@@ -296,6 +296,28 @@ export function reconcileSlot({ rows = [], candidateHash } = {}) {
 }
 
 /**
+ * Why a stale occupant of a slot is being retired, in the database's own vocabulary.
+ *
+ * A `qr` artefact's `render_config_hash` covers its `target_url_digest` (the worker's plate derivation
+ * at `stage9-render-worker.mjs:1228-1234`), so the only way a plate lands in `reconcileSlot`'s supersede
+ * list while its invitation is unchanged is that the address encoded in its pixels moved — which is what
+ * §12's table calls a rotation. Naming that `superseded` would put a wrong sentence on the host's screen:
+ * the client's wording for `superseded` is "an older version of this invitation than the one now
+ * published", and a rotated plate shows the *same* invitation at a dead address. So the two are decided
+ * apart here, from the one fact that distinguishes them.
+ *
+ * Non-plates have no destination, so their stale rows are always superseded renders. A plate whose
+ * digest cannot be read on either side answers `null`: the migration's `invitation_outputs_qr_target`
+ * CHECK guarantees a `qr` row carries one, so a missing or malformed value means this run is reading a
+ * manifest it does not understand, and `superseded` would be a guess dressed as a reason.
+ */
+export function classifyRetirement({ kind, staleTargetDigest, candidateTargetDigest } = {}) {
+  if (kind !== 'qr') return 'superseded';
+  if (!isHex64(staleTargetDigest) || !isHex64(candidateTargetDigest)) return null;
+  return staleTargetDigest === candidateTargetDigest ? 'superseded' : 'token_rotated';
+}
+
+/**
  * The read-back, checked against the artefact rather than against the record that made it.
  *
  * Four properties, all of them facts about the bytes: the digest, the length, the served content type,
@@ -437,7 +459,10 @@ export function sqlReadVersion(versionId) {
 /** Every row that already occupies this (version, kind, variant, format, page) slot, at any config.
  *
  *  The publisher reads `object_key`, which the client-facing RPC deliberately withholds: this process
- *  is the one that has to address the object, and the panel still gets no path from anywhere. */
+ *  is the one that has to address the object, and the panel still gets no path from anywhere. It also
+ *  reads `target_url_digest` for the same reason — `classifyRetirement` can only tell a rotated plate
+ *  from a re-rendered one by comparing the destination the stored row encoded with the one this run was
+ *  asked to encode. A digest, never an address: the raw target stays in the operator's environment. */
 export function sqlSlotRows({ versionId, kind, variant, format, pageNumber }) {
   if (!(OUTPUT_KINDS).includes(kind)) throw new Error(`unknown output_kind: ${kind}`);
   if (!(OUTPUT_VARIANTS).includes(variant)) throw new Error(`unknown variant: ${variant}`);
@@ -446,7 +471,8 @@ export function sqlSlotRows({ versionId, kind, variant, format, pageNumber }) {
   return `SELECT ${b64Out(`coalesce(jsonb_agg(row_to_json(x)::jsonb ORDER BY x.created_at), '[]'::jsonb)`)} AS rows
   FROM (
     SELECT o.id::text AS id, o.object_key, o.status, o.content_digest, o.render_config_hash,
-           o.attempt_count, o.last_error, o.invalidation_reason, o.ready_at, o.created_at
+           o.attempt_count, o.last_error, o.invalidation_reason, o.ready_at, o.created_at,
+           o.target_url_digest
       FROM public.invitation_outputs o
      WHERE o.version_id = ${uuidSql(versionId, 'version_id')}
        AND o.output_kind = ${sqlText(kind)}

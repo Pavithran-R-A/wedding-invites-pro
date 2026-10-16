@@ -44,6 +44,7 @@ import {
   OUTPUT_BUCKET,
   STORAGE_DOMAIN,
   artefactIdentity,
+  classifyRetirement,
   isHex64,
   patchForTransition,
   planRegistration,
@@ -56,6 +57,7 @@ import {
   sqlVersionManifest,
   verifyReadBack,
 } from './stage9-publish-core.mjs';
+import { INVALIDATION_REASONS } from '../src/lib/invitationOutputs.ts';
 
 const WEDDING = '11111111-1111-4111-8111-111111111111';
 const VERSION = '22222222-2222-4222-8222-222222222222';
@@ -414,6 +416,60 @@ describe('reconcileSlot', () => {
   });
 });
 
+// §12's design table says a token rotation retires a wedding's `qr` rows with reason `token_rotated`, and
+// the host's panel has a sentence of its own for that reason (`src/lib/invitationOutputs.ts`
+// `reprintWarnings`). The fact that makes a rotation a *new* row rather than a same-hash no-op is that a
+// plate's `render_config_hash` covers its `target_url_digest` (`stage9-render-worker.mjs`'s qr
+// derivation), so the dead plate lands in `plan.supersede`. Before these cases, `retireStale` named every
+// supersession `superseded` — whose client wording is "an older version of this invitation than the one
+// now published". For a rotated plate that sentence is wrong about the cause: the paper shows the same
+// invitation and points at a dead address. So the classification is a named decision here, and the
+// publisher's right answer is to refuse rather than to guess.
+describe('classifyRetirement', () => {
+  const STALE = digestOf('plate-target-old');
+  const CANDIDATE = digestOf('plate-target-new');
+
+  it.each(['og_image', 'share_image', 'pdf'])('calls a stale %s render superseded', (kind) => {
+    expect(classifyRetirement({ kind, staleTargetDigest: null, candidateTargetDigest: null }))
+      .toBe('superseded');
+  });
+
+  it('calls a plate whose encoded address changed a rotation', () => {
+    expect(classifyRetirement({ kind: 'qr', staleTargetDigest: STALE, candidateTargetDigest: CANDIDATE }))
+      .toBe('token_rotated');
+  });
+
+  it('keeps superseded for a plate re-drawn at the same address', () => {
+    // The address is the only thing a plate can be stale about that is not a re-render: same target with
+    // a different config hash means fonts, geometry or the engine moved, and the printed destination did not.
+    expect(classifyRetirement({ kind: 'qr', staleTargetDigest: STALE, candidateTargetDigest: STALE }))
+      .toBe('superseded');
+  });
+
+  it('refuses to name a reason it cannot prove', () => {
+    // A `qr` row always carries a target digest (the migration's `invitation_outputs_qr_target` CHECK), so
+    // a missing or malformed one is a broken read. Guessing `superseded` would print the wrong sentence to
+    // a host who is about to decide whether their printed plates are dead.
+    for (const stale of [undefined, null, '', 'not-a-digest', 'A'.repeat(64)]) {
+      expect(classifyRetirement({ kind: 'qr', staleTargetDigest: stale, candidateTargetDigest: CANDIDATE }))
+        .toBeNull();
+    }
+    for (const candidate of [undefined, null, '', 'not-a-digest']) {
+      expect(classifyRetirement({ kind: 'qr', staleTargetDigest: STALE, candidateTargetDigest: candidate }))
+        .toBeNull();
+    }
+  });
+
+  it('answers only with the database\'s own reason vocabulary', () => {
+    const answers = [
+      classifyRetirement({ kind: 'qr', staleTargetDigest: STALE, candidateTargetDigest: CANDIDATE }),
+      classifyRetirement({ kind: 'qr', staleTargetDigest: STALE, candidateTargetDigest: STALE }),
+      classifyRetirement({ kind: 'pdf', staleTargetDigest: null, candidateTargetDigest: null }),
+    ];
+    for (const answer of answers) expect(INVALIDATION_REASONS).toContain(answer);
+  });
+});
+
 describe('verifyReadBack', () => {
   const teaser = pngBytes(1200, 630);
 
@@ -600,6 +656,11 @@ describe('the emitted SQL', () => {
     expect(sql).toContain('o.page_number = 2');
     expect(sql).toContain("'1200x630'");
     expect(sql).toContain('o.object_key');
+    // The digest, not the address: retiring a plate has to say whether the encoded destination moved, and
+    // this is the one read that is allowed to answer. `sqlVersionManifest` — the panel-shaped read — is
+    // pinned below to keep withholding it.
+    expect(sql).toContain('o.target_url_digest');
+    expect(sql).not.toMatch(/target_url(?!_digest)/);
     expect(sql).toMatch(/AS rows/);
     expect(() => sqlSlotRows({ versionId: VERSION, kind: 'poster', variant: 'a4', format: 'png', pageNumber: 1 }))
       .toThrow(/unknown output_kind/);

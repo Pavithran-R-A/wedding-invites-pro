@@ -23,6 +23,9 @@
 // so every rule below is that idea applied one step earlier: the status moves last; a failure removes
 // the object before it names itself in `last_error` (delete-then-mark, §12); a superseded `ready` row is
 // retired rather than overwritten; and a step that cannot be recorded is reported instead of skipped.
+// A retired plate's `invalidation_reason` is decided before its object goes away, from the two target
+// digests — the same-address `superseded` and the rotated-away `token_rotated` are different sentences
+// on the host's panel, and a run that deleted first could only guess which one it had caused.
 // The legal moves, the column map each one carries, the plan for a slot that already holds a row and
 // the verification of a read-back all live in `scripts/stage9-publish-core.mjs`, which is pure. This
 // file supplies the channels and the order, and `scripts/stage9-output-publisher.test.mjs` pins both.
@@ -61,6 +64,7 @@ import { assertLoopback } from './stage5-browser-driver.mjs';
 import { ROOT, dtoDigest, openRenderWorker } from './stage9-render-worker.mjs';
 import {
   artefactIdentity,
+  classifyRetirement,
   isUuid,
   OUTPUT_BUCKET,
   patchForTransition,
@@ -562,7 +566,18 @@ async function publishArtefact({
 
   // Stale occupants go first: the manifest should not hold two live rows for one slot while this run is
   // still in flight, and §12's order is remove-then-mark.
-  for (const stale of slot.supersede) await retireStale({ row: stale, invalidating: true, sql, storage, log, record });
+  for (const stale of slot.supersede) {
+    await retireStale({
+      row: stale,
+      invalidating: true,
+      kind: identity.kind,
+      candidateTargetDigest: identity.kind === 'qr' ? parent.target_url_digest : null,
+      sql,
+      storage,
+      log,
+      record,
+    });
+  }
   for (const stale of slot.reclaim) await retireStale({ row: stale, invalidating: false, sql, storage, log, record });
   for (const stale of slot.orphan_check) {
     if (typeof stale.object_key !== 'string' || stale.object_key === '') continue;
@@ -666,8 +681,24 @@ async function publishArtefact({
 
 /** Remove an object, then let the row say what happened to it. A `ready` row whose object would not go
  *  away stays `ready` — it is still telling the truth about bytes a host can download, and retiring it
- *  with `superseded` would be a lie about why. */
-async function retireStale({ row, invalidating, sql, storage, log, record }) {
+ *  with `superseded` would be a lie about why.
+ *
+ *  The reason a retired plate carries is decided *before* the object is removed, and `classifyRetirement`
+ *  decides it: a stale row that points at a different address was rotated away from, not replaced by a
+ *  newer invitation, and the panel tells the host to reprint for a different reason. A row whose digest
+ *  cannot be read refuses here rather than after the deletion — the bytes cannot be un-deleted, and a
+ *  wrong reason stamped on the row is not recoverable by the run that stamped it. */
+async function retireStale({ row, invalidating, kind, candidateTargetDigest, sql, storage, log, record }) {
+  let invalidationReason = 'superseded';
+  if (invalidating) {
+    invalidationReason = classifyRetirement({
+      kind, staleTargetDigest: row.target_url_digest, candidateTargetDigest,
+    });
+    if (invalidationReason === null) {
+      record('refusal', 'retirement-reason-unclassifiable', { row_id: row.id, kind });
+      return;
+    }
+  }
   if (typeof row.object_key === 'string' && row.object_key !== '') {
     const gone = await storage.remove({ key: row.object_key });
     if (gone.ok !== true) {
@@ -677,13 +708,13 @@ async function retireStale({ row, invalidating, sql, storage, log, record }) {
     }
   }
   if (invalidating) {
-    const patch = patchForTransition({ from: row.status, to: 'invalidated', row, invalidationReason: 'superseded' });
+    const patch = patchForTransition({ from: row.status, to: 'invalidated', row, invalidationReason });
     if (patch.ok !== true) {
       record('note', `supersede-could-not-be-marked-${patch.reason}`, { row_id: row.id });
       return;
     }
     sql(sqlTransition(row.id, patch.patch));
-    log(`SUPERSEDED row=${row.id}`);
+    log(`SUPERSEDED row=${row.id} reason=${invalidationReason}`);
     return;
   }
   // The lifecycle has no `registered -> failed` edge, so the guard's own HINT is followed through
