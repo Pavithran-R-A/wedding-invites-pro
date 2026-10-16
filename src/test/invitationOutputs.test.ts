@@ -282,6 +282,40 @@ describe('the reprint notices', () => {
     expect(notices[0]).toContain('1 QR plate was retired');
   });
 
+  it('agrees each notice with the number of rows it prints', () => {
+    // Each notice counts rows and then talks about them, so a plural pronoun after "1" describes a
+    // second file the host does not have — and the sentence a host weighs a reprint against is the
+    // one that has to say how many plates died. Both numbers are pinned for all three reasons.
+    const two = (overrides: Partial<InvitationOutput>) => [
+      row({ status: 'invalidated', ...overrides }),
+      row({ status: 'invalidated', id: '00000000-0000-4000-8000-00000000000a', ...overrides }),
+    ];
+
+    const rotated = reprintWarnings([row({ status: 'invalidated', invalidationReason: 'token_rotated' })]);
+    expect(rotated[0]).toContain('Any printed copy of it now leads');
+    expect(rotated[0]).toContain('print a fresh plate');
+    expect(rotated[0]).not.toContain('of them');
+    const rotatedTwo = reprintWarnings(two({ invalidationReason: 'token_rotated' }));
+    expect(rotatedTwo[0]).toContain('Any printed copy of them now leads');
+    expect(rotatedTwo[0]).toContain('print fresh plates');
+
+    const revoked = reprintWarnings([row({ kind: 'pdf', variant: 'a4', format: 'pdf', status: 'invalidated', invalidationReason: 'publication_revoked' })]);
+    expect(revoked[0]).toContain('1 file was retired');
+    expect(revoked[0]).toContain('Nothing printed from it');
+    const revokedTwo = reprintWarnings(two({ kind: 'pdf', variant: 'a4', format: 'pdf', invalidationReason: 'publication_revoked' }));
+    expect(revokedTwo[0]).toContain('2 files were retired');
+    expect(revokedTwo[0]).toContain('Nothing printed from them');
+
+    const superseded = reprintWarnings([row({ kind: 'share_image', variant: '1080x1350', status: 'invalidated', invalidationReason: 'superseded' })]);
+    expect(superseded[0]).toContain('1 file shows an older version');
+    expect(superseded[0]).toContain('Its wording is the wording of the version it was drawn from');
+    expect(superseded[0]).toContain('which is why it is retired');
+    const supersededTwo = reprintWarnings(two({ kind: 'share_image', variant: '1080x1350', invalidationReason: 'superseded' }));
+    expect(supersededTwo[0]).toContain('2 files show an older version');
+    expect(supersededTwo[0]).toContain('Their wording is the wording of the version they were drawn from');
+    expect(supersededTwo[0]).toContain('which is why they are retired');
+  });
+
   it('names a take-down and a supersession apart from a rotation', () => {
     const revoked = reprintWarnings([row({ kind: 'pdf', variant: 'a4', format: 'pdf', status: 'invalidated', invalidationReason: 'publication_revoked' })]);
     expect(revoked[0]).toContain('taken down');

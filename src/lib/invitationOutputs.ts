@@ -258,16 +258,19 @@ export const outputSummary = (output: InvitationOutput): string => {
  * printed plate is now dead, and the manifest is where the evidence of those moments lives: a `qr`
  * row invalidated with `token_rotated` is a plate that was retired because its address went away. The
  * sentences below name the artefacts they actually describe — one per reason present, counted — and
- * nothing here claims a *live* plate still matches the current address, because the read deliberately
- * carries no `target_url_digest` to compare against. That limitation is the last sentence rather
- * than an omission, so the host is not left believing a printed square is verified when it is only
- * unreplaced.
+ * each agrees its pronouns and verbs with that count, because a plural pronoun after "1 QR plate was
+ * retired" reads as a second file the host does not have. Nothing here claims a *live* plate still
+ * matches the current address, because the read deliberately carries no `target_url_digest` to compare
+ * against. That limitation is the last sentence rather than an omission, so the host is not left
+ * believing a printed square is verified when it is only unreplaced.
  *
- * What no sentence here says is that a rotation retires these rows. Nothing in this build does:
- * §9.2 gives every manifest write, `invalidated` included, to the render worker's privileged path, and
- * no token turnover triggers it. A notice below is therefore evidence the worker recorded, and the
- * general paragraph is the host's protection for the case the manifest cannot show — a plate printed
- * before a rotation whose retirement the worker has not written yet.
+ * What no sentence here says is that turning a token over retires these rows by itself. The retirement
+ * is a manifest write, and in this build the trusted local publisher writes it: it stamps
+ * `token_rotated` when the address it was asked to encode differs from the one a stored plate encodes,
+ * and nothing is stamped until a render is published against the new address (§24 of the Stage 9 audit
+ * measures that run). A notice below is therefore evidence the publisher recorded, and the general
+ * paragraph is the host's protection for the case the manifest cannot show — a plate printed before a
+ * rotation whose retirement has not been published yet.
  */
 export const reprintWarnings = (outputs: InvitationOutput[]): string[] => {
   const notices: string[] = [];
@@ -276,28 +279,33 @@ export const reprintWarnings = (outputs: InvitationOutput[]): string[] => {
 
   const rotated = retiredBy('token_rotated');
   if (rotated > 0) {
+    const one = rotated === 1;
     notices.push(
-      `${rotated} QR ${rotated === 1 ? 'plate was' : 'plates were'} retired when the address was `
-      + 'rotated. Any printed copy of them now leads guests to a dead page — print fresh plates from '
-      + 'the new address.',
+      `${rotated} QR ${one ? 'plate was' : 'plates were'} retired when the address was `
+      + `rotated. Any printed copy of ${one ? 'it' : 'them'} now leads guests to a dead page — print `
+      + `${one ? 'a fresh plate' : 'fresh plates'} from the new address.`,
     );
   }
 
   const revoked = retiredBy('publication_revoked');
   if (revoked > 0) {
+    const one = revoked === 1;
     notices.push(
-      `${revoked} ${revoked === 1 ? 'file was' : 'files were'} retired when the invitation was `
-      + 'taken down. Nothing printed from them should be handed out while the link is down.',
+      `${revoked} ${one ? 'file was' : 'files were'} retired when the invitation was `
+      + `taken down. Nothing printed from ${one ? 'it' : 'them'} should be handed out while the link `
+      + 'is down.',
     );
   }
 
   const superseded = retiredBy('superseded');
   if (superseded > 0) {
+    const one = superseded === 1;
     notices.push(
-      `${superseded} ${superseded === 1 ? 'file shows' : 'files show'} an older version of this `
-      + 'invitation than the one now published. Their wording is the wording of the version they were '
-      + 'drawn from, which is why they are retired rather than quietly reused: reprint from the '
-      + 'version you published if the paper should match it.',
+      `${superseded} ${one ? 'file shows' : 'files show'} an older version of this `
+      + `invitation than the one now published. ${one ? 'Its' : 'Their'} wording is the wording of the `
+      + `version ${one ? 'it was' : 'they were'} drawn from, which is why ${one ? 'it is' : 'they are'} `
+      + 'retired rather than quietly reused: reprint from the version you published if the paper '
+      + 'should match it.',
     );
   }
 
