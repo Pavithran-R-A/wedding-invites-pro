@@ -1033,3 +1033,107 @@ re-confirmed at the time of writing):
 | `536867199b24b1d3a8546df809b19983357e111e` | the reprint-notice agreement repair, 2 files +60 −18 | `git ls-remote` = `gh api` = this SHA |
 | `78c2bca473596155b6a9999d5c21bad37de1cd8a` | the browser tier widened to 56 cases, 1 file +262 −44 | `git ls-remote` = `gh api` = local HEAD = this SHA |
 | *this section's own commit* | §24 and the two readiness rows it forces | the docs commit is the head this section is pushed under; its SHA and its read-back belong to the next section's ledger, not to a claim made here before the push happened |
+
+## 25. The HTTP tier re-measured on the code it now tests
+
+§22's table is not wrong, but it stopped describing this branch. It was taken at head
+`9fc4810c32a332d06a7dd6415cda19d759e659c7`, and two of the three commits since then changed files that
+`supabase/tests/api/stage9_render_outputs.test.mjs` **imports directly**: `:58-64` pulls
+`decodeLine`, `runPsql`, `makeSqlChannel`, `makeStorageChannel` and `runPublish` out of
+`scripts/stage9-output-publisher.mjs` (`0de1676`, +36 −5) and `:65` pulls `sqlReadVersion` out of
+`scripts/stage9-publish-core.mjs` (`0de1676`, +28 −2). The battery drives the publisher, so a green run
+of it was a green run *of that publisher's code*, and the publisher's retirement classification has since
+moved. `src/lib/invitationOutputs.ts` — the other file those commits touched — is client-side and is not
+imported by any HTTP suite; its coverage is the unit tier §24 re-ran at 1,247.
+
+Re-ran `bash supabase/tests/api/run.sh` against the live `localvivaahvarnam` stack at
+`5f246adefe5d5c639ab565d2b5e72304084552ae` (`q9-logs/live/s9-http-5f246ad-01.txt`:
+`captured_utc=2026-10-17T06:28:42Z`, `finished_utc=2026-10-17T06:33:54Z`,
+`working_tree_delta=pnpm-lock.yaml,pnpm-workspace.yaml` — the two untracked workspace artefacts, nothing
+else, `db_health=running healthy`, `condition=stack idle`):
+
+| suite | tests | pass | fail |
+|---|---|---|---|
+| stage3_publication | 38 | 38 | 0 |
+| stage3_security | 56 | 56 | 0 |
+| stage4_tradition_packs | 28 | 28 | 0 |
+| stage5_admin_cli | 36 | 36 | 0 |
+| stage5_pack_driven_http | 28 | 28 | 0 |
+| stage6_storage | 34 | 34 | 0 |
+| stage7_family_approval | 61 | 61 | 0 |
+| stage8_guest_rsvp | 56 | 56 | 0 |
+| **stage9_render_outputs** | **30** | **30** | **0** |
+
+**367 tests, 367 pass, 0 fail**, with `grep -c "^not ok"` on the ANSI-stripped log returning **0**,
+`==> RESULT: PASS` as the run's own last line and `http_exit=0` captured adjacent to the command — not
+inferred from the wrapper's notification, which reported the same number but is not the instrument. The
+nine counts are read from the `==> node --test <file>` banner that precedes each summary, not assumed
+from `ls | sort` order, and their sum reproduces §22's 367 exactly: the tier's *scope* did not move, only
+the code under it.
+
+**The census is the interesting half.** §24's rotation left the fixture permanently holding a retired row,
+and this run measured what that does to the drift check: the baseline is now
+`invitation_outputs=9` with `storage.objects(invitation-outputs)=8` and
+`storage.objects(invitation-previews)=0` — nine promised rows over eight living objects, because retiring
+a plate deletes its object while its row stays as the host's warning. The runner takes that census at the
+start of its own run rather than from a remembered number, so the retired row is inside the baseline
+instead of being read as residue, and all **17** post-run read-backs came back `ok` against those same
+figures with no `FATAL`, `LEAK` or `drift` line anywhere in the log. That is the outcome §24 predicted
+when it said the panel would show a retired row for as long as the fixture lives; here it is measured
+rather than argued.
+
+### What this section does not claim
+
+**`bash supabase/tests/stage9/run.sh family` was not re-run at this head, and saying so is the point.**
+It starts a throwaway `postgres:16-alpine` container and loads a full migration chain into it, so its
+writable layer lands on the same volume as everything else on this host. That volume was measured falling
+through this window: **279,352 KB** free at the HTTP run's start, **162,088 KB** at its end, **14,208 KB**
+when the §25 gate capture ran twelve minutes later, and at the moment of writing the two instruments
+disagree — GNU `df -k /c` reports `0` available while WMI's `Win32_LogicalDisk` reports **24.8 MB** of
+486,458.3 MB, which is the shape this host presents when it is genuinely full rather than one of them
+lying. Both readings are recorded instead of the convenient one. The run that ended at 162,088 KB
+accounts for ~117 MB of the drop; the rest happened outside any command this section ran. Against that,
+the brief's own instruction — "Do not run expensive builds with insufficient free space" — governs over
+the wish for one more green row, because a container that fills the volume takes the shared Docker engine
+down for every project on this machine, not just this one. The
+headroom was probed before deciding, non-destructively: the only container this stage leaves behind is
+`vivaahvarnam-s9probe`, `Exited (0)`, and `docker ps -a -s` reports its writable layer at **16.4 kB**
+(virtual 303 MB, which is the shared base image the runner itself needs), so deleting it reclaims nothing
+worth the word; the reclaimable mass is **5.906 GB of images and 11.43 GB of volumes**, and those belong
+to DueWeave and other projects, so `docker system prune` was not run and nothing outside this stage's own
+paths was touched.
+
+What stands in for the missing re-run is a byte-identity proof rather than a recollection:
+`git diff --name-only 091d0ed7 5f246ad -- supabase/` prints **nothing**. Every SQL file, every runner and
+every migration in the battery's input set is identical between the head where `family` measured
+`stage 7 80_family_review PASSED (255)` / `stage 7 90_review_boundary PASSED (116)`, `family_exit=0`
+(`q9-logs/live/s9-sql-family-091d0ed-01.txt`, `c_free_mb=6575`) and the head being offered for merge, and
+`run.sh all` passed with `chain_exit=0` at that same head (`q9-logs/live/s9-sql-all-091d0ed-01.txt`,
+`c_free_mb=6513`). Four commits' worth of changes sit entirely in `scripts/`, `src/` and `docs/`. So the
+SQL tier is **unchanged-input, previously measured**, which is a weaker statement than "re-run at the
+merge head" and is written here as the weaker statement it is. The same reasoning is *not* applied to the
+HTTP tier above, because there the inputs did change — that asymmetry is why one was re-measured and the
+other was not.
+
+**Gates for this section's own tree.** §25 adds no file to the tracked set and edits one file of prose, so
+the two checkers whose scope is a list of tracked files were re-run on these exact bytes before
+committing, and the three code gates were not: `tsc --noEmit -p tsconfig.app.json`, `eslint .` and
+`vitest run` consume only JavaScript/TypeScript inputs, and a Markdown-only diff cannot change their
+inputs — the code bytes they read are the ones §24 certified at 1,247 passing tests and 9 warnings. The
+capture is `q9-logs/live/s9-gates-final-03.txt`, which also records `git diff --name-only HEAD` at the
+moment it ran, so the claim "one prose file moved" is checkable rather than asserted, and re-reads the
+Stage 9 HTTP log's own tallies so this section's numbers are reproducible from the file it cites.
+
+**The row §24 asked this section to write.** Its placeholder said the docs commit's SHA and read-back
+belong here, so they are recorded as measured fact rather than as intention — each pushed the moment it
+was committed, then read back from the Git side *and* from GitHub's ref API, never from a stale
+`origin/<branch>` tracking ref:
+
+| commit | what | remote read-back |
+|---|---|---|
+| `5f246adefe5d5c639ab565d2b5e72304084552ae` | §24 and the two readiness rows it forced, 2 files +186 −2 | `git ls-remote` = `gh api` = local HEAD = this SHA; both commands exit **0** (`q9-logs/live/s9-push-readback-5f246ad.txt`) |
+
+**This ledger stops here deliberately.** The reverse of the paragraph above is also true: §25's own commit
+cannot certify itself inside §25, and a §26 written to certify it would need a §27, so its read-back lives
+outside the repository — `q9-logs/live/s9-push-readback-*.txt` — and is quoted forward in the handoff
+report instead of being laundered into a new section.
