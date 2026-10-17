@@ -1051,10 +1051,21 @@ BEGIN
   PERFORM pg_temp.s7b_eq('G1 `api` is exactly the host and door verbs it was measured to be at this '
     'head — thirteen at Stage 7, with Stage 7''s three added names and no fourteenth; nineteen from '
     'Stage 8, which adds the six household-invitation verbs; twenty-one from Stage 9, which adds the '
-    'output manifest and one frozen version''s document, both reads. Named rather than counted, '
+    'output manifest and one frozen version''s document, both reads; twenty-two from Stage 10, which '
+    'adds `commerce_host_summary` and nothing else a browser can call. Named rather than counted, '
     'because a checker that only counts would not notice a swapped-out name',
     api_names,
-    CASE WHEN pg_temp.s7b_at_least('stage9')
+    CASE WHEN pg_temp.s7b_at_least('stage10')
+         THEN pg_temp.s7b_sorted(ARRAY['commerce_host_summary', 'create_invitation_version',
+           'get_approval_requests', 'get_guest_invitation_state',
+           'get_invitation_publication_state', 'issue_guest_invitations', 'list_invitation_outputs',
+           'preview_invitation', 'preview_invitation_document', 'publish_invitation_version',
+           'render_invitation_document',
+           'request_family_review', 'resolve_family_review',
+           'resolve_guest_invitation', 'resolve_public_invitation', 'revoke_family_review',
+           'revoke_guest_invitation', 'revoke_invitation_publication', 'rotate_guest_invitation',
+           'rotate_invitation_token', 'submit_family_review', 'submit_guest_rsvp'])
+         WHEN pg_temp.s7b_at_least('stage9')
          THEN pg_temp.s7b_sorted(ARRAY['create_invitation_version', 'get_approval_requests',
            'get_guest_invitation_state', 'get_invitation_publication_state',
            'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',
@@ -1082,15 +1093,18 @@ BEGIN
   PERFORM pg_temp.s7b_eq('G2 and `internal_api` holds the bodies behind them: twenty-four at Stage 7, '
     'thirteen mirrored from `api` plus the eleven cultural-authority names §7 keeps on this side; '
     'thirty from Stage 8, whose six new bodies are all mirrors, so the eleven stay eleven; thirty-two '
-    'from Stage 9, whose two are mirrors too — G3f below is the line that proves the eleven did not '
-    'move',
+    'from Stage 9, whose two are mirrors too; thirty-nine from Stage 10, whose seven are one mirror '
+    'and six names no browser may call at all — the money verbs. G3f below is the line that proves '
+    'the uncallable half grew from eleven to seventeen rather than being quietly granted',
     cardinality(internal_names)::bigint,
-    CASE WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
+    CASE WHEN pg_temp.s7b_at_least('stage10') THEN 39::bigint
+         WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
          WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
 
   PERFORM pg_temp.s7b_eq('G3 `authenticated` holds EXECUTE on the mirrored internal bodies and on the '
     'same number of `api` names — thirteen and thirteen at Stage 7, nineteen and nineteen from Stage '
-    '8, twenty-one and twenty-one from Stage 9 — so the eleven cultural-authority bodies are refused '
+    '8, twenty-one and twenty-one from Stage 9, twenty-two and twenty-two from Stage 10 — so the '
+    'uncallable half is refused '
     'to a host by the absence of a grant, '
     'not by the size of the schema §7. The two halves must agree: a host granted an internal body '
     'with no wrapper would be a second, unadvertised door',
@@ -1100,7 +1114,8 @@ BEGIN
           (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text]::text[],
-    CASE WHEN pg_temp.s7b_at_least('stage9') THEN ARRAY['21', '21']::text[]
+    CASE WHEN pg_temp.s7b_at_least('stage10') THEN ARRAY['22', '22']::text[]
+         WHEN pg_temp.s7b_at_least('stage9') THEN ARRAY['21', '21']::text[]
          WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
          ELSE ARRAY['13', '13']::text[] END);
 
@@ -1160,20 +1175,36 @@ BEGIN
         AND has_function_privilege('authenticated', p.oid, 'execute'))),
     api_names);
 
-  PERFORM pg_temp.s7b_eq('G3f and the complement is the eleven cultural-authority bodies §7 keeps '
-    'on this side, listed rather than inferred from subtraction: a host who can approve an '
-    'invitation cannot approve, create, inspect, validate, deprecate, update, catalog or '
-    'retention-report a tradition pack, nor open one''s review packet',
+  PERFORM pg_temp.s7b_eq('G3f and the complement is '
+    || CASE WHEN pg_temp.s7b_at_least('stage10')
+              THEN 'seventeen bodies a host cannot call at all: the eleven cultural-authority names '
+                   || '§7 keeps on this side, plus the six money verbs Stage 10 put behind the server '
+                   || '— open an order, record a payment event, grant a right, revoke a right, expire '
+                   || 'an order, reconcile. Listing them is the point: a seventh commerce name that '
+                   || 'someone granted to `authenticated` would leave this list by moving to G3e''s, '
+                   || 'and one that should have been a mirror but was not would show up here'
+            ELSE 'the eleven cultural-authority bodies §7 keeps on this side, listed rather than '
+                   || 'inferred from subtraction' END,
     pg_temp.s7b_sorted(ARRAY(SELECT p.proname::text FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'internal_api'
         AND NOT has_function_privilege('authenticated', p.oid, 'execute'))),
-    pg_temp.s7b_sorted(ARRAY['approve_tradition_pack_release', 'create_tradition_pack',
+    CASE WHEN pg_temp.s7b_at_least('stage10')
+         THEN pg_temp.s7b_sorted(ARRAY['approve_tradition_pack_release', 'commerce_reconcile',
+           'create_commerce_order', 'create_tradition_pack', 'create_tradition_pack_release',
+           'deprecate_tradition_pack_release', 'expire_commerce_order',
+           'get_tradition_pack_review_packet', 'grant_commerce_entitlement',
+           'inspect_tradition_pack_release', 'record_commerce_event',
+           'revoke_commerce_entitlement', 'submit_tradition_pack_review', 'tradition_pack_catalog',
+           'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
+           'validate_tradition_pack_release'])
+         ELSE pg_temp.s7b_sorted(ARRAY['approve_tradition_pack_release', 'create_tradition_pack',
       'create_tradition_pack_release', 'deprecate_tradition_pack_release',
       'get_tradition_pack_review_packet', 'inspect_tradition_pack_release',
       'submit_tradition_pack_review', 'tradition_pack_catalog',
       'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
-      'validate_tradition_pack_release']));
+      'validate_tradition_pack_release'])
+    END);
 
   -- The set equality below is what carries Stage 7's claim, and it is worth saying why widening it
   -- for Stage 8 does not weaken anything: because the want-list is exact, the three host-side family
@@ -1197,8 +1228,8 @@ BEGIN
 
   PERFORM pg_temp.s7b_eq('G5 and `service_role` — the key a server integration would hold — has no '
     'path through either schema: zero EXECUTE grants across every name in both of them (thirty-seven '
-    'at the Stage 7 head, forty-nine from Stage 8, fifty-three from Stage 9), so neither the review '
-    'workflow nor the guest one '
+    'at the Stage 7 head, forty-nine from Stage 8, fifty-three from Stage 9, sixty-one from Stage 10), '
+    'so neither the review workflow nor the guest one nor the money model '
     'can be driven by a trusted key bypassing the caller checks §9',
     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname IN ('api','internal_api')

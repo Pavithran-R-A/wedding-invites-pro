@@ -157,7 +157,20 @@ DECLARE
   release_read_cols text[] := ARRAY[
     'definition', 'definition_schema_version', 'id', 'languages', 'pack_id',
     'release_number', 'status'];
-  private_tbls    text[] := ARRAY['access_tokens','audit_events'];
+  private_tbls    text[] := ARRAY['access_tokens','audit_events']
+    -- Stage 10's commerce ledger, declared as the head's addition for the same reason
+    -- `invitation_outputs` is declared above: `supabase/tests/stage2/run.sh` stops its chain at
+    -- Stage 4 and must not be handed a list it cannot satisfy, while a Stage 10 chain that failed
+    -- to create a ledger table must not be told it is absent. The whole point of this head is that
+    -- the money model lives *here*: these six are in `private`, which no browser role can even
+    -- name (C11, and 30_migration_empty's E12), and C06 is the assertion that says so by inventory
+    -- rather than by a grant list — an order, an attempt or an event that arrived in `public` would
+    -- fail this line before it could ever be read through the API.
+    || CASE WHEN pg_temp.st2_at_least('stage10')
+            THEN ARRAY['commerce_packages','commerce_orders',
+                       'commerce_payment_attempts','commerce_payment_events',
+                       'commerce_refunds','commerce_policy']
+            ELSE ARRAY[]::text[] END;
   legacy_tbls     text[] := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
     'migration_findings'];
@@ -268,6 +281,26 @@ DECLARE
     || CASE WHEN pg_temp.st2_at_least('stage9')
             THEN ARRAY['invitation_outputs(wedding_id)->weddings=NOACTION',
                        'invitation_outputs(wedding_id+version_id)->invitation_versions=NOACTION']
+            ELSE ARRAY[]::text[] END
+    -- Stage 10's eight, and the split across them is the whole design of the ledger in one column: the
+    -- rows that *decide* money reference NO ACTION, so a wedding, an attempt or an order cannot be
+    -- deleted out from under a live quote; the rows that *record* what arrived reference SET NULL, so a
+    -- piece of evidence outlives the row it is evidence about rather than being silently deleted with it
+    -- or blocking the delete. `commerce_payment_events.order_id` is the load-bearing one of the five:
+    -- the ledger's promise (§4) is that a delivery is never lost, and a RESTRICT would turn a retention
+    -- delete of an order into a refusal to keep the audit, while a CASCADE would destroy exactly the
+    -- receipt a dispute is settled with. `commerce_orders.owner_user_id` mirrors `audit_events`: a user
+    -- delete nulls the attribution and keeps the row.
+    || CASE WHEN pg_temp.st2_at_least('stage10')
+            THEN ARRAY[
+              'commerce_orders(wedding_id)->weddings=NOACTION',
+              'commerce_orders(entitlement_id)->entitlements=NOACTION',
+              'commerce_orders(owner_user_id)->auth.users=SETNULL',
+              'commerce_payment_attempts(order_id)->private.commerce_orders=NOACTION',
+              'commerce_payment_events(order_id)->private.commerce_orders=SETNULL',
+              'commerce_payment_events(attempt_id)->private.commerce_payment_attempts=SETNULL',
+              'commerce_refunds(order_id)->private.commerce_orders=NOACTION',
+              'commerce_refunds(event_id)->private.commerce_payment_events=SETNULL']
             ELSE ARRAY[]::text[] END;
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
@@ -301,7 +334,28 @@ DECLARE
     -- a venue is deleted after its events are un-pointed; venue_id alone is indexed
     'wedding_events->venues',
     'weddings->design_templates',
-    'weddings->tradition_pack_releases'];
+    'weddings->tradition_pack_releases']
+    -- Stage 10's three, and each is unindexed for a reason that is the same shape as one above it:
+    -- the check it slows down is a rare one, not a customer path.
+    --
+    -- `commerce_orders.owner_user_id` is null-ness on a user delete, exactly like `audit_events` — the
+    -- scan is bounded by the orders table, which is one row per wedding per package, and the column is
+    -- never a query key because ownership is re-derived through the wedding, not searched by owner.
+    --
+    -- `commerce_orders.entitlement_id` is written once, when the entitlement is granted, and is never
+    -- read back through this edge: the publish gate asks `public.entitlements` by wedding, not the order
+    -- by entitlement. The FK check it would slow is an entitlement DELETE, and a client cannot delete one
+    -- (`entitlements_no_client_delete`, C31) while a server revoke updates its status.
+    --
+    -- `commerce_refunds.event_id` points at the append-only ledger, which by construction has no DELETE
+    -- path at all (`reject_any_update` plus the client-delete guard), so the check this index would
+    -- serve is a check that never runs. Adding three indexes to serve three unreachable deletes would be
+    -- write cost paid for nothing; naming them here is what keeps that from becoming a habit.
+    || CASE WHEN pg_temp.st2_at_least('stage10')
+            THEN ARRAY['commerce_orders->auth.users',
+                       'commerce_orders->entitlements',
+                       'commerce_refunds->private.commerce_payment_events']
+            ELSE ARRAY[]::text[] END;
   t text;
 BEGIN
   -- =========================================================== 1. row-level security
@@ -339,7 +393,8 @@ BEGIN
     (SELECT array_agg(c.relname::text ORDER BY c.relname)
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'public') = (SELECT array_agg(x ORDER BY x) FROM unnest(public_tbls) x));
-  PERFORM pg_temp.st2_ok('C06 private schema holds exactly the two server tables',
+  PERFORM pg_temp.st2_ok('C06 private schema holds exactly the '
+      || cardinality(private_tbls) || ' server tables',
     (SELECT array_agg(c.relname::text ORDER BY c.relname)
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname = 'private') = (SELECT array_agg(x ORDER BY x) FROM unnest(private_tbls) x));
@@ -439,11 +494,32 @@ BEGIN
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind = 'r' AND n.nspname IN ('public','private')
         AND has_table_privilege('service_role', c.oid, 'SELECT, INSERT, UPDATE, DELETE'))
+      -- The number does NOT move for Stage 10, and that is the point rather than an oversight: the
+      -- server key is not given a table-level door into the money model. Every other head that added a
+      -- `private` table added it to this count; Stage 10 added six and left it at twenty-two, because
+      -- writes to those tables go through the seven bodies in `internal_api` and nowhere else. C15b is
+      -- the assertion that says so in the affirmative, and the count staying put is what would make a
+      -- later "just grant service_role on the commerce tables" repair noticeable instead of silent.
       = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 22::bigint ELSE 21::bigint END));
   PERFORM pg_temp.st2_ok('C16 service_role holds nothing in legacy',
     NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                  WHERE c.relkind = 'r' AND n.nspname = 'legacy'
                    AND has_table_privilege('service_role', c.oid, 'SELECT, INSERT, UPDATE, DELETE')));
+  -- The standing form of the requirement Stage 0 was created to close — "a customer cannot make
+  -- themselves paid" — is here expressed one level below RLS: the tables that hold paid-ness are not
+  -- nameable by any role a request can arrive as, *including* the server key. A policy on such a table
+  -- would be the thing being trusted; with no grant there is no policy to reason about, and the only
+  -- path in is a function body whose caller matrix C26e/C28b name one at a time. This is written as a
+  -- pattern rather than a list so that a seventh money table arriving with a grant fails the check that
+  -- exists to catch exactly that.
+  PERFORM pg_temp.st2_ok('C15b no role a request can be holds any table privilege on the commerce model',
+    NOT EXISTS (SELECT 1 FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                  CROSS JOIN LATERAL unnest(ARRAY['anon','authenticated','service_role']) r(rol)
+                 WHERE c.relkind = 'r' AND n.nspname = 'private'
+                   AND c.relname LIKE 'commerce%'
+                   AND has_table_privilege(r.rol, c.oid,
+                         'SELECT, INSERT, UPDATE, DELETE, REFERENCES, TRIGGER')));
   -- Two different claims, so two checks: a browser role reaches one schema, and the
   -- trusted backend reaches two. `private` for service_role is the design (it writes
   -- the audit trail and presents credentials); `legacy` for anyone is not.
@@ -597,8 +673,8 @@ BEGIN
   -- here before it can ship". Stage 3 collected the seven callable boundary
   -- functions of the published invitation, and made the signup-adjacent draft
   -- trigger a definer so the one-draft-per-wedding invariant could be closed. Nine
-  -- names still stand here — the closure repair moved seven of them between schemas
-  -- rather than adding an eighth, which is the point of the change — but *which* nine
+  -- names stood at that head — the closure repair moved seven of them between schemas
+  -- rather than adding an eighth, which is the point of the change — but *which* names
   -- is now the interesting fact: after independent review the privileged bodies left
   -- the exposed `api` schema, whose wrappers are SECURITY INVOKER one-liners, and the
   -- definers live in `internal_api`, which PostgREST does not serve. Each name here is
@@ -615,7 +691,7 @@ BEGIN
   -- stage added. Nothing from Stage 5 onwards is folded into the base, so this line still says
   -- which head introduced which definer — and a head that declares Stage 5 against a schema that
   -- has no such definer fails, exactly as it should.
-  PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the privileged publication implementations plus the two trigger definers',
+  PERFORM pg_temp.st2_set('C26 SECURITY DEFINER functions are exactly the privileged publication implementations plus the trigger definers',
     (SELECT array_agg(p ORDER BY p) FROM (
        SELECT n.nspname || '.' || p.proname AS p
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -673,6 +749,28 @@ BEGIN
         || CASE WHEN pg_temp.st2_at_least('stage9')
                 THEN ARRAY['internal_api.list_invitation_outputs',
                            'internal_api.render_invitation_document']
+                ELSE ARRAY[]::text[] END
+        -- Stage 10 adds two, and they are the two names this head was argued about.
+        --
+        -- `internal_api.commerce_host_summary` is a definer for the standing reason: the host panel
+        -- asks "what state is my wedding's purchase in", and answering that needs a read of
+        -- `private.commerce_orders` and `private.commerce_policy`, tables no browser role holds a
+        -- single privilege on (C06, C11, C12). It is STABLE, owner-scoped by the wedding it is handed,
+        -- and it deliberately returns the frozen amount only when the package's price is approved for
+        -- display — so what it can give a caller is more than a table policy would, and less than the
+        -- ledger holds.
+        --
+        -- `private.guard_publication_commerce_gate` is the third trigger definer, beside the draft
+        -- attach and the signup handler, and it is a definer because it cannot be anything else: it
+        -- must read `private.commerce_policy` while firing on an INSERT made by `authenticated`, and a
+        -- SECURITY INVOKER trigger answering an API role would raise `permission denied for table
+        -- commerce_policy` on every publish attempt. The privilege it therefore runs with is used for
+        -- one config read and one entitlement lookup, and its only observable effect is to *refuse*;
+        -- it writes nothing and returns NEW on every path it allows. C30 is the assertion that no API
+        -- role can execute it, and C27 that its search_path is pinned.
+        || CASE WHEN pg_temp.st2_at_least('stage10')
+                THEN ARRAY['internal_api.commerce_host_summary',
+                           'private.guard_publication_commerce_gate']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -704,13 +802,18 @@ BEGIN
   --
   -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the document
   -- preview, thirteen from Stage 7, which added the five family-review verbs, nineteen from
-  -- Stage 8, which added the six household-invitation verbs, and twenty-one from Stage 9, which added
-  -- the two read doors over the render contract and its manifest. Every wrapper still has to be one
-  -- line, whatever the number is.
+  -- Stage 8, which added the six household-invitation verbs, twenty-one from Stage 9, which added
+  -- the two read doors over the render contract and its manifest, and twenty-two from Stage 10, which
+  -- added one door over the purchase state. Only one, because the commerce write verbs stay
+  -- server-side: a browser that could place an order could choose its own price, and the whole point of
+  -- the quote is that it cannot. So the exposed surface grows by a read, and the six service-only
+  -- implementations beside it are reachable from no wrapper at all.
+  -- Every wrapper still has to be one line, whatever the number is.
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 21
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage10') THEN 22
+                                       WHEN pg_temp.st2_at_least('stage9') THEN 21
                                        WHEN pg_temp.st2_at_least('stage8') THEN 19
                                        WHEN pg_temp.st2_at_least('stage7') THEN 13
                                        WHEN pg_temp.st2_at_least('stage5') THEN 8
@@ -797,6 +900,26 @@ BEGIN
         || CASE WHEN pg_temp.st2_at_least('stage9')
                 THEN ARRAY['list_invitation_outputs',
                            'render_invitation_document']
+                ELSE ARRAY[]::text[] END
+        -- Stage 10's seven, and this is the one place on this head where the census is allowed to be
+        -- asymmetric for a *write*. Six of the seven have no wrapper — `create_commerce_order`,
+        -- `grant_commerce_entitlement`, `revoke_commerce_entitlement`, `expire_commerce_order`,
+        -- `record_commerce_event`, `commerce_reconcile` — and they are unpaired not because they are
+        -- administrative, like the eleven maintenance bodies above, but because a wrapper would be a door
+        -- a customer could walk through: `api.create_commerce_order` is a browser choosing what to buy and
+        -- when its own quote dies, and `api.record_commerce_event` is a browser confirming its own payment.
+        -- So reachability here is a property of the role, not of a token: each is SECURITY INVOKER with
+        -- EXECUTE granted to nobody but the owner, which C28b measures by absence. The seventh,
+        -- `commerce_host_summary`, is the one paired name, and it is a definer read of state the caller
+        -- already owns — C26d therefore moves by exactly one for Stage 10, not seven.
+        || CASE WHEN pg_temp.st2_at_least('stage10')
+                THEN ARRAY['commerce_host_summary',
+                           'commerce_reconcile',
+                           'create_commerce_order',
+                           'expire_commerce_order',
+                           'grant_commerce_entitlement',
+                           'record_commerce_event',
+                           'revoke_commerce_entitlement']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -809,7 +932,8 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 21
+      = (CASE WHEN pg_temp.st2_at_least('stage10') THEN 22
+              WHEN pg_temp.st2_at_least('stage9') THEN 21
               WHEN pg_temp.st2_at_least('stage8') THEN 19
               WHEN pg_temp.st2_at_least('stage7') THEN 13
               WHEN pg_temp.st2_at_least('stage5') THEN 8
@@ -899,7 +1023,8 @@ BEGIN
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
     -- Fourteen names when this was written, sixteen from Stage 5, which paired one more wrapper
     -- with one more body, twenty-six from Stage 7, which paired five, thirty-eight from Stage 8,
-    -- which paired six, and forty-two from Stage 9, which paired two. The pack-maintenance
+    -- which paired six, forty-two from Stage 9, which paired two, and forty-four from Stage 10, which
+    -- paired one of the seven commerce bodies it added and left six ungrantable. The pack-maintenance
     -- bodies are absent from every version of this list because they are granted to nobody a
     -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
     -- appeared for one of them would show up as a diff in this set.
@@ -970,6 +1095,16 @@ BEGIN
                            'api.render_invitation_document',
                            'internal_api.list_invitation_outputs',
                            'internal_api.render_invitation_document']
+                ELSE ARRAY[]::text[] END
+        -- Stage 10's two, and the absence beside them is the point of writing this one out: the six
+        -- service-only commerce bodies are *not* in this set, so a signed-in customer cannot call the
+        -- code that places an order, applies a capture, expires a quote or records a payment event. That
+        -- is the whole RLS-era question "can a client mark itself paid" answered one level up — the write
+        -- verbs are not merely policy-restricted, they hold no grant for any browser role at all, which is
+        -- why this census moves by two when Stage 10 adds seven implementations.
+        || CASE WHEN pg_temp.st2_at_least('stage10')
+                THEN ARRAY['api.commerce_host_summary',
+                           'internal_api.commerce_host_summary']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -1027,6 +1162,14 @@ BEGIN
         || CASE WHEN pg_temp.st2_at_least('stage9')
                 THEN ARRAY['list_invitation_outputs',
                            'render_invitation_document']
+                ELSE ARRAY[]::text[] END
+        -- Stage 10's one. It is the only name the exposed boundary gains, and the reason is the same as
+        -- C26e's: the six write bodies are not on this list because a browser that could call them could
+        -- place its own order or record its own capture. `commerce_host_summary` is here because a host
+        -- asking "what state is my purchase in" is a read of the host's own rows, and it is the only
+        -- commerce answer that has an HTTP shape.
+        || CASE WHEN pg_temp.st2_at_least('stage10')
+                THEN ARRAY['commerce_host_summary']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
   -- "the credential never appears in a query string": with no parameter to name, a
@@ -1068,12 +1211,51 @@ BEGIN
   -- covered by the same regex for the same reason — a reviewer names themselves with a display
   -- string they were given, never with an account identity the schema could be steered into
   -- trusting.
-  PERFORM pg_temp.st2_ok('C29c no callable takes a user or role identity as an argument',
+  --
+  -- Stage 10 makes the blanket form of that sentence false, and the honest response is to split it
+  -- rather than to delete it. The rule that carries the weight — nothing a browser can execute takes
+  -- an identity — stays absolute and is now measured *as* that, instead of as a stronger claim that
+  -- happened to be true while nothing else existed. The six service-only commerce bodies do take
+  -- `p_actor_user_id`, and they must: they are called by a trusted path that has no JWT to read, so
+  -- the audit trail needs the human the operation is on behalf of, named by the caller. What makes
+  -- that an attribution rather than a privilege is that none of the six believes it. Each re-derives
+  -- ownership from `public.weddings` and raises `insufficient_privilege` when the named actor does not
+  -- own the wedding, so naming somebody else cannot get a caller further than they could already go —
+  -- it can only mislabel a row in a table that caller cannot write. C29c-b is the exception named, and
+  -- its guard is the second half of the same line: an identity argument may only exist on a body no
+  -- browser role can execute.
+  PERFORM pg_temp.st2_ok('C29c no callable a browser role can execute takes a user or role identity',
     NOT EXISTS (SELECT 1 FROM pg_proc p
                   JOIN pg_namespace n ON n.oid = p.pronamespace
                   JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
                  WHERE n.nspname IN ('api','internal_api','private','public')
-                   AND a.argname ~* 'user_id|owner|role|uid'));
+                   AND a.argname ~* 'user_id|owner|role|uid'
+                   AND (has_function_privilege('anon', p.oid, 'EXECUTE')
+                     OR has_function_privilege('authenticated', p.oid, 'EXECUTE'))));
+  PERFORM pg_temp.st2_ok('C29c-b the only identity-taking callables are the six service-only commerce bodies, and each is ungrantable to a browser role',
+    (SELECT array_agg(x ORDER BY x) FROM (
+       SELECT n.nspname || '.' || p.proname || '.' || a.argname AS x
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+         JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
+        WHERE n.nspname IN ('api','internal_api','private','public')
+          AND a.argname ~* 'user_id|owner|role|uid') s)
+    = (CASE WHEN pg_temp.st2_at_least('stage10')
+            THEN ARRAY['internal_api.commerce_reconcile.p_actor_user_id',
+                       'internal_api.create_commerce_order.p_actor_user_id',
+                       'internal_api.expire_commerce_order.p_actor_user_id',
+                       'internal_api.grant_commerce_entitlement.p_actor_user_id',
+                       'internal_api.record_commerce_event.p_actor_user_id',
+                       'internal_api.revoke_commerce_entitlement.p_actor_user_id']
+            ELSE ARRAY[]::text[] END)
+    AND NOT EXISTS (SELECT 1 FROM pg_proc p
+                      JOIN pg_namespace n ON n.oid = p.pronamespace
+                      JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
+                     WHERE n.nspname IN ('api','internal_api','private','public')
+                       AND a.argname ~* 'user_id|owner|role|uid'
+                       AND (has_function_privilege('anon', p.oid, 'EXECUTE')
+                         OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+                         OR has_function_privilege('service_role', p.oid, 'EXECUTE'))));
   PERFORM pg_temp.st2_ok('C30 anon and authenticated cannot execute anything in private',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'private'
@@ -1180,6 +1362,39 @@ BEGIN
                   'public.invitation_outputs.invitation_outputs_no_client_write=reject_client_write',
                   'public.invitation_outputs.invitation_outputs_no_client_delete=reject_client_delete',
                   'public.invitation_outputs.set_updated_at=touch_updated_at']
+                ELSE ARRAY[]::text[] END
+        -- Stage 10's twenty, in the order that explains them. Nineteen are on the six new server tables
+        -- and follow the house pattern exactly: every commerce table that can be written by the trusted
+        -- path carries `reject_client_write` + `reject_client_delete` + `touch_updated_at` — except
+        -- `commerce_payment_events`, whose third trigger is `reject_any_update` instead of the delete
+        -- guard's partner, because an append-only ledger must refuse an UPDATE from *any* role, owner
+        -- included, rather than only from a browser. `commerce_orders` adds one more: the freeze guard,
+        -- which is what makes "a quote's price and expiry cannot be edited after it is issued" a fact of
+        -- the schema rather than a promise in a function. The twentieth is on `public.publications` and
+        -- is the only definer in this whole inventory that Stage 10 adds, because it is the only one that
+        -- has to read a table the caller cannot name (see C32).
+        || CASE WHEN pg_temp.st2_at_least('stage10')
+                THEN ARRAY[
+                  'private.commerce_packages.commerce_packages_no_client_write=reject_client_write',
+                  'private.commerce_packages.commerce_packages_no_client_delete=reject_client_delete',
+                  'private.commerce_packages.set_updated_at=touch_updated_at',
+                  'private.commerce_orders.commerce_orders_no_client_write=reject_client_write',
+                  'private.commerce_orders.commerce_orders_no_client_delete=reject_client_delete',
+                  'private.commerce_orders.set_updated_at=touch_updated_at',
+                  'private.commerce_orders.commerce_orders_freeze=guard_commerce_order_freeze',
+                  'private.commerce_payment_attempts.commerce_attempts_no_client_write=reject_client_write',
+                  'private.commerce_payment_attempts.commerce_attempts_no_client_delete=reject_client_delete',
+                  'private.commerce_payment_attempts.set_updated_at=touch_updated_at',
+                  'private.commerce_payment_events.commerce_events_no_client_write=reject_client_write',
+                  'private.commerce_payment_events.commerce_events_no_client_delete=reject_client_delete',
+                  'private.commerce_payment_events.commerce_events_append_only_no_update=reject_any_update',
+                  'private.commerce_refunds.commerce_refunds_no_client_write=reject_client_write',
+                  'private.commerce_refunds.commerce_refunds_no_client_delete=reject_client_delete',
+                  'private.commerce_refunds.set_updated_at=touch_updated_at',
+                  'private.commerce_policy.commerce_policy_no_client_write=reject_client_write',
+                  'private.commerce_policy.commerce_policy_no_client_delete=reject_client_delete',
+                  'private.commerce_policy.set_updated_at=touch_updated_at',
+                  'public.publications.publications_commerce_publish_gate=guard_publication_commerce_gate']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
@@ -1188,8 +1403,9 @@ BEGIN
   -- a trigger on a canonical table, so the blanket form of the claim became false —
   -- the honest repair is to name the exception and keep the rule:
   --   * every `reject_client_*` / `touch_updated_at` guard is INVOKER (C32b), and
-  --   * exactly one canonical table carries a definer trigger, and it is this one (C32).
-  PERFORM pg_temp.st2_set('C32 the only SECURITY DEFINER trigger on a canonical table is the draft pairing',
+  --   * the definer triggers on canonical tables are named one at a time (C32) — one until Stage 10
+  --     added the publish gate, two from there, and a third would have to earn its name here.
+  PERFORM pg_temp.st2_set('C32 the SECURITY DEFINER triggers on canonical tables are exactly the draft pairing and the commerce publish gate',
     (SELECT array_agg(x ORDER BY x) FROM (
        SELECT n.nspname || '.' || c.relname || '.' || t.tgname AS x
          FROM pg_trigger t
@@ -1198,7 +1414,25 @@ BEGIN
          JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE NOT t.tgisinternal AND p.prosecdef
           AND n.nspname IN ('public','private')) s),
-    ARRAY['public.weddings.weddings_have_draft']);
+    -- Two names, each with a reason that is not the other's.
+    --
+    -- `weddings_have_draft` is Stage 3's, and it is a definer because the invariant it protects — every
+    -- wedding has exactly one draft — had to survive an owner *delete*, which no INVOKER policy can
+    -- authorise. `publications_commerce_publish_gate` is Stage 10's, and it is a definer because it must
+    -- answer one question before a publish: does this wedding hold the entitlement the shipped policy
+    -- requires? The tables that hold the answer (`private.commerce_policy`, and the entitlement read) are
+    -- reachable by no API role, so an INVOKER trigger would raise `permission denied for table
+    -- commerce_policy` on every publish attempt by an honest host, and would dress a privilege gap up as
+    -- a business rule. What its privilege is *used for* is bounded by C26's own claim and by the body:
+    -- one config read, one entitlement lookup, no write, and NEW returned on every path it allows. Its
+    -- only observable effect is to refuse.
+    -- Sorted on this side too: the left half is an ordered aggregate, so a want list written in the
+    -- order that explains the two names would compare unequal to the same two names in collation order.
+    (SELECT array_agg(x ORDER BY x) FROM unnest(
+        ARRAY['public.weddings.weddings_have_draft']
+        || CASE WHEN pg_temp.st2_at_least('stage10')
+                THEN ARRAY['public.publications.publications_commerce_publish_gate']
+                ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C32b no write guard or timestamp trigger is SECURITY DEFINER',
     NOT EXISTS (SELECT 1 FROM pg_trigger t
                   JOIN pg_proc p ON p.oid = t.tgfoid
@@ -1214,7 +1448,14 @@ BEGIN
                                      -- you", and only the second is a secret.
                                      'guard_tradition_pack_release',
                                      'require_approved_pack_release',
-                                     'require_frozen_pack_release')));
+                                     'require_frozen_pack_release',
+                                     -- Stage 10's two. The freeze guard decides whether a quote may still
+                                     -- change, and a definer version of that decision could be made to see
+                                     -- an entitlement the caller does not have; the ledger's update refusal
+                                     -- is stricter than the house pattern, so it belongs on the list of
+                                     -- guards that must never hold a privilege.
+                                     'guard_commerce_order_freeze',
+                                     'reject_any_update')));
   -- Phase 47: "no client-writable trusted field". The grant list (C13/C22) says which
   -- tables a client may write; this says every table that must not be client-written
   -- also has a trigger refusing it, so a future GRANT cannot be the only line of
@@ -1295,13 +1536,44 @@ BEGIN
       = ARRAY['venues.latitude','venues.longitude']);
   -- Word-boundary matching, because a substring search on this list reports
   -- `feedback_kind` as a price column: the first version of this check failed on it.
-  PERFORM pg_temp.st2_ok('C41 no column pretends to hold a price',
+  --
+  -- Stage 2 wrote this as one blanket refusal over `public` and `private` together, and the reason was
+  -- truthfulness rather than security: the customer-facing schema carried `price`/`amount` columns that
+  -- backed no payment system, so the product's own data model claimed a money flow that did not exist.
+  -- Stage 10 makes the columns real, and the honest form of the claim is now two halves instead of one,
+  -- because the two schemas answer different questions. The half that carried the original weight is
+  -- unchanged and absolute: nothing price-shaped may live in `public`, where an API role's SQL can name
+  -- a column and a forged `paid` value has a place to be written. Money lives only in `private`, which
+  -- no browser role can reach (C14) and whose tables no client can write (C31/C32b).
+  PERFORM pg_temp.st2_ok('C41 no price-shaped column exists in the schema a client can write',
     NOT EXISTS (SELECT 1 FROM pg_attribute a
                   JOIN pg_class c ON c.oid = a.attrelid
                   JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE a.attnum > 0 AND NOT a.attisdropped
-                   AND n.nspname IN ('public','private')
+                 WHERE a.attnum > 0 AND NOT a.attisdropped AND c.relkind = 'r'
+                   AND n.nspname = 'public'
                    AND a.attname ~* '(^|_)(paise|amount|price|cost|gst|tax|total|fee|discount)($|_)'));
+  -- ... and the server half is a *named* set, so that "it lives in private" is not itself an excuse. A
+  -- seventh price-shaped column arriving in `private` — a discount, a tax, a "total" that rounds
+  -- something — fails here and has to be explained by whoever added it. Every name below is minor-unit
+  -- or ordinal, never a decimal: `amount_minor` is an integer count of the smallest currency unit, which
+  -- is what keeps C40 (numeric appears only as a venue coordinate) true, and `price_version` is the
+  -- ordinal that lets an order freeze *which* published price it agreed to rather than inheriting the
+  -- current one. Relkind is filtered because a table constraint carries an internal attribute named for
+  -- the column it keys, and that is not a column pretending to be anything.
+  PERFORM pg_temp.st2_set('C41b the price-shaped columns in the server schema are exactly the frozen-quote ledger fields',
+    (SELECT array_agg(x ORDER BY x) FROM (
+       SELECT c.relname || '.' || a.attname AS x
+         FROM pg_attribute a
+         JOIN pg_class c ON c.oid = a.attrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE a.attnum > 0 AND NOT a.attisdropped AND c.relkind = 'r'
+          AND n.nspname = 'private'
+          AND a.attname ~* '(^|_)(paise|amount|price|cost|gst|tax|total|fee|discount)($|_)') s),
+    CASE WHEN pg_temp.st2_at_least('stage10')
+         THEN ARRAY['commerce_orders.amount_minor', 'commerce_orders.price_version',
+                    'commerce_packages.amount_minor', 'commerce_packages.price_version',
+                    'commerce_payment_events.amount_minor', 'commerce_refunds.amount_minor']
+         ELSE ARRAY[]::text[] END);
   -- Quantities a client can send are bounded, and the set is found by *name pattern*
   -- rather than listed by hand: a new `*_count`, `*_size`, `*_number` or
   -- `*_order` column that arrives without a bound fails here instead of joining an
@@ -1446,7 +1718,8 @@ BEGIN
                        <> 'wedding_id'));
   -- Unindexed foreign keys: a closed set, each with a reason (Phase 49). A new one has
   -- to arrive here with a justification before the suite will pass.
-  PERFORM pg_temp.st2_set('C48 the unindexed foreign keys are exactly the accepted twelve',
+  PERFORM pg_temp.st2_set('C48 the unindexed foreign keys are exactly the accepted '
+    || cardinality(unindexed_fks) || ', each with a reason above',
     (SELECT array_agg(x ORDER BY x) FROM (
        SELECT c.relname || '->' ||
               CASE WHEN rn.nspname = 'public' THEN r.relname
@@ -1827,16 +2100,30 @@ BEGIN
   -- more server-authored table, five more triggers, three more foreign keys, one more
   -- bounded quantity — changed no assertion count, which is worth saying because a reader
   -- comparing totals would otherwise look for a change that is not there. Stage 9 re-measured at its
-  -- own head and the total is still 103 for the same reason: one more public table, one more read
+  -- own head and the total was still 103 for that reason: one more public table, one more read
   -- policy, one more server-authored table, six more triggers, two more foreign keys, two more bounded
   -- quantities and two more paired callables were all absorbed by the inventories above, which are
   -- lists rather than counts. What Stage 9 asserts about the *shape* of a render row — that a key
   -- cannot be presented, that a status may only move along a registered edge, that a `ready` row
-  -- carries the digest of bytes it did not invent — belongs to its own battery, not here. Re-measure
+  -- carries the digest of bytes it did not invent — belongs to its own battery, not here.
+  --
+  -- Stage 10 measures 106, and the three are the first additions this file has accepted for a schema
+  -- change since Stage 2 wrote it. Each is a rule that the money model made necessary rather than an
+  -- inventory entry: C15b (no role a request can arrive as holds *any* table privilege on the commerce
+  -- model, so the seven bodies are the only way in — this is requirement 6 stated below the policy
+  -- layer, where RLS cannot be reasoned about because there is no policy to reason about), C29c-b
+  -- (Stage 10's `p_actor_user_id` made the blanket "no callable takes an identity" false, so the
+  -- exception is named and pinned to bodies no role can execute rather than deleted), and C41b
+  -- (price-shaped columns are now real, so the file names the six of them and keeps `public` forbidden
+  -- outright instead of refusing to distinguish the two schemas). Everything else Stage 10 added —
+  -- six tables, one wrapper, seven implementations, twenty triggers, eight foreign keys, one definer
+  -- trigger and one policy row — went into lists that grew in place and moved no count. Re-measure
   -- and say so whenever a check is added or removed: a floor nobody re-measures stops meaning anything.
-  IF (current_setting('st2.passed'))::int < 103 THEN
-    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor is 103',
-      (current_setting('st2.passed'))::int;
+  IF (current_setting('st2.passed'))::int <
+     (CASE WHEN pg_temp.st2_at_least('stage10') THEN 106 ELSE 103 END) THEN
+    RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor for this head is %',
+      (current_setting('st2.passed'))::int,
+      (CASE WHEN pg_temp.st2_at_least('stage10') THEN 106 ELSE 103 END);
   END IF;
 END $CATALOG$;
 

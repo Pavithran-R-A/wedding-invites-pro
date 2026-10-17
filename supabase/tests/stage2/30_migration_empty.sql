@@ -114,7 +114,9 @@ DECLARE
   -- Head-aware because E01 is a set comparison and E02 loops this same list: a stage that
   -- legitimately adds a canonical table must say so here, and a chain that does not have it
   -- must not be handed the later expectation. The Stage 9 manifest is the first arrival since
-  -- Stage 4's catalogue tables.
+  -- Stage 4's catalogue tables; Stage 10's six ledger tables are the second, and all six are
+  -- in `private` — this head claims to add a server-side model, so a `public` commerce table
+  -- would be a defect with an API role on the other end of it, and E01 is what catches it.
   canonical text[] := ARRAY[
     'public.approval_feedback', 'public.approval_requests', 'public.design_templates',
     'public.entitlements', 'public.guest_households', 'public.household_event_scopes',
@@ -128,6 +130,11 @@ DECLARE
     'legacy.templates'
   ] || CASE WHEN pg_temp.st2_at_least('stage9')
             THEN ARRAY['public.invitation_outputs']
+            ELSE ARRAY[]::text[] END
+    || CASE WHEN pg_temp.st2_at_least('stage10')
+            THEN ARRAY['private.commerce_packages', 'private.commerce_orders',
+                       'private.commerce_payment_attempts', 'private.commerce_payment_events',
+                       'private.commerce_refunds', 'private.commerce_policy']
             ELSE ARRAY[]::text[] END;
 BEGIN
 
@@ -146,10 +153,28 @@ BEGIN
 
   -- =============================================== 2. and produced no rows at all
 
+  -- `private.commerce_policy` is the one row any stage's migration writes into the canonical
+  -- domain, and it is not customer data: it is the gate's fail-safe default, shipped because a
+  -- publish gate whose configuration row is absent is a gate nobody can read. So this loop does
+  -- not exempt it — exempting would drop the claim. It replaces the weak claim ("no rows") with a
+  -- strong one ("exactly one row, and it is the permissive/off/hold-for-review row"), and keeps
+  -- "no rows" for the five tables that would hold a package, an order, an attempt, an event or a
+  -- refund if the chain had invented a customer. No head guard is needed here: this branch is
+  -- unreachable before Stage 10, because the name only enters `canonical` at that head.
   FOR r IN SELECT unnest(canonical) AS rel LOOP
     EXECUTE format('SELECT count(*) FROM %s', r.rel) INTO n;
-    PERFORM pg_temp.st2_ok('E02 ' || r.rel || ' is empty on a clean chain (found ' || n || ')',
-                           n = 0);
+    IF r.rel = 'private.commerce_policy' THEN
+      PERFORM pg_temp.st2_ok('E02 ' || r.rel || ' holds the shipped default and nothing else (found ' || n || ')',
+                             n = 1);
+      PERFORM pg_temp.st2_count('E02b the shipped gate is permissive, live capture disabled, '
+        || 'refunds held for review, no package gated, and it is the row with id 1',
+        'private.commerce_policy WHERE id = 1 AND publish_gate = ''permissive'' '
+        || 'AND live_capture_enabled = false AND refund_revocation_mode = ''hold_for_review'' '
+        || 'AND publish_required_package_codes = ''{}''::text[]', 1);
+    ELSE
+      PERFORM pg_temp.st2_ok('E02 ' || r.rel || ' is empty on a clean chain (found ' || n || ')',
+                             n = 0);
+    END IF;
   END LOOP;
 
   -- Accounts are only ever created by signing up. Nothing signed up here, so the
@@ -240,11 +265,15 @@ $EMPTY$;
 -- 1 inventory check (E01) + one emptiness check per canonical table (E02) + the 14 fixed
 -- probes (E03-E16). E02's count is the declared inventory's size, so declaring a new
 -- canonical table moves this number by exactly one and deleting an assertion breaks it.
+-- Stage 10 declares six tables and adds one assertion of its own (E02b, the shipped
+-- policy row's values), so its branch is 34 + 1 rather than 34.
 DO $FLOOR$
 DECLARE n int; floor int;
 BEGIN
   n := coalesce(current_setting('st2.passed', true), '0')::int;
-  floor := 1 + 14 + CASE WHEN pg_temp.st2_at_least('stage9') THEN 28 ELSE 27 END;
+  floor := 1 + 14 + CASE WHEN pg_temp.st2_at_least('stage10') THEN 35
+                         WHEN pg_temp.st2_at_least('stage9')  THEN 28
+                         ELSE 27 END;
   IF n < floor THEN
     RAISE EXCEPTION 'Stage 2 clean-chain suite ran only % assertions (floor %)', n, floor;
   END IF;

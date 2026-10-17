@@ -1284,7 +1284,8 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the '
-    || CASE WHEN pg_temp.s5_at_least('stage9') THEN 'twenty-one names'
+    || CASE WHEN pg_temp.s5_at_least('stage10') THEN 'twenty-two names'
+            WHEN pg_temp.s5_at_least('stage9') THEN 'twenty-one names'
             WHEN pg_temp.s5_at_least('stage8') THEN 'nineteen names'
             WHEN pg_temp.s5_at_least('stage7') THEN 'thirteen names' ELSE 'eight names' END
     || ' it is meant to expose — Stage 4 shipped the seven pack-and-publication verbs, Stage 5 adds '
@@ -1299,7 +1300,18 @@ BEGIN
     -- Stage 9 appends two more on the same pair pattern, so nineteen becomes twenty-one and M5 is
     -- still empty: both new names are reads of already-frozen or already-recorded state, neither is
     -- a maintenance act, and neither has a twin-less body behind it.
-    || CASE WHEN pg_temp.s5_at_least('stage9') THEN
+    || CASE WHEN pg_temp.s5_at_least('stage10') THEN
+              ', from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
+              || 'read the link state — plus the two doors a guest walks through, to read its own '
+              || 'invitation and to answer it, add six more, from Stage 9 the two reads a render '
+              || 'worker and a host panel need — the output manifest and one frozen version''s own '
+              || 'document — add two more, and from Stage 10 the one read a host needs to see the '
+              || 'quote it was given adds the twenty-second. Stage 10''s other six commerce names are '
+              || 'not on this list by design: an order, a payment event, an entitlement grant or a '
+              || 'reconciliation finding that a browser could call would be a customer deciding their '
+              || 'own paid status, which is the exact thing M5 and the Stage 2 attack battery exist to '
+              || 'refuse'
+            WHEN pg_temp.s5_at_least('stage9') THEN
               ', from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
               || 'read the link state — plus the two doors a guest walks through, to read its own '
               || 'invitation and to answer it, add six more, and from Stage 9 the two reads a render '
@@ -1314,7 +1326,19 @@ BEGIN
     || 'which is the shape §B asked for: '
     || 'the privileged half of the new pair is reachable by nested call and by nothing else',
     v_bad,
-    CASE WHEN pg_temp.s5_at_least('stage9') THEN
+    CASE WHEN pg_temp.s5_at_least('stage10') THEN
+      ARRAY['commerce_host_summary', 'create_invitation_version', 'get_approval_requests',
+            'get_guest_invitation_state', 'get_invitation_publication_state',
+            'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'render_invitation_document',
+            'request_family_review', 'resolve_family_review',
+            'resolve_guest_invitation', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_guest_invitation',
+            'revoke_invitation_publication', 'rotate_guest_invitation',
+            'rotate_invitation_token', 'submit_family_review',
+            'submit_guest_rsvp']::text[]
+    WHEN pg_temp.s5_at_least('stage9') THEN
       ARRAY['create_invitation_version', 'get_approval_requests',
             'get_guest_invitation_state', 'get_invitation_publication_state',
             'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',

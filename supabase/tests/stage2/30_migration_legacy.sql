@@ -63,6 +63,29 @@ BEGIN
   RAISE EXCEPTION 'FAIL % — found % rows, expected %', what, got, want;
 END $$;
 
+-- M66 is the first assertion in this file that has to know which head it is reading, so the two helpers
+-- below are the same pair `40_catalog.sql` runs its census on, spelled the same way and defaulted the
+-- same way. The default is deliberately *low*: run this file against a Stage 10 schema with
+-- `app.stage_head` unset and the pre-Stage-10 branch counts six price columns where it expects none and
+-- fails loudly, which is the direction a missing GUC must fail in.
+CREATE FUNCTION pg_temp.st2_head() RETURNS text
+LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(current_setting('app.stage_head', true), 'stage4') $fn$;
+
+CREATE FUNCTION pg_temp.st2_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.st2_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 'st2_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.st2_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.st2_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$fn$;
+
 DO $MIGRATION$
 BEGIN
 
@@ -388,12 +411,45 @@ BEGIN
   -- Measured against the live catalog rather than remembered: on this schema the only
   -- columns in `public`/`private` matching these shapes are the two credential-digest
   -- columns of `private.access_tokens`, which hold a hash and a kind, never a token.
-  PERFORM pg_temp.st2_count('M66 no canonical column carries a legacy price, printer endpoint or raw credential',
-    'information_schema.columns c WHERE c.table_schema IN (''public'',''private'')
-       AND (c.column_name ~ ''(^|_)(price|cost|amount)(_|$)'' OR c.column_name LIKE ''%paise%''
-            OR c.column_name LIKE ''%endpoint%''
-            OR (c.column_name LIKE ''%token%''
-                AND c.column_name NOT IN (''token_hash'',''token_kind'')))', 0);
+  --
+  -- Stage 10 makes that sentence false, and the way it becomes false is the whole question. Its price
+  -- model puts `amount_minor` on four tables and `price_version` on two, every one of them in `private`,
+  -- so the needle above now counts six. Two repairs were available. Deleting those names from the search
+  -- would have made this assertion blind to precisely the thing it was written to catch — a money column
+  -- arriving somewhere a client can reach — so it is not what this file does. Instead the claim splits
+  -- into the two halves that were always inside it: the schema a client can write carries no price,
+  -- endpoint or credential at all, and the schema it cannot write carries a *named* set and nothing
+  -- else. A seventh match — a discount, a tax, a rounded total, a printer endpoint, a raw token — fails
+  -- M66b and has to be explained by whoever added it. Same split, reached from the other side, as
+  -- `40_catalog.sql`'s C41/C41b.
+  IF pg_temp.st2_at_least('stage10') THEN
+    PERFORM pg_temp.st2_count('M66 no column in the schema a client can write carries a price, printer endpoint or raw credential',
+      'information_schema.columns c WHERE c.table_schema = ''public''
+         AND (c.column_name ~ ''(^|_)(price|cost|amount)(_|$)'' OR c.column_name LIKE ''%paise%''
+              OR c.column_name LIKE ''%endpoint%''
+              OR (c.column_name LIKE ''%token%''
+                  AND c.column_name NOT IN (''token_hash'',''token_kind'')))', 0);
+    PERFORM pg_temp.st2_set('M66b the match set across both schemas is exactly the six frozen-quote columns Stage 10 wrote into the server-owned schema, named rather than counted',
+      (SELECT array_agg(x ORDER BY x COLLATE "C") FROM (
+         SELECT c.table_schema || '.' || c.table_name || '.' || c.column_name AS x
+           FROM information_schema.columns c
+          WHERE c.table_schema IN ('public','private')
+            AND (c.column_name ~ '(^|_)(price|cost|amount)(_|$)' OR c.column_name LIKE '%paise%'
+                 OR c.column_name LIKE '%endpoint%'
+                 OR (c.column_name LIKE '%token%'
+                     AND c.column_name NOT IN ('token_hash','token_kind')))
+       ) d),
+      ARRAY['private.commerce_orders.amount_minor', 'private.commerce_orders.price_version',
+            'private.commerce_packages.amount_minor', 'private.commerce_packages.price_version',
+            'private.commerce_payment_events.amount_minor', 'private.commerce_refunds.amount_minor']);
+  ELSE
+    PERFORM pg_temp.st2_count('M66 no canonical column carries a legacy price, printer endpoint or raw credential',
+      'information_schema.columns c WHERE c.table_schema IN (''public'',''private'')
+         AND (c.column_name ~ ''(^|_)(price|cost|amount)(_|$)'' OR c.column_name LIKE ''%paise%''
+              OR c.column_name LIKE ''%endpoint%''
+              OR (c.column_name LIKE ''%token%''
+                  AND c.column_name NOT IN (''token_hash'',''token_kind'')))', 0);
+  END IF;
   PERFORM pg_temp.st2_count('M67 the legacy money columns are still readable where they were archived',
     'information_schema.columns c WHERE c.table_schema = ''legacy''
        AND c.column_name IN (''price_platform_paise'',''cost_printer_paise'',''api_endpoint'')', 3);
@@ -446,6 +502,12 @@ $MIGRATION$;
 -- A suite that can be emptied one assertion at a time still prints "PASSED", so the
 -- floor is checked before the word is used. Stage 4 raised this from 75 to 76 by adding
 -- M15b; the number tracks the assertions in this file and must move with them.
+--
+-- It is a floor, not an equality, and Stage 10 is the reason the distinction now matters: M66 became
+-- two cells at that head (above), so this file prints 77 there and 76 below it. Requiring 76 still
+-- catches a section that stopped running, and requiring exactly 76 would have been a second way to
+-- make this suite's future impossible. The added cell is a *stronger* claim at the new head, so the
+-- head-aware count going up is the designed outcome, not drift.
 DO $FLOOR$
 DECLARE n int;
 BEGIN
