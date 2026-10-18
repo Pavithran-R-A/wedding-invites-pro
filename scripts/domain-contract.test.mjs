@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readDomain } from "./check-db-contract.mjs";
 
-// Stage 2 domain contract, tested with no database.
+// Stage 2 domain contract, tested with no database, and widened by the stages that moved the census.
 //
 // `supabase/tests/stage2/` proves these properties against a live Postgres catalogue, which is the
 // stronger claim — but it needs Docker, and CI has no Postgres job. This file is the same rules
@@ -12,6 +12,14 @@ import { readDomain } from "./check-db-contract.mjs";
 //
 // Every matcher here is paired with a hostile name it must match. A guard that cannot fire is not
 // a guard.
+//
+// Stage 10 changed one premise. This file was written when the product's money columns were all
+// scaffold fiction, so "no live table holds an amount" was the safe rule; Stage 10 built a real
+// purchase ledger, and a ledger is made of amounts. The rule that survives is the one the fiction
+// actually violated: no amount may live where a client can read or write it. Money is therefore
+// allowed in the private commerce tables and nowhere else, and the exposure guard that
+// `private.access_tokens` already carries is extended over the whole ledger set, because a price
+// the browser can see is a price the browser can change.
 
 const { sources, tables, unparsed, typeTables } = readDomain();
 
@@ -50,7 +58,19 @@ describe("domain contract", () => {
     // moving the number.
     expect(publicKeys.length).toBe(20);
     expect(publicKeys).toContain("public.invitation_outputs");
-    expect(privateKeys.sort()).toEqual(["private.access_tokens", "private.audit_events"]);
+    // Eight since Stage 10 added the commerce ledger; two before that. Nothing here reached `public`,
+    // which is why the count of public tables did not move with it, and the client-type comparison below
+    // is what turns "private" from a name into a claim.
+    expect(privateKeys.sort()).toEqual([
+      "private.access_tokens",
+      "private.audit_events",
+      "private.commerce_orders",
+      "private.commerce_packages",
+      "private.commerce_payment_attempts",
+      "private.commerce_payment_events",
+      "private.commerce_policy",
+      "private.commerce_refunds",
+    ]);
     expect(legacyKeys.length).toBe(8);
   });
 
@@ -141,21 +161,50 @@ describe("domain contract", () => {
     expect(namesOf("public.weddings")).toContain("primary_language");
   });
 
-  it("has no money column in the live domain", () => {
-    const MONEY = /(^|[^a-z0-9])(paise|rupees|amount|price|cost|gst|tax|charge|fee)([^a-z0-9]|$)/i;
-    for (const key of [...publicKeys, ...privateKeys]) {
+  const MONEY = /(^|[^a-z0-9])(paise|rupees|amount|price|cost|gst|tax|charge|fee)([^a-z0-9]|$)/i;
+
+  /**
+   * The private tables Stage 10's ledger put money in, with the money columns each one holds. Listed
+   * column by column rather than table by table, so a sixth amount cannot arrive under this comment;
+   * the case below also proves the list has no table in it that stopped carrying money.
+   */
+  const LEDGER_MONEY = new Map([
+    ["private.commerce_orders", ["amount_minor", "price_version"]],
+    ["private.commerce_packages", ["amount_minor", "price_version"]],
+    ["private.commerce_payment_events", ["amount_minor"]],
+    ["private.commerce_refunds", ["amount_minor"]],
+  ]);
+
+  it("keeps every amount out of the client-visible domain and inside the ledger that owns it", () => {
+    for (const key of publicKeys) {
       for (const column of namesOf(key)) {
         expect(`${key}.${column}`).not.toMatch(MONEY);
       }
     }
+    const moneyTables = [];
+    for (const key of privateKeys) {
+      const money = namesOf(key).filter((column) => `${key}.${column}`.match(MONEY));
+      if (money.length === 0) continue;
+      moneyTables.push(key);
+      expect([...LEDGER_MONEY.keys()], `${key} is not a table this rule was written for`).toContain(key);
+      expect(money.sort(), `${key} carries money columns this census does not name`).toEqual(LEDGER_MONEY.get(key));
+    }
+    expect(moneyTables.sort()).toEqual([...LEDGER_MONEY.keys()].sort());
+    // The ledger is only a ledger if the client cannot read it: a price a browser can see is a price a
+    // browser can quote itself, so none of these tables may reach the generated types.
+    for (const key of LEDGER_MONEY.keys()) {
+      expect([...typeTables.keys()], key).not.toContain(key.slice("private.".length));
+    }
     expect("legacy.payments.amount_paise").toMatch(MONEY);
     expect("public.weddings.fee").toMatch(MONEY);
     expect("public.weddings.preference_level").not.toMatch(MONEY);
+    expect("private.commerce_orders.price_version").toMatch(MONEY);
+    expect("private.commerce_payment_attempts.confirmed_at").not.toMatch(MONEY);
   });
 
   it("archives the money history instead of deleting it", () => {
-    // The archive-not-delete half of phase 67: no live table may hold a amount, and no migration
-    // may drop the ones the scaffold already had.
+    // The archive-not-delete half of phase 67: no client-visible table may hold an amount, and no
+    // migration may drop the ones the scaffold already had.
     expect(namesOf("legacy.payments")).toContain("amount_paise");
     expect(namesOf("legacy.orders")).toContain("price_platform_paise");
     expect(namesOf("legacy.orders")).toContain("cost_printer_paise");
