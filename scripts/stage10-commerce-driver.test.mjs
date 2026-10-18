@@ -129,6 +129,81 @@ function argumentLines(statement, functionName) {
   return body[1].split(',\n  ');
 }
 
+/** The columns one ledger table really has, read out of the `CREATE TABLE` that made it.
+ *
+ *  This exists because the observation once named `commerce_orders.provider` and
+ *  `commerce_payment_attempts.provider_attempt_ref`, neither of which was ever in the schema, and no case
+ *  in this file could notice: the instrument's statements are strings here, and the first tier that
+ *  actually ran one was the Stage 10 HTTP battery. A provider is a fact about an attempt or a delivery,
+ *  never about a frozen quote — so the field list is now checked against the DDL at the level where a name
+ *  can be wrong.
+ *
+ *  The block is split on commas at paren depth zero rather than line by line, because a column definition
+ *  wraps (`CHECK (kind IN ('payment_initiated', …))` runs over three lines) and a line-based reader either
+ *  keeps a continuation as a column — which measured 22 names for the events table's 19 columns, an
+ *  inventory wide enough to pass an unknown one — or drops it and can drop a real column too. An entry
+ *  this parser cannot classify is a refusal, not a skip. */
+function tableColumns(table, schema = 'private') {
+  const block = new RegExp(`CREATE TABLE ${schema}\\.${table} \\(([\\s\\S]*?)\\n\\);`).exec(migration);
+  if (!block) throw new Error(`${schema}.${table} is not created by ${MIGRATION_RELATIVE}`);
+  const entries = [];
+  let depth = 0;
+  let current = '';
+  for (const character of block[1].replace(/--[^\n]*/g, ' ')) {
+    if (character === '(') depth += 1;
+    if (character === ')') depth -= 1;
+    if (character === ',' && depth === 0) {
+      entries.push(current);
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+  if (current.trim()) entries.push(current);
+
+  const names = [];
+  for (const entry of entries) {
+    const words = entry.trim().split(/\s+/).filter(Boolean);
+    const [first, second] = words;
+    if (!first) continue;
+    if (/^(?:CONSTRAINT|CHECK|UNIQUE|PRIMARY|FOREIGN|EXCLUDE)$/i.test(first)) continue;
+    if (!/^[a-z_][a-z0-9_]*$/.test(first) || !second) {
+      throw new Error(`the column parser cannot classify ${JSON.stringify(entry.trim())} in ${schema}.${table}`);
+    }
+    if (names.includes(first)) throw new Error(`${schema}.${table} names ${first} twice`);
+    names.push(first);
+  }
+  return names;
+}
+
+/** The relations the observation reads, keyed by the alias it gives each one. The four ledger tables are
+ *  checked against their own `CREATE TABLE` above; `entitlements` is Stage 2's table, so its columns are
+ *  the inventory `pg_attribute` reported for it on the deployed stack. */
+const OBSERVED = {
+  o: tableColumns('commerce_orders'),
+  e: tableColumns('commerce_payment_events'),
+  a: tableColumns('commerce_payment_attempts'),
+  r: tableColumns('commerce_refunds'),
+  en: ['id', 'wedding_id', 'package_code', 'status', 'source', 'granted_at', 'revoked_at',
+    'metadata', 'created_at', 'updated_at'],
+};
+
+/** Every `alias.column` the statement names.
+ *
+ *  The column class carries digits: `raw_body_sha256` is the one ledger column named for a hash length,
+ *  and `[a-z_]+` stops at its first digit and then fails the trailing boundary — which read as a clean
+ *  18-reference sweep of a 19-field event object, the digest being the field that went unseen. */
+const namedColumns = (statement) =>
+  [...statement.matchAll(/\b([a-z]{1,2})\.([a-z_][a-z0-9_]*)\b/g)].map(([, alias, column]) => ({ alias, column }));
+
+/** The fields one alias projects, spelled the way `json_build_object` spells them: `'key', alias.column`.
+ *  Read from the projection rather than swept from the text, so a field the sweep cannot see — which is
+ *  exactly how the digest slipped — cannot slip here too. */
+function projectedFields(statement, alias) {
+  const pattern = new RegExp(`'([a-z0-9_]+)', ${alias}\\.([a-z0-9_]+)`, 'g');
+  return [...statement.matchAll(pattern)].map(([, key, column]) => ({ key, column }));
+}
+
 /** A channel that records what it was asked to run and answers with one ledger-shaped row. */
 function recordingChannel(answer = { disposition: 'applied' }) {
   const calls = [];
@@ -291,6 +366,59 @@ describe('the statement builders', () => {
     expect(statement).not.toMatch(/raw_body(?!_sha256)/);
     expect(statement.match(/raw_body_sha256/g)?.length ?? 0).toBeGreaterThan(0);
     expect(() => observeOrderSql({ orderId: 'not-a-uuid' })).toThrow(/order/);
+  });
+
+  it('CD-13b: names only columns the schema has, and reads the provider from the attempt, not the quote', () => {
+    const statement = observeOrderSql({ orderId: ORDER });
+
+    // The projection is the contract, so each group is read out of the `json_build_object` calls and
+    // checked name by name against the DDL. The counts are pinned too: a field the sweep cannot see is
+    // invisible to the containment loop, and that is precisely how a `raw_body_sha256` slips past a
+    // column class that stops at its first digit.
+    const GROUPS = { o: 13, e: 19, a: 9, r: 9, en: 5 };
+    for (const [alias, fields] of Object.entries(GROUPS)) {
+      const projected = projectedFields(statement, alias);
+      expect(projected, `the ${alias} object projects no fields`).not.toHaveLength(0);
+      expect(projected.map(({ key }) => key), `the ${alias} object renames a field as it reports it`)
+        .toEqual(projected.map(({ column }) => column));
+      expect(new Set(projected.map(({ column }) => column)).size,
+        `the ${alias} object projects ${fields} distinct fields`)
+        .toBe(fields);
+      for (const { column } of projected) {
+        expect(OBSERVED[alias], `${alias}.${column} is not a column of the relation that alias stands for`)
+          .toContain(column);
+      }
+    }
+
+    // Anything the statement reaches for outside a projection — the `WHERE` and the `ORDER BY` — is held
+    // to the same inventory, so no qualified reference is unchecked.
+    for (const { alias, column } of namedColumns(statement)) {
+      expect(OBSERVED[alias], `${alias} is an alias this observation does not declare`).toBeDefined();
+      expect(OBSERVED[alias], `${alias}.${column} is not a column of the relation that alias stands for`)
+        .toContain(column);
+    }
+
+    // The four price fields the quote froze, and the state the machine moved it to, are all reportable;
+    // `provider` is not one of them. It belongs to the attempt the provider named and to the delivery
+    // that arrived, so a provider column on the order would be a second, unsynchronised answer to
+    // "who was paid", which is the divergence §2 of the design exists to prevent.
+    const orderFields = projectedFields(statement, 'o').map(({ column }) => column);
+    for (const column of ['price_version', 'amount_minor', 'currency', 'status', 'merchant_reference',
+      'quote_expires_at', 'entitlement_id']) {
+      expect(orderFields, `the order object reports the frozen ${column}`).toContain(column);
+    }
+    expect(orderFields).not.toContain('provider');
+    // An attempt is where a provider reference lives, and both of the names it can carry are read, with
+    // the two timestamps that separate initiation from confirmation.
+    const attemptFields = projectedFields(statement, 'a').map(({ column }) => column);
+    expect(attemptFields).toEqual(expect.arrayContaining(['provider', 'environment',
+      'provider_order_ref', 'provider_payment_ref', 'initiated_at', 'confirmed_at', 'failed_at']));
+    // A refund's kind is what separates money back from a dispute, and §9 treats them differently.
+    const refundFields = projectedFields(statement, 'r').map(({ column }) => column);
+    expect(refundFields).toEqual(expect.arrayContaining(['kind', 'status', 'amount_minor', 'event_id']));
+    // The digest is the field that proves the bytes acted on were the bytes signed; it is projected, and
+    // nothing beside it is.
+    expect(projectedFields(statement, 'e').map(({ column }) => column)).toContain('raw_body_sha256');
   });
 
   it('CD-14: bends nothing, so a value that carries a quote still makes exactly one statement', () => {

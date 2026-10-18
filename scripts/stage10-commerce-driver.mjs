@@ -232,16 +232,20 @@ function revocationSql({ orderId, actorUserId, reason }) {
 
 /** Everything one purchase consists of, in one round trip. The ledger's columns are named rather than
  *  `row_to_json`-ed because the table's only body-derived column is the digest, and the observation must
- *  not acquire a wider read by accident. */
+ *  not acquire a wider read by accident.
+ *
+ *  The field lists are the migration's own columns, not a design document's: a provider is a fact about an
+ *  attempt or a delivery, never about the frozen quote, so the order object carries no provider and the
+ *  attempt object carries the two references the provider actually names. */
 function observeOrderSql({ orderId }) {
   const id = sqlUuid(orderId, 'order');
   return statement(`json_build_object(
     'order', (SELECT json_build_object('id', o.id, 'wedding_id', o.wedding_id, 'owner_user_id', o.owner_user_id,
                                        'merchant_reference', o.merchant_reference, 'package_code', o.package_code,
                                        'price_version', o.price_version, 'amount_minor', o.amount_minor,
-                                       'currency', o.currency, 'status', o.status, 'provider', o.provider,
-                                       'quote_expires_at', o.quote_expires_at, 'captured_at', o.captured_at,
-                                       'closed_at', o.closed_at, 'entitlement_id', o.entitlement_id)
+                                       'currency', o.currency, 'status', o.status, 'quote_expires_at', o.quote_expires_at,
+                                       'captured_at', o.captured_at, 'closed_at', o.closed_at,
+                                       'entitlement_id', o.entitlement_id)
                 FROM private.commerce_orders o WHERE o.id = ${id}),
     'events', (SELECT json_agg(json_build_object('id', e.id, 'provider', e.provider, 'event_id', e.event_id,
                                                  'event_type', e.event_type, 'kind', e.kind, 'environment', e.environment,
@@ -253,12 +257,17 @@ function observeOrderSql({ orderId }) {
                                                  'applied_effect', e.applied_effect, 'occurred_at', e.occurred_at,
                                                  'received_at', e.received_at) ORDER BY e.id)
                  FROM private.commerce_payment_events e WHERE e.order_id = ${id}),
-    'attempts', (SELECT json_agg(json_build_object('id', a.id, 'provider', a.provider, 'provider_attempt_ref',
-                                                  a.provider_attempt_ref, 'status', a.status, 'created_at', a.created_at)
+    'attempts', (SELECT json_agg(json_build_object('id', a.id, 'provider', a.provider, 'environment', a.environment,
+                                                   'provider_order_ref', a.provider_order_ref,
+                                                   'provider_payment_ref', a.provider_payment_ref,
+                                                   'status', a.status, 'initiated_at', a.initiated_at,
+                                                   'confirmed_at', a.confirmed_at, 'failed_at', a.failed_at)
                                    ORDER BY a.created_at)
                    FROM private.commerce_payment_attempts a WHERE a.order_id = ${id}),
-    'refunds', (SELECT json_agg(json_build_object('id', r.id, 'event_id', r.event_id, 'provider_refund_ref',
-                                                 r.provider_refund_ref, 'amount_minor', r.amount_minor, 'status', r.status)
+    'refunds', (SELECT json_agg(json_build_object('id', r.id, 'event_id', r.event_id, 'kind', r.kind,
+                                                 'status', r.status, 'amount_minor', r.amount_minor,
+                                                 'currency', r.currency, 'provider_refund_ref', r.provider_refund_ref,
+                                                 'recorded_at', r.recorded_at, 'completed_at', r.completed_at)
                                   ORDER BY r.id)
                   FROM private.commerce_refunds r WHERE r.order_id = ${id}),
     'entitlement', (SELECT json_build_object('id', en.id, 'package_code', en.package_code, 'status', en.status,
