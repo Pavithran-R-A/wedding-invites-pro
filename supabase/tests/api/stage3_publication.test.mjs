@@ -1057,8 +1057,8 @@ describe('§6.5 taking a link down', () => {
 // `api`, which PostgREST serves and which now holds only one-line SECURITY INVOKER
 // wrappers, and `internal_api`, which it does not serve and which holds the privileged
 // SECURITY DEFINER bodies those wrappers name. Asserting them in one pass is what makes
-// the split a fact rather than a claim: the same twenty-one names, in two postures, with the
-// same twenty-one caller sets.
+// the split a fact rather than a claim: the same twenty-two names, in two postures, with the
+// same twenty-two caller sets.
 describe('§6.6 the callable catalogue is closed', () => {
   /** `grantees` lists the roles this build intends to reach the function. The owner is
    *  always allowed and is not a caller; nothing else may appear. */
@@ -1084,7 +1084,7 @@ describe('§6.6 the callable catalogue is closed', () => {
     // asking who has been invited is a third caller class again. Signatures and grantees for the
     // five below are read from `q7-logs/s7-census-readout-03.log`, which is a census of the whole
     // published chain applied through the Stage 7 head — not from the migration's intent. What
-    // this map proves over HTTP is that all twenty-one names sit in the same two postures behind the
+    // this map proves over HTTP is that every name on it sits in the same two postures behind the
     // transport, with `service_role` on none of them.
     ['get_approval_requests', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
     ['request_family_review', {
@@ -1134,13 +1134,24 @@ describe('§6.6 the callable catalogue is closed', () => {
     // run at this head is what re-confirms them against the deployed stack.
     ['list_invitation_outputs', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
     ['render_invitation_document', { args: 'p_version_id uuid', grantees: ['authenticated'] }],
+    // Stage 10's one new door, and the reason it is one and not seven: a host may read the state of
+    // its own purchase, but every act that moves money — quoting, recording a provider event,
+    // granting, revoking, expiring, reconciling — belongs to a trusted connection that names its
+    // actor explicitly, because a browser cannot be trusted to say who paid. So the write path has no
+    // HTTP surface at all, and the inventory below (`COMMERCE_SERVICE_ONLY`) is what keeps that
+    // absence a fact. The signature and caller set here are measured from the deployed stack at this
+    // head with this file's own `readSurface` projection, not transcribed from
+    // `20261017120000_stage10_commerce_foundations.sql:1646-1652`.
+    ['commerce_host_summary', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
   ]);
 
   // The maintenance surface Stage 5 added, named here rather than left to be discovered: the
   // assertion below is that all eleven exist in `internal_api`, none of them has a wrapper in
   // `api`, and none of them is granted to any role but the owner. That is §B's rule stated as
   // an inventory, and an inventory is the only form in which "a twelfth privileged function
-  // appeared" becomes a failure rather than a surprise.
+  // appeared" becomes a failure rather than a surprise. Stage 10's six money bodies are the same
+  // kind of surface and are listed separately below, because their owner-answer is a different
+  // one — Stage 5's are human-review acts, Stage 10's are the ledger's write path.
   const MAINTENANCE_ONLY = [
     'approve_tradition_pack_release',
     'create_tradition_pack',
@@ -1153,6 +1164,25 @@ describe('§6.6 the callable catalogue is closed', () => {
     'tradition_pack_retention_report',
     'update_draft_tradition_pack_release',
     'validate_tradition_pack_release',
+  ].sort();
+
+  // Stage 10's write path, inventoried for the reason the list above is inventoried: an unlisted
+  // privileged function is a hole nobody read yet. These six hold the money model's every verb, and
+  // each is deliberately in the posture §9 of `20261017120000_stage10_commerce_foundations.sql:588-594`
+  // states — SECURITY INVOKER, `search_path` pinned, owned by `postgres`, granted to no role at all.
+  // INVOKER is not an oversight here: a body that cannot escalate is a body whose reachability is a
+  // property of the connecting role rather than of a token, which is why all six take an explicit
+  // `p_actor_user_id` and re-derive ownership from `public.weddings` instead of believing it. The
+  // names and the posture are measured from the deployed stack at this head; the signatures are not
+  // pinned, for the same reason API38 does not pin the eleven above — an unreachable door has no
+  // caller to keep a promise to, and API33's per-name signature audit belongs to the reachable half.
+  const COMMERCE_SERVICE_ONLY = [
+    'commerce_reconcile',
+    'create_commerce_order',
+    'expire_commerce_order',
+    'grant_commerce_entitlement',
+    'record_commerce_event',
+    'revoke_commerce_entitlement',
   ].sort();
 
   // The two halves of the boundary and what each is allowed to be. `definer` and
@@ -1196,11 +1226,11 @@ describe('§6.6 the callable catalogue is closed', () => {
     const surfaces = SURFACES.map(({ schema }) => ({ schema, rows: readSurface(schema) }));
 
     for (const { schema, rows } of surfaces) {
-      // `internal_api` is allowed the maintenance names and nothing else; `api` is allowed the
-      // paired wrappers and nothing else. Separating the two is what keeps a *new* privileged
-      // function from passing by having been added to the wrong list.
+      // `internal_api` is allowed the maintenance names, the money bodies and nothing else; `api` is
+      // allowed the paired wrappers and nothing else. Separating the two is what keeps a *new*
+      // privileged function from passing by having been added to the wrong list.
       const intended = schema === 'internal_api'
-        ? new Set([...INTENDED.keys(), ...MAINTENANCE_ONLY])
+        ? new Set([...INTENDED.keys(), ...MAINTENANCE_ONLY, ...COMMERCE_SERVICE_ONLY])
         : INTENDED;
       const extra = rows.filter(row => !intended.has(row.name));
       assert.deepEqual(extra.map(row => row.name), [],
@@ -1322,6 +1352,85 @@ describe('§6.6 the callable catalogue is closed', () => {
     }
   });
 
+  test('API39 the Stage 10 money surface exists, has no wrapper, and is unreachable over HTTP', async () => {
+    // The ledger's six write and recovery verbs, inventoried in the same shape §B puts Stage 5's
+    // review acts in and for the same reason — a browser must not be able to say it paid. What
+    // differs is the escalation story: these are SECURITY INVOKER, so even the role that owns them
+    // acts as itself, which is what lets `record_commerce_event` nest the grant and revocation steps
+    // instead of duplicating them, and is why each takes an explicit actor instead of reading a JWT.
+    const internal = readSurface('internal_api');
+    const exposed = readSurface('api');
+    const missing = COMMERCE_SERVICE_ONLY.filter(n => !internal.some(r => r.name === n));
+    assert.deepEqual(missing, [], `money bodies missing from internal_api: ${missing.join(', ')}`);
+
+    const bodies = internal.filter(r => COMMERCE_SERVICE_ONLY.includes(r.name));
+    // By length as well as by name, because a same-name overload with a second signature would pass
+    // a name census and still be a second door.
+    assert.equal(bodies.length, COMMERCE_SERVICE_ONLY.length,
+      `internal_api holds ${bodies.length} rows for ${COMMERCE_SERVICE_ONLY.length} money bodies; an overload is not a reviewed addition`);
+
+    for (const row of bodies) {
+      assert.equal(row.securer, 'false',
+        `${row.name} is SECURITY DEFINER; the money surface was built to need no escalation`);
+      assert.equal(row.language, 'plpgsql', `${row.name} is written in ${row.language}`);
+      assert.ok(row.config.includes('search_path=""'),
+        `${row.name} does not pin its search_path: '${row.config}'`);
+      assert.equal(row.owner, 'postgres', `${row.name} is owned by ${row.owner}`);
+      assert.deepEqual(row.grantees, [],
+        `${row.name} is granted to ${row.grantees.join(', ')}; no role a request can hold may record a payment`);
+      assert.ok(!exposed.some(r => r.name === row.name),
+        `${row.name} has a wrapper in api, which would put a money act behind an HTTP door`);
+    }
+
+    // The other direction, and the one the six-name list cannot see: no *seventh* commerce name grew
+    // a door. `create_commerce_order` and `record_commerce_event` are the two verbs a front end could
+    // most plausibly be handed by mistake, so the exposed half is censused by substring rather than
+    // left to the paired list above.
+    assert.deepEqual(exposed.filter(r => r.name.includes('commerce')).map(r => r.name),
+      ['commerce_host_summary'],
+      'the exposed RPC schema holds a commerce name other than the host read');
+
+    // The same facts as a client experiences them. Two spelling per name, three credential shapes,
+    // and the same refusal the maintenance surface gets: PostgREST resolves the name inside the
+    // exposed profile before it reaches any privilege check, so the answer is 404 / PGRST202 rather
+    // than 401 or 403 — and it must not vary by credential, or the endpoint has become a way to learn
+    // whether a money body exists. The bodies are probed with an empty object on purpose: an argument
+    // list would be a second question, and a 400 here would read like a routed call.
+    const byName = {};
+    for (const [label, key] of [
+      ['apikey only', anonKey],
+      ['as a bearer token', anonKey],
+      ['the server key', serviceKey],
+    ]) {
+      for (const fn of ['create_commerce_order', 'record_commerce_event']) {
+        for (const [target, spelling] of [
+          [`/rest/v1/rpc/${fn}`, 'unqualified'],
+          [`/rest/v1/rpc/internal_api.${fn}`, 'schema-qualified'],
+        ]) {
+          const res = await fetch(`${url}${target}`, {
+            method: 'POST',
+            headers: {
+              apikey: key, Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json', 'Content-Profile': 'api',
+            },
+            body: '{}',
+          });
+          const body = await res.json().catch(() => ({}));
+          assert.equal(res.status, 404,
+            `${label} / ${fn} ${spelling}: a money call was routed rather than refused (${res.status} ${JSON.stringify(body)})`);
+          assert.equal(body.code, 'PGRST202',
+            `${label} / ${fn} ${spelling}: refused with ${body.code}, not the catalogue-miss code: ${JSON.stringify(body)}`);
+          (byName[`${fn} ${spelling}`] ??= []).push(JSON.stringify(body));
+        }
+      }
+    }
+    for (const [name, refusals] of Object.entries(byName)) {
+      assert.equal(refusals.length, 3, `${name}: fewer credential shapes probed than this test lists`);
+      assert.ok(refusals.every((b) => b === refusals[0]),
+        `the ${name} refusal differs by credential: ${new Set(refusals).size} distinct bodies`);
+    }
+  });
+
   test('API34 the RPC schemas are functions only, and nothing else is callable by a browser role', () => {
     // An allow-listed API surface with a table in it is a second kind of door: PostgREST
     // would serve it with row-level security as its only guard, and the whole publication
@@ -1365,11 +1474,12 @@ describe('§6.6 the callable catalogue is closed', () => {
     // executable by a browser role. A leftover in `public` would be reachable through the
     // default profile without anybody changing a setting, and API05 only proves three
     // particular names are gone. `internal_api` is excluded from this scan on purpose:
-    // the twenty-one bodies that have a wrapper beside them *are* browser-callable, by
+    // the twenty-two bodies that have a wrapper beside them *are* browser-callable, by
     // necessity — PostgreSQL checks a nested call as the invoking role, so a wrapper's
     // caller must also hold EXECUTE on the body beside it. API33 is what keeps that
-    // necessary grant to exactly those twenty-one paired names, API38 is what proves the
-    // eleven maintenance bodies behind them are granted to nobody but the owner, and
+    // necessary grant to exactly those twenty-two paired names, API38 is what proves the
+    // eleven maintenance bodies behind them are granted to nobody but the owner, API39 does
+    // the same for Stage 10's six money bodies, and
     // `stage3_security.test.mjs` is what measures that none of it is reachable as an HTTP
     // profile.
     const strays = sqlRows(`

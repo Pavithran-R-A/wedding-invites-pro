@@ -806,16 +806,21 @@ describe('§23 BROWSER WRITE SECURITY', () => {
     // caller has to be able to name. Stage 9 put the last two on it — `list_invitation_outputs` and
     // `render_invitation_document`, both host reads, both granted to `authenticated` and to no
     // anonymous caller — measured from `q9-logs/s9-http-census-readout-02.txt` rather than predicted.
-    // Which of the twenty-one anon may also reach is the other half: the
+    // Stage 10 added the twenty-second, `commerce_host_summary`, and it is the only money name on
+    // this mirror: a host reading the state of its own purchase needs the same nested-execution grant
+    // as every other wrapper's caller, while the six bodies that write the ledger hold no grant at all
+    // and are inventoried by name in `stage3_publication.test.mjs` API39 instead. Measured from
+    // `readSurface` against the deployed stack at this head.
+    // Which of the twenty-two anon may also reach is the other half: the
     // five header-credential doors, three of which take no argument at all, are pinned per name in
     // `stage3_publication.test.mjs` §6.6, so this case pins only the half that is common to all
-    // twenty-one.
+    // twenty-two.
     const direct = sqlRows(`select n.nspname || '.' || p.proname from pg_proc p
                               join pg_namespace n on n.oid = p.pronamespace
                              where n.nspname = 'internal_api'
                                and has_function_privilege('authenticated', p.oid, 'EXECUTE')
                              order by 1`);
-    assert.deepEqual(direct, ['internal_api.create_invitation_version',
+    assert.deepEqual(direct, ['internal_api.commerce_host_summary', 'internal_api.create_invitation_version',
       'internal_api.get_approval_requests', 'internal_api.get_guest_invitation_state',
       'internal_api.get_invitation_publication_state', 'internal_api.issue_guest_invitations',
       'internal_api.list_invitation_outputs',

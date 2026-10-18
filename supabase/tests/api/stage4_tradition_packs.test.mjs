@@ -608,10 +608,15 @@ describe('§17 CATALOGUE', () => {
   test('CAT-08 (cases 33, 34, 35, 36) no maintenance function is callable, and the exposed function inventory is pinned', async () => {
     // 35 + 36: what is callable over HTTP, enumerated from the catalogue rather than from the
     // migration file, and pinned to the exact set. A new pack-shaped RPC in `api` would show up
-    // here, and so would a new RPC of any other kind.
+    // here, and so would a new RPC of any other kind. Stage 10's twenty-second name is the one
+    // addition that is not pack-shaped: `commerce_host_summary` is a host read of its own purchase,
+    // ruled in §5 and §9-§10 of `20261017120000_stage10_commerce_foundations.sql`, and the six money
+    // bodies that could write the ledger are deliberately absent from this list — their absence from
+    // the exposed schema is `stage3_publication.test.mjs` API39's job, not this line's silence.
     const exposed = sqlRows(`select routine_name from information_schema.routines
                                where routine_schema = 'api' order by 1`).join(',');
     assert.deepEqual(exposed.split(','), [
+      'commerce_host_summary',
       'create_invitation_version', 'get_approval_requests', 'get_guest_invitation_state',
       'get_invitation_publication_state', 'issue_guest_invitations', 'list_invitation_outputs',
       'preview_invitation',
@@ -639,7 +644,7 @@ describe('§17 CATALOGUE', () => {
     // schema, and why `stage3_publication.test.mjs` puts only the first three in its anonymous-refusal
     // matrix. None of the five takes a pack key, a release id or a selection reference: the fifth
     // assertion below is the one that would notice if one ever did, and the SQL tier's own catalogue
-    // tripwire pins the same twenty-one names at this head (`supabase/tests/stage2/40_catalog.sql`).
+    // tripwire pins the same twenty-two names at this head (`supabase/tests/stage2/40_catalog.sql`).
     // Their behaviour
     // at the transport is qualified in `supabase/tests/api/stage7_family_approval.test.mjs`.
     //
