@@ -207,8 +207,12 @@ function splitClauses(text) {
   return parts.map((p) => p.replace(/\s+/g, " ").trim()).filter((p) => p.length > 0);
 }
 
-const CREATE_TABLE = /^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)/i;
-const SET_SCHEMA = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\s+SET\s+SCHEMA\s+([a-z_]+)/i;
+// Every identifier pattern below is `[a-z_][a-z_0-9]*`, not `[a-z_]+`: Postgres allows a digit
+// anywhere but the first character of an unquoted identifier, and the Stage 10 ledger names carry
+// them (`raw_body_sha256`). A stricter class does not make the checker safer — it makes legal
+// schema invisible to it, either as an "unparsed clause" or as a table that never appears at all.
+const CREATE_TABLE = /^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z_0-9]*)\.([a-z_][a-z_0-9]*)/i;
+const SET_SCHEMA = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z_0-9]*)\.([a-z_][a-z_0-9]*)\s+SET\s+SCHEMA\s+([a-z_][a-z_0-9]*)/i;
 /**
  * Column inventory changes this reader folds rather than reports. It used to report them:
  * the Stage 4 migration retires seven columns from `public.tradition_packs` and renames a
@@ -216,11 +220,11 @@ const SET_SCHEMA = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\
  * nagging forever, which trains everyone to ignore a gate that is actually useful. Folding
  * is what makes the checker able to tell whether the types file caught up.
  */
-const ALTER_TABLE = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_]+)\.([a-z_]+)\s+(.+)$/is;
-const TABLE_RENAME = /^\s*RENAME\s+TO\s+([a-z_]+)\b/i;
-const ADD_COLUMN = /^\s*ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\b/i;
-const DROP_COLUMN = /^\s*DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?([a-z_]+)\b/i;
-const RENAME_COLUMN = /^\s*RENAME\s+(?:COLUMN\s+)?([a-z_]+)\s+TO\s+([a-z_]+)\b/i;
+const ALTER_TABLE = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z_0-9]*)\.([a-z_][a-z_0-9]*)\s+(.+)$/is;
+const TABLE_RENAME = /^\s*RENAME\s+TO\s+([a-z_][a-z_0-9]*)\b/i;
+const ADD_COLUMN = /^\s*ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z_0-9]*)\b/i;
+const DROP_COLUMN = /^\s*DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?([a-z_][a-z_0-9]*)\b/i;
+const RENAME_COLUMN = /^\s*RENAME\s+(?:COLUMN\s+)?([a-z_][a-z_0-9]*)\s+TO\s+([a-z_][a-z_0-9]*)\b/i;
 /**
  * Clauses that change what a column accepts, who owns the table, or which rows the database
  * will let through — not which columns exist. This check compares an inventory, so these are
@@ -253,7 +257,7 @@ export function parseMigrations(sources) {
         for (const chunk of splitTopLevel(body)) {
           const first = chunk.split(" ")[0];
           if (CONSTRAINT_KEYWORDS.has(first)) continue;
-          if (!/^[a-z_]+$/.test(first)) {
+          if (!/^[a-z_][a-z_0-9]*$/.test(first)) {
             unparsed.push(`${fileName}: unparsed clause on ${schema}.${table}: ${first}`);
             continue;
           }
@@ -350,7 +354,7 @@ export function parseGeneratedTypes(text) {
   for (const block of objectMembers(text, "Tables")) {
     for (const table of block.members) {
       const row = (findMember(table.members, "Row")?.members ?? []).map((c) => c.key);
-      if (table.key && /^[a-z_]+$/.test(table.key)) tables.set(table.key, row);
+      if (table.key && /^[a-z_][a-z_0-9]*$/.test(table.key)) tables.set(table.key, row);
     }
   }
   return tables;
@@ -446,7 +450,7 @@ function membersOf(text, start, end) {
 }
 
 const CALL =
-  /\.from\(\s*['"`]([a-z_]+)['"`]\s*\)|\.select\(\s*(['"`])([^'"`]*)\2\s*\)|\.(?:eq|neq|in|gte|lte|order)\(\s*['"`]([a-z_]+)['"`]/g;
+  /\.from\(\s*['"`]([a-z_][a-z_0-9]*)['"`]\s*\)|\.select\(\s*(['"`])([^'"`]*)\2\s*\)|\.(?:eq|neq|in|gte|lte|order)\(\s*['"`]([a-z_][a-z_0-9]*)['"`]/g;
 
 /**
  * Every table and column the data layer names, in call order. `select()` arguments are

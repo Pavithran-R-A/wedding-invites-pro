@@ -33,6 +33,24 @@ describe("database contract checker", () => {
     expect([...tables.keys()].sort()).toEqual(["legacy.projects", "public.weddings"]);
   });
 
+  it("reads an identifier that carries a digit, and still refuses one that is not an identifier", () => {
+    // Postgres allows a digit anywhere but the first character of an unquoted identifier, and the
+    // Stage 10 ledger uses them (`raw_body_sha256`). A reader that rejects the digit reads a legal
+    // column as an unparsed clause, which is the shape this file exists to refuse: an instrument
+    // that goes blind on the schema it is guarding. The quoted clause is the other half of the
+    // same claim — widening the character class must not switch the guard off.
+    const { tables, unparsed } = parseMigrations({
+      "1.sql":
+        "CREATE TABLE private.commerce_payment_events (id uuid, raw_body_sha256 text);\n" +
+        "ALTER TABLE private.commerce_payment_events ADD COLUMN utf8_hint text;",
+      "2.sql": "CREATE TABLE private.quoted (id uuid, \"Weird Name\" text);",
+    });
+    expect(unparsed).toEqual([
+      '2.sql: unparsed clause on private.quoted: "Weird',
+    ]);
+    expect(tables.get("private.commerce_payment_events")).toEqual(["id", "raw_body_sha256", "utf8_hint"]);
+  });
+
   it("reads only Row keys out of the generated types", () => {
     // The fixture carries the `Tables:` block the reader anchors on. It used to be a bare
     // table object, which an older indent-matching parser accepted from anywhere in the
