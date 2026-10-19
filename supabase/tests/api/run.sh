@@ -101,6 +101,15 @@ psql_q "select '  db: ' || version()"
 # count, and an artefact byte left in either bucket under a key no row names is a public object with
 # no owner. Both buckets are counted rather than just one, because which of them a given suite fills
 # is a property of the suite, and a census that guessed would be silent about the other.
+# Stage 10 adds the money model itself: the six `private.commerce_*` tables and `public.entitlements`.
+# The reason is the same shape as Stage 9's, and sharper, because these are the rows a payment buys. A
+# run that left an order, an event, a refund or an entitlement behind would move no `weddings` count at
+# all, and the residue would read in a later run as a wedding that has paid — which is precisely the
+# state Stage 10's whole design says no test may be able to fake. `commerce_policy` is counted because
+# its absence is not neutral: the publish gate reads a missing policy row as permissive, so a suite
+# that deleted it and did not restore it would leave the product unable to refuse anything. The policy
+# posture is additionally checked by name below, because a count of 1 says nothing about which posture
+# that one row carries.
 # Add a store by adding one `select` line; the comparison below reads whatever names come back.
 leak_census() {
   psql_q "select 'weddings='||count(*) from public.weddings
@@ -119,7 +128,14 @@ leak_census() {
     union all select 'rsvp_responses='||count(*) from public.rsvp_responses
     union all select 'invitation_outputs='||count(*) from public.invitation_outputs
     union all select 'storage.objects(invitation-outputs)='||count(*) from storage.objects where bucket_id = 'invitation-outputs'
-    union all select 'storage.objects(invitation-previews)='||count(*) from storage.objects where bucket_id = 'invitation-previews'"
+    union all select 'storage.objects(invitation-previews)='||count(*) from storage.objects where bucket_id = 'invitation-previews'
+    union all select 'commerce_packages='||count(*) from private.commerce_packages
+    union all select 'commerce_orders='||count(*) from private.commerce_orders
+    union all select 'commerce_payment_attempts='||count(*) from private.commerce_payment_attempts
+    union all select 'commerce_payment_events='||count(*) from private.commerce_payment_events
+    union all select 'commerce_refunds='||count(*) from private.commerce_refunds
+    union all select 'commerce_policy='||count(*) from private.commerce_policy
+    union all select 'entitlements='||count(*) from public.entitlements"
 }
 BASE_CENSUS=$(leak_census)
 printf '%s\n' "$BASE_CENSUS" | sed 's/^/  ..  baseline /'
@@ -134,6 +150,10 @@ MISSING=$(psql_q "
   from (
     select x as t from unnest(array[
       'private.access_tokens', 'private.audit_events',
+      'private.commerce_orders', 'private.commerce_payment_attempts',
+      'private.commerce_payment_events', 'private.commerce_refunds',
+      'private.commerce_packages', 'private.commerce_policy',
+      'public.entitlements', 'public.publications',
       'legacy.projects', 'legacy.guests', 'legacy.payments', 'legacy.templates'
     ]) x
     where position('.' in x) > 0
@@ -145,12 +165,26 @@ if [[ -n "$MISSING" ]]; then
   exit 1
 fi
 echo "  ok  the private/legacy objects the suite expects to be unreachable do exist"
+echo "  ok  the Stage 10 money tables and the right row they buy exist, so a refusal over REST is a refusal"
 
 MIGRATIONS_APPLIED=$(psql_q "select count(*) from supabase_migrations.schema_migrations")
 MIGRATIONS_LOCAL=$(find supabase/migrations -name '*.sql' | wc -l | tr -d ' ')
 if [[ "$MIGRATIONS_APPLIED" != "$MIGRATIONS_LOCAL" ]]; then
+  # The two directions are different incidents and used to print the same sentence, which told an operator
+  # to reset the database when the honest reading was that a forward migration had not been applied yet.
+  # `db reset` drops rows other suites and other people put in this stack, so it is not advice to hand out
+  # for a missing file — and a run that silently tested the older schema would have been worse still.
   echo "FATAL: the stack has $MIGRATIONS_APPLIED migrations recorded; the repository has $MIGRATIONS_LOCAL." >&2
-  echo "       Re-apply from zero with 'npx supabase db reset --local --no-seed'." >&2
+  if (( MIGRATIONS_LOCAL > MIGRATIONS_APPLIED )); then
+    echo "       The repository is ahead: $(( MIGRATIONS_LOCAL - MIGRATIONS_APPLIED )) forward migration(s) have" >&2
+    echo "       not been applied to this stack, so the schema the suite would qualify is not the schema in" >&2
+    echo "       source control. Apply them with 'npx supabase db push --local'. Do NOT reset: a reset would" >&2
+    echo "       discard rows this stack already holds." >&2
+  else
+    echo "       The stack is ahead: it recorded $(( MIGRATIONS_APPLIED - MIGRATIONS_LOCAL )) migration(s) the" >&2
+    echo "       repository no longer contains, which is drift rather than a pending file. Stop and reconcile" >&2
+    echo "       the journal against 'git log -- supabase/migrations' before running anything." >&2
+  fi
   exit 1
 fi
 echo "  ok  $MIGRATIONS_APPLIED migrations applied, matching supabase/migrations"
@@ -207,6 +241,19 @@ ORPHANS=$(psql_q "select count(*) from public.invitation_drafts d where not exis
 if [[ "$ORPHANS" != "0" ]]; then
   echo "FATAL: $ORPHANS draft rows have no wedding — the Stage 3 invariant broke mid-run." >&2
   LEAK=1
+fi
+# The census above counts the policy *row*; this names the posture that row came back with, because the two
+# are different claims and only one of them is a count. Stage 10's publish gate reads a missing row or a
+# non-permissive one as a decision about every wedding in the database, so a suite that left
+# `entitlement_required` standing would refuse the next suite's publish and make it look like a product
+# defect. `(none)` is written with the `nullif` idiom the Stage 10 gate repair uses, not a bare
+# `coalesce(array_to_string(...))` — the empty list stringifies to '' and would print as an empty tail.
+POLICY_POSTURE=$(psql_q "select coalesce(string_agg(publish_gate || '/' || coalesce(nullif(array_to_string(publish_required_package_codes, ','), ''), '(none)'), ' + '), '(no row)') from private.commerce_policy")
+if [[ "$POLICY_POSTURE" != "permissive/(none)" ]]; then
+  echo "FATAL: the commerce policy came back as '$POLICY_POSTURE', not the shipped 'permissive/(none)'." >&2
+  LEAK=1
+else
+  echo "  ok  the commerce policy is back at the shipped permissive posture with no package named"
 fi
 [[ "$LEAK" == "0" ]] || exit 1
 
