@@ -89,6 +89,7 @@ import PublicationPanel from '@/components/invitation/PublicationPanel';
 import InvitationOutputsPanel from '@/components/invitation/InvitationOutputsPanel';
 import GuestInvitationPanel from '@/components/invitation/GuestInvitationPanel';
 import GuestRepliesPanel from '@/components/invitation/GuestRepliesPanel';
+import CommerceStatusPanel from '@/components/invitation/CommerceStatusPanel';
 
 interface EditorState {
   font: string;
@@ -918,6 +919,17 @@ const EditProject = () => {
           <Separator />
 
           <GuestRepliesPanel weddingId={id} />
+
+          <Separator />
+
+          {/* Stage 10's host door goes last, and the reason is what it is not: every panel above this one
+              is work the host does, and this is the only one that reports a fact they cannot change from
+              this page — `state` is derived server-side, and the door calls no write at all. It cannot go
+              between the two guest panels above, which the comment there pairs as one household's doors.
+              It reads through `api.commerce_host_summary`, an owner-only function whose price keys are
+              absent until that price is approved for display, so a host with an unapproved figure sees the
+              states without the number — which is Requirement 8 stated as a page. */}
+          <CommerceStatusPanel weddingId={id} />
         </aside>
       </main>
     </div>
