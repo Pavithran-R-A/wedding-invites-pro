@@ -510,8 +510,8 @@ after the ids were re-derived from the three files rather than from the design d
 ## 14. Tiers, and what each is allowed to claim
 
 1. **Unit (engine-independent)** — the verifier core and adapters, the order/quote decision rules, the
-   DTO projection, the state-machine edge table as data. Runs with no database, so it works under the
-   disk constraint the host is currently in.
+   DTO projection, the state-machine edge table as data. Runs with no database, so it is the tier that
+   answers when the host has no engine — which is why it ran first here.
 2. **SQL battery** — `supabase/tests/stage10/80_commerce_ledger.sql`, `90_commerce_functions.sql`,
    driven by `supabase/tests/stage10/run.sh` with `commerce|render|guest|family|historic|all`, in a throwaway
    database built from the migration chain, and `supabase/tests/stage2/40_catalog.sql` widened behind the
@@ -524,24 +524,27 @@ after the ids were re-derived from the three files rather than from the design d
    preconditions now refuse to run against a stack whose recorded migrations are behind the repository,
    instead of advising a reset.
 4. **Browser tier** — the host panel's states, and proof that guest and RSVP routes gained no payment
-   dependency. Requires headroom; if it cannot run, it is reported as unrun.
+   dependency. Driven against the built bundle on loopback; if it cannot run, it is reported as unrun.
 5. **Regressions** — every historical chain and suite. A foundation that weakens Stage 3's publication
    or Stage 8's guest privacy is not a foundation.
 6. **Sandbox tier** — **not run.** No credentials, no provider contact.
 
 **Measured versus pending, as of this writing.** Every number below was read out of a run log taken at
-this tree. The logs live in `q10-logs/` beside the working copy, not inside the repository: they are
+this tree, or at the commit the tier was driven from where that differs — the line that says so names it.
+The logs live in `q10-logs/` beside the working copy, not inside the repository: they are
 task-owned evidence for this pass, and the cited path below each number is that directory's file name.
 Anything not measured is named as unrun.
 
-- **Tier 1 — measured.** `npx vitest run` → 1327 tests across 60 files, exit 0
-  (`q10-logs/s10-unit-final-1.txt`, re-run over this tree as `q10-logs/s10-unit-truthsync-2.txt`; the
-  passes in between, `s10-node-truthsync-1.txt` and `s10-unit-truthsync-1.txt`, gave the same totals).
-  Stage 10's own share is 79:
+- **Tier 1 — measured.** `npm test` at `b81c441` → 1375 tests across 63 files, exit 0
+  (`q10-logs/s10-headgate2-test.txt`). Stage 10's share is 126 of those:
   `stage10-webhook-core.test.mjs` 36 cases
   (`WH-00..WH-46`, the gaps at 17–19, 28–29 and 34–39 being deliberate — one id per rule, not one per
-  arrangement) and `stage10-commerce-driver.test.mjs` 43 (`CD-01..CD-42`). No engine, no network, no
-  provider.
+  arrangement), `stage10-commerce-driver.test.mjs` 43 (`CD-01..CD-42`), and the host projection's
+  `src/test/commerceStatusShape.test.ts` 17, `commerceStatusTransport.test.ts` 10 and
+  `commerceStatusPanel.test.tsx` 20. No engine, no network, no provider. The same batteries measured
+  1327 tests across 60 files (`q10-logs/s10-unit-final-1.txt`, `s10-unit-truthsync-1/2.txt`) before those
+  three projection files existed; the earlier capture is kept as the instrument's history, not the number
+  to quote.
 - **Tier 2 — measured on two engines, and they agree.** `run.sh commerce` with `STAGE10_LOCAL=1` on the
   host's native `PostgreSQL 17.10` → ledger 291, functions 277 (`q10-logs/s10-sql-truthsync-3.txt`,
   re-run over this tree as `q10-logs/s10-sql-truthsync-4.txt`).
@@ -554,12 +557,12 @@ Anything not measured is named as unrun.
   (`q10-logs/s10-sql-all-repair-1.txt` is the earlier 17.10 sweep). This closes the parity question this
   stage had recorded as owed: the batteries are no longer proven only on a Windows-native 17.10.
 - **Tier 3 — measured, and the arm that was red is now green.** `supabase/tests/api/run.sh` runs the ten
-  HTTP suites against the live `localvivaahvarnam` stack and exits 0: stage10 67, stage3_publication 39,
+  HTTP suites against the live `localvivaahvarnam` stack and exits 0: stage10 68, stage3_publication 39,
   stage3_security 56, stage4 28, stage5_admin_cli 36, stage5_pack_driven 28, stage6 34, stage7 61,
-  stage8 56, stage9 30 → **435 executed cases, 0 failures**, with all seven money stores back to 0 rows
+  stage8 56, stage9 30 → **436 executed cases, 0 failures**, with all seven money stores back to 0 rows
   (policy singleton 1) and the posture check reading `permissive/(none)`
-  (`q10-logs/s10-http-full-1.txt`). Quote executed counts, not `test(` occurrences: the other nine suites
-  hold 339 literal `test(` sites but execute 368 cases, because several generate cases in loops.
+  (`q10-logs/s10-http-head-3.txt`). Quote executed counts, not `test(` occurrences: several suites
+  generate cases in loops.
   The same battery's history stays in the record: at 2026-10-19 12:5x it ran 67 tests / 66 pass / 1 fail
   with `G-02` red, because the stack still ran the pre-repair publish-gate function
   (`q10-logs/http-s10http-1792394672-r10.txt`, `node_test_code=1`) — and that run was *suite-only*, so the
@@ -567,9 +570,27 @@ Anything not measured is named as unrun.
   adjusted to match a schema that was behind: `20261019120000_stage10_publish_gate_empty_list.sql` was
   applied to this repository's own local stack with `npx supabase db push --local --skip-vault` after a
   `--dry-run` showed exactly one pending file (journal 25 → 26), once the Docker daemon was running again.
-- **Tier 4 — unrun.** The browser tier has not been executed at the Stage 10 head, and it cannot be yet:
-  §11's host panel is the next slice, so there is no pending/failed/cancelled/verified UI to drive. Nothing
-  here is evidence about a rendered page.
+  Two further runs at this head were not evidence either and are named in the stage's evidence record
+  rather than quietly dropped: the chain aborted at the catalogue precondition with 9 rows this pass had
+  left behind (`q10-logs/s10-http-head-1-moved.txt`), then ran 68 / 67 / 1 fail with `Z-03` red on 9
+  entitlements the first cleanup had not reached (`s10-http-head-2.txt`). Both were this pass's incomplete
+  cleanup, not product defects, and the third run cleared them —
+  `docs/audits/stage-10-commerce-foundations.md` §11 carries the two scoped statements that did it.
+- **Tier 4 — measured.** `scripts/stage10-browser-commerce.mjs` drives the built bundle on
+  `127.0.0.1:4173` against the stack's Kong on `:54400`, signing the fixture host in through the shipped
+  sign-up form and login → **40 cases, 0 failures** (`q10-logs/s10-browser-4.txt`, run tag
+  `s10ui-75574ac0f740`, taken at `7a2eeb6` — the commit before the tier's own file landed in `b81c441`, so
+  the bytes driven are the shipped ones and the instrument is what that commit adds).
+  All thirteen reader states are driven on the page, including `payment_attempt_failed` behind a pending
+  order, `refunded_pending_review` under the shipped `hold_for_review` default, and `entitlement_revoked`
+  reached with no refund row. `B50`–`B52` prove the unapproved-price rule from the wire body up to the
+  printed sentence, and the same reader showing a figure for an approved price, so the silence is the rule
+  rather than a broken formatter. The privacy half of the tier ran too: `B100` zero commerce requests from
+  any guest, invitation or review door, `B110`/`B111` the money door in the host editor chunk and in
+  neither guest chunk, `B120`–`B122` 7859 captured request header values hashed with none matching the
+  service-role key, the secret key or the maintenance database URL, `B124` every request loopback.
+  Three earlier arms of the same tier aborted mid-flight and are kept (`s10-browser-1/2/3.txt`); their
+  residue is what §11 clears.
 - **Tier 5 — measured on both halves.** The `run.sh all` sweep above is the historical SQL regression at
   this head, and the ten-suite chain in Tier 3 is the historical HTTP regression: Stage 3's publication and
   security suites, Stage 8's guest privacy and Stage 9's delivery suite all pass with Stage 10's schema and

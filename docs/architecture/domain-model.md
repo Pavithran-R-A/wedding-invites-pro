@@ -357,13 +357,17 @@ violation that does not exist, and that failure mode is why the near-miss list i
 not an attribute of a person or a family; the same file asserts in the other direction that
 `weddings` no longer contains `tradition_pack_id`, so the retired shape cannot come back unnoticed.
 
-Money: **no monetary column exists in `public` or `private`** (C41). `numeric` appears only as venue
-coordinates (C40) and there is no `real`/`double precision` anywhere (C39). The integer-paise columns
-that do exist are archived ones. No price, no GST, no package amount was invented by this stage.
+Money: **no price-shaped column exists in a schema a client can write** (C41 — the sentence used to read
+"in `public` or `private`", which was true until Stage 10 and is now the wrong shape: the money columns
+live in `private`, which no browser role reaches, and C41b names each of the six that exist so a seventh
+becomes a finding). `numeric` appears only as venue coordinates (C40) and there is no
+`real`/`double precision` anywhere (C39) — including in the ledger, whose amounts are `bigint` minor units.
+No price, no GST and no package amount was invented by any of these stages; the catalogue ships empty and
+every quote refuses.
 
 ## 8. Deferred, on purpose
 
-| Concept | Status at this branch's head (schema: Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6) | What would promote it |
+| Concept | Status at this branch's head (schema: Stage 2 through Stage 10; the rows for Stages 7–9 live in their own audits) | What would promote it |
 | --- | --- | --- |
 | Recipients / individual guests inside a household | **no table, no JSON column** | a per-recipient credential, or an RSVP that records one named person |
 | Pack × template compatibility | still **no join table**. Stage 4 reached the pack model, not this one: a release's `design_guidance` is validated as a shape and nothing pairs a release with a `design_templates` row | the first real pairing a customer can choose, rather than two catalogues that happen to exist |
@@ -372,7 +376,7 @@ that do exist are archived ones. No price, no GST, no package amount was invente
 | Family approval UX | **built, and locally qualified at the state that carries it.** Stage 7 wrote one migration and one workflow: the host's panel on `/project/:id/edit` opens an ask against a frozen version and one named relative, the mint returns a single-scoped credential, `/r/:token` is the reviewer's door outside `AuthProvider`, and an answer is one append-only `approval_feedback` row. Qualified by **255 + 116** SQL assertions on a throwaway Postgres, **61** HTTP tests inside a **281**-test seven-file battery on the local stack, **91** unit tests and a **104-check** browser tier (`../audits/stage-7-family-approval.md` §§8–12). **Local stack only** — nothing ran against a hosted project | what is still deferred is a reviewer *account*, and it is deferred on purpose: identity here is a typed label, not a verified person (§9's classification rows and `family-approval-review-security.md` §11). A guest replying is Stage 8 |
 | Event / venue / family editors | **built, not schema only** — `ContentEditor` on the workbench adds, edits, reorders and removes `wedding_people`, `venues` and `wedding_events` rows through the adapters, which is how journeys A, B and C got their content. Stage 5 extended the same workbench with the pack-driven section editor and the server-side issue records | what is still deferred is a *richer* editor (drag-reorder, inline media), not the row writes |
 | Uploads and Storage policies | Stage 6 wrote the integration this row deferred: the private `wedding-assets` bucket with a 5 MiB ceiling and four MIME types, the minted key, the three `storage.objects` policies, the lifecycle guards, one adapter and the host's file panel. **Built, and locally qualified at the state that carries it**: HTTP 220 tests / 0 fail, the two Stage 6 SQL batteries (90 registry + 80 storage policy) with every historical suite at a schema that contains Stage 6, 473 unit tests, and a browser tier that drove the panel through upload, preview, replace and remove with the N1–N4 privacy checks and the two-viewport accessibility re-measurement (`../audits/stage-6-storage-assets.md` §37; §18's engine outage is what §§36–37 closed). **Local stack only** — nothing here ran against a hosted project, and the 60-second preview expiry is asserted as a link shape, never as an elapsed-time measurement | what is still deferred is a guest seeing an uploaded file, and §7 of that audit explains why that needs its own threat model, a minting path for guest-delivered media and a stated retention rule rather than a policy tweak |
-| Entitlement granting | table + guards only, nothing ever sets `active` | Stage 10, from a real payment provider |
+| Entitlement granting | **built as a foundation, and locally qualified.** Stage 10 wrote the ledger this row deferred: six `private.commerce_*` tables, seven `internal_api` bodies, and `internal_api.grant_commerce_entitlement` as the only path that ever sets `entitlements.status = 'active'` — reached from a verified capture and nothing else, refused on a second capture (battery 1 `D33`/`D35`/`D38`), and driven to the rendered page in a browser (`B60`). No customer has an entitlement today: the price catalogue is empty and `live_capture_enabled` ships `false` | A real provider's credentials and a sandbox run — the owner's decision, recorded at `commerce-foundations.md` §15 as the one thing genuinely blocked. `docs/audits/stage-10-commerce-foundations.md` carries what the tiers proved and what they did not |
 | Retention and erasure policy | not modelled | Stage 13 |
 
 `data classification` below is the sensitivity view of the same territory: several of these deferred
@@ -476,8 +480,13 @@ migration plan, and is executed in `20_attacks.sql` groups 11a–11e.
 ## 12. What this domain does not do yet
 
 A guest can now be given a link and nothing else: there is no guest, RSVP or approval *screen*, no
-upload path, no payment provider, no price, no admin console reachable from a browser and no deployed
-schema. The editor does
+upload path, no admin console reachable from a browser and no deployed
+schema. On the money half, this sentence was written when Stage 2 was the whole schema and Stage 10
+changed it: there is still **no payment provider and no price**, because the catalogue ships empty and
+`live_capture_enabled` ships `false` — but there is now an order, an attempt, an event and a refund row
+in `private`, and a host panel that reads them. The other clauses above are Stage-2-era and were made
+false by Stages 6 to 8, not by this one; `docs/audits/stage-10-commerce-foundations.md` §14 records them
+as a stale-row finding for whichever stage owns that rewrite. The editor does
 now write the rows this domain owns: `ContentEditor` on the workbench adds, edits, reorders and
 removes `wedding_people`, `venues` and `wedding_events` rows, which is how the Stage 3 host-to-guest
 run got its content — by being typed into the product, not by seeded SQL. Stage 4 added one more

@@ -383,8 +383,14 @@ through Kong and PostgREST rather than inferred. See
 [`docs/audits/stage-3-public-invitation.md`](docs/audits/stage-3-public-invitation.md) §4–§6 for what
 that did and did not buy.
 
-What deliberately does **not** exist yet is a **product surface** for payment, GST handling, print
-ordering, and admin tooling. QR codes and PDF/image export left that list in Stage 9: the host's
+What deliberately does **not** exist yet is a **live** product surface for payment, plus GST handling,
+print ordering, and admin tooling. Stage 10 moved payment half out of that sentence: the ledger and the
+host's purchase panel are built and locally qualified — six `private.commerce_*` tables, seven
+`internal_api` bodies, a verified capture as the only thing that can grant an entitlement, and a browser
+tier that drove thirteen purchase states on the shipped bundle
+([`docs/audits/stage-10-commerce-foundations.md`](docs/audits/stage-10-commerce-foundations.md)) — while
+**no provider credential, no checkout redirect, no webhook receiver and no approved price exist**, so
+every quote still refuses and nobody has been asked to pay. QR codes and PDF/image export left that list in Stage 9: the host's
 workbench lists the files made from one frozen version and asks Storage for a 60-second signed URL
 (`src/integrations/supabase/invitationOutputs.ts:53`), and the bytes behind those rows were uploaded,
 read back and re-hashed against the digests their own rows carry by the trusted local publisher —

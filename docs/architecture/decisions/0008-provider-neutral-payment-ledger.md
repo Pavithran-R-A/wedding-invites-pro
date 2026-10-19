@@ -25,12 +25,14 @@ Two facts from the current repository shape the decision.
   through `owners_read_entitlements` (`20260925120500_stage2_rls_and_grants.sql:337-340`) and can write
   none. Anything Stage 10 builds must terminate *in this table*, or the product has two answers to
   "has this wedding paid".
-- **Nothing gates publishing on an entitlement today.** `internal_api.publish_invitation_version`
+- **Nothing gated publishing on an entitlement when this decision was taken.** `internal_api.publish_invitation_version`
   checks ownership, version membership, expiry and the live row
   (`20260926150000_stage3_privileged_bodies_behind_wrappers.sql:199`, replaced at
   `20261009120000_stage8_guest_invitations_rsvp.sql:957`); the word `entitlement` does not appear in
   that file. The deferral is written down, not discovered: `docs/architecture/stage-2-domain-blueprint.md`
-  says the check is "not enforced yet … Stage 10 owns it".
+  said the check was "not enforced yet … Stage 10 owns it" — and Stage 10's implementation closed it with
+  the `publications_commerce_publish_gate` trigger, which is why the blueprint's I-22 row now reads
+  "enforced, and off by default" rather than the sentence quoted above.
 
 The provider research (kickoff §2, and the same reading this document records for signatures) describes
 two gateways whose mechanics differ in ways that a schema must not absorb: Razorpay signs the raw body
@@ -105,7 +107,8 @@ terms in the data model.**
 
 **Negative / costs**
 
-- Six `private` tables and four service-only functions, all of which have to be enumerated in
+- Six `private` tables, seven `internal_api` bodies and the one `api.commerce_host_summary` wrapper paired
+  to a definer function — all of which have to be enumerated in
   `supabase/tests/stage2/40_catalog.sql` behind `st2_at_least('stage10')` — the catalogue is deliberately
   a census, so new surface is invisible only if it is also unreviewed.
 - Duplication between DDL constraints and the state machine's refusals, accepted for the reason ADR
