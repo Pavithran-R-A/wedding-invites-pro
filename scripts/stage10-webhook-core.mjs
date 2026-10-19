@@ -264,10 +264,8 @@ function verifyRazorpayWebhook(input = {}) {
   // webhook would throw away exactly the evidence the reconciliation pass and the chargeback guardrail
   // exist to read.
   if (!REQUIRES_PAYMENT_IDENTITY.has(kind)) {
-    const subject =
-      kind === 'refund_succeeded' || kind === 'refund_failed'
-        ? doc.payload?.refund?.entity
-        : doc.payload?.order?.entity;
+    const namesOwnEntity = kind === 'refund_succeeded' || kind === 'refund_failed';
+    const subject = namesOwnEntity ? doc.payload?.refund?.entity : doc.payload?.order?.entity;
     const rawAmount = asRef(subject?.amount) ?? asRef(subject?.amount_refunded) ?? asRef(subject?.amount_paid);
     let amountMinor = null;
     if (rawAmount !== null && rawAmount !== undefined) {
@@ -275,13 +273,23 @@ function verifyRazorpayWebhook(input = {}) {
       if (!amount.ok) return amount;
       amountMinor = amount.amountMinor;
     }
+    // The single reference this shape carries is written into `private.commerce_refunds.provider_refund_ref`
+    // by the ledger, and that column is what a person reads to find the movement again at the provider. A
+    // refund entity's own id (`rfnd_…`) *is* the credit; its `payment_id` is the charge it reverses. So the
+    // subject's own id comes first for a refund, and only an order cancellation — whose subject is the order,
+    // whose id already has `providerOrderRef` — may take a payment id from elsewhere in the body. An order id
+    // in this slot would also collide with the real payment later, because `commerce_attempts_payment_ref_uk`
+    // is unique on `(provider, provider_payment_ref)`.
+    const providerPaymentRef =
+      (namesOwnEntity ? asRef(subject?.id) : null)
+      ?? asRef(subject?.payment_id)
+      ?? asRef(doc.payload?.payment?.entity?.id);
     return success({
       ...base,
       facts: success({
         merchantReference: merchantFromOrder ?? asRef(subject?.notes?.merchant_reference),
         providerOrderRef: asRef(subject?.order_id) ?? asRef(order?.id),
-        providerPaymentRef:
-          asRef(subject?.payment_id) ?? asRef(subject?.id) ?? asRef(doc.payload?.payment?.entity?.id),
+        providerPaymentRef,
         amountMinor,
         currency: asRef(subject?.currency) ?? null,
         providerStatus: asRef(subject?.status),
@@ -396,8 +404,12 @@ function verifyCashfreeWebhook(input = {}) {
     asRef(payload?.order_details?.order_id) ??
     asRef(payload?.refund_details?.payment_order_id);
   const providerOrderRef = asRef(payload.cf_order_id) ?? asRef(payload.order_id);
-  const providerPaymentRef =
-    asRef(payload.cf_payment_id) ?? asRef(payload.refund_id) ?? asRef(payload.chargeback_id);
+  // Same rule as the Razorpay adapter, for the same column: a refund or a chargeback is evidence about
+  // *itself*, so its own id is what the ledger's refund row records, and the payment it concerns is only a
+  // fallback. A payment delivery keeps `cf_payment_id` first — that is what the attempt row is matched on.
+  const providerPaymentRef = REQUIRES_PAYMENT_IDENTITY.has(kind)
+    ? asRef(payload.cf_payment_id) ?? asRef(payload.refund_id) ?? asRef(payload.chargeback_id)
+    : asRef(payload.refund_id) ?? asRef(payload.chargeback_id) ?? asRef(payload.cf_payment_id);
 
   if (REQUIRES_PAYMENT_IDENTITY.has(kind)) {
     if (!providerPaymentRef && !providerOrderRef) return refuse('missing_payment_identity');

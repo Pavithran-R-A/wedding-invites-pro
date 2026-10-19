@@ -654,6 +654,109 @@ describe('minor units, because an amount is the fact a webhook must not be allow
   });
 });
 
+describe('the identity a refund, chargeback or cancellation is stored under', () => {
+  // These four cases decide a fact the ledger cannot decide for itself. `record_commerce_event` has one
+  // reference argument for a delivery that is not a payment, and it writes that argument into
+  // `private.commerce_refunds.provider_refund_ref`
+  // (`20261017120000_stage10_commerce_foundations.sql:1307-1320`) — the column a person uses to find the
+  // movement again at the provider. A refund id and the payment it reverses are different objects, so
+  // which one this module puts in that slot is the whole difference between "the reader can find the
+  // credit" and "the reader is sent to the charge".
+  const rzVerdict = (event, eventId, payload) => {
+    const rawBody = razorpayBody(event, eventId, payload);
+    return verifyRazorpayWebhook({
+      rawBody,
+      headers: { 'x-razorpay-signature': hexSign(rawBody), 'x-razorpay-event-id': eventId },
+      secret: RAZORPAY_TEST_KEY,
+      environment: 'synthetic',
+    });
+  };
+
+  const cfVerdict = (type, payload) => {
+    const rawBody = cashfreeBody(`ntf_${type.toLowerCase()}`, type, payload);
+    return verifyCashfreeWebhook({
+      rawBody,
+      headers: { 'x-webhook-signature': cfSign(TS, rawBody), 'x-webhook-timestamp': TS },
+      secret: CASHFREE_TEST_KEY,
+      environment: 'synthetic',
+      now: NOW,
+    });
+  };
+
+  it('WH-43: a Razorpay refund is stored under the refund id, not the payment it reverses', () => {
+    const result = rzVerdict('refund.processed', 'evt_rz_refund', {
+      payment: { entity: { id: 'pay_rz1', order_id: 'order_rz1', amount: 99900, currency: 'INR', status: 'captured' } },
+      order: { entity: { id: 'order_rz1', notes: { merchant_reference: 'vv1.rz' }, currency: 'INR', status: 'paid' } },
+      refund: {
+        entity: {
+          id: 'rfnd_rz1', payment_id: 'pay_rz1', order_id: 'order_rz1', amount: 99900, currency: 'INR',
+          status: 'processed', notes: { merchant_reference: 'vv1.rz' },
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe('refund_succeeded');
+    expect(result.facts.providerPaymentRef).toBe('rfnd_rz1');
+    expect(result.facts.providerOrderRef).toBe('order_rz1');
+    expect(result.facts.merchantReference).toBe('vv1.rz');
+    expect(result.facts.amountMinor).toBe(99900);
+    noSecretLeak(result, RAZORPAY_TEST_KEY);
+  });
+
+  it('WH-44: a cancellation stores the payment it cancelled, and never its own order id in that slot', () => {
+    const bare = rzVerdict('order.cancelled', 'evt_rz_cancel', {
+      order: { entity: { id: 'order_rz2', notes: { merchant_reference: 'vv1.rz2' }, currency: 'INR', status: 'cancelled' } },
+    });
+    expect(bare.ok).toBe(true);
+    expect(bare.kind).toBe('order_cancelled');
+    expect(bare.facts.providerOrderRef).toBe('order_rz2');
+    // `null`, not `'order_rz2'`. `commerce_attempts_payment_ref_uk` is unique on (provider,
+    // provider_payment_ref), so an order id written into the payment slot would collide with the real
+    // payment for that order the next time one is back-filled.
+    expect(bare.facts.providerPaymentRef).toBe(null);
+
+    const withPayment = rzVerdict('order.cancelled', 'evt_rz_cancel_b', {
+      payment: { entity: { id: 'pay_rz2', order_id: 'order_rz2', amount: 99900, currency: 'INR', status: 'failed' } },
+      order: { entity: { id: 'order_rz2', notes: { merchant_reference: 'vv1.rz2' }, currency: 'INR', status: 'cancelled' } },
+    });
+    expect(withPayment.facts.providerPaymentRef).toBe('pay_rz2');
+  });
+
+  it('WH-45: a Cashfree refund is stored under its refund_id while its payment id is also present', () => {
+    const result = cfVerdict('REFUND_STATE_CHANGED', {
+      entity: 'refund', refund_id: 'rfnd_cf1', cf_payment_id: 'pay_cf1', cf_order_id: 'order_cf1',
+      payment_order_id: 'vv1.cf', refund_amount: '999.00', currency_code: 'INR',
+      refund_state_change: { from: 'PENDING', to: 'SUCCESS' },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe('refund_succeeded');
+    expect(result.facts.providerPaymentRef).toBe('rfnd_cf1');
+    expect(result.facts.providerOrderRef).toBe('order_cf1');
+    expect(result.facts.merchantReference).toBe('vv1.cf');
+    expect(result.facts.amountMinor).toBe(99900);
+    noSecretLeak(result, CASHFREE_TEST_KEY);
+  });
+
+  it('WH-46: a chargeback takes its own id, and a payment still takes cf_payment_id', () => {
+    const cb = cfVerdict('CHARGEBACK_CREATED', {
+      entity: 'chargeback', chargeback_id: 'cb_cf1', cf_payment_id: 'pay_cf1', cf_order_id: 'order_cf1',
+      payment_order_id: 'vv1.cf', chargeback_amount: '999.00', currency_code: 'INR',
+    });
+    expect(cb.ok).toBe(true);
+    expect(cb.kind).toBe('chargeback_opened');
+    expect(cb.facts.providerPaymentRef).toBe('cb_cf1');
+
+    // Kind-awareness must not leak into the payment arm: `cf_payment_id` is the payment's own identity and
+    // the attempt row is matched on it, so a refund-shaped precedence here would strand every capture.
+    const pay = cfVerdict('PAYMENT_STATE_CHANGED', {
+      entity: 'payment', payment_order_id: 'vv1.cf', cf_order_id: 'order_cf1', cf_payment_id: 'pay_cf1',
+      currency_code: 'INR', payment_amount: '999.00', payment_state_change: { from: 'INITIATED', to: 'COMPLETED' },
+    });
+    expect(pay.kind).toBe('payment_captured');
+    expect(pay.facts.providerPaymentRef).toBe('pay_cf1');
+  });
+});
+
 describe('the dispatcher, and what it refuses to be', () => {
   it('WH-40: routes by provider and refuses an unknown one', () => {
     expect(
