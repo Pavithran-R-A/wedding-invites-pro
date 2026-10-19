@@ -1256,6 +1256,33 @@ BEGIN
   PERFORM pg_temp.s10f_eq('G05b and the refusal wrote no row, which is the half a message-only cell misses',
     pg_temp.s10f_pubcount(g2::text), 0::bigint);
 
+  -- The empty-code-list posture, pinned here as well as over HTTP because the sentence is produced by the
+  -- database, not by PostgREST. `publish_gate` stays `entitlement_required` and only the list goes empty:
+  -- no code can satisfy an empty array, so the refusal is correct and fail-closed and what is under test is
+  -- the *message*. Before 20261019120000_stage10_publish_gate_empty_list.sql this arm printed `one of []`,
+  -- because `array_to_string('{}'::text[], ', ')` is '' and not NULL, so the migration's
+  -- `coalesce(…, '(none named)')` was unreachable — a defect found by HTTP arm G-02, which is the only tier
+  -- that set an empty list until this cell existed.
+  v := pg_temp.s10f_try_write('postgres', NULL,
+    'UPDATE private.commerce_policy SET publish_required_package_codes = ARRAY[]::text[] WHERE id = 1');
+  PERFORM pg_temp.s10f_eq('G05c the owner can empty the package list the gate reads', v, 'ACCEPTED');
+  v := pg_temp.s10f_pub('postgres', NULL, g2::text, v2::text, 'active');
+  PERFORM pg_temp.s10f_ok('G05d an empty list still refuses, and refuses with the sentence that says none is named',
+    v LIKE '42501 | wedding % may not publish: the commerce policy requires an active entitlement for one of %'
+    AND position('[(none named)], and this wedding has none.' in v) > 0);
+  PERFORM pg_temp.s10f_ok('G05e and the answer is no longer the bare bracket an operator had to decode before the repair',
+    position('one of []' in v) = 0);
+  PERFORM pg_temp.s10f_eq('G05f and that refusal too wrote no row',
+    pg_temp.s10f_pubcount(g2::text), 0::bigint);
+  v := pg_temp.s10f_try_write('postgres', NULL,
+    'UPDATE private.commerce_policy SET publish_required_package_codes = ARRAY[' || quote_literal('QCLASSIC')
+    || '] WHERE id = 1');
+  PERFORM pg_temp.s10f_eq('G05g the list can be populated again', v, 'ACCEPTED');
+  v := pg_temp.s10f_pub('postgres', NULL, g2::text, v2::text, 'active');
+  PERFORM pg_temp.s10f_ok('G05h and with a code named the refusal names that code, so the repair did not blank the other branch',
+    position('one of [QCLASSIC], and this wedding has none.' in v) > 0
+    AND position('(none named)' in v) = 0);
+
   -- An entitled wedding, in the named package.
   INSERT INTO public.entitlements (wedding_id, package_code, status, source)
   VALUES (g4, 'QCLASSIC', 'active', 'admin_manual');
