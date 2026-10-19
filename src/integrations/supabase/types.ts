@@ -1,5 +1,5 @@
 // Database types for the canonical Stage 9 schema: the RLS-governed tables in `public`,
-// and the twenty-one browser-callable RPCs in `api`.
+// and the twenty-two browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -129,6 +129,23 @@
 // to query it. No client file names it at this head, and the read path Stage 9 builds is
 // `api.list_invitation_outputs`, because a canonical table read straight out of the adapter is what
 // `npm run product:check` refuses.
+//
+// Stage 10 adds one RPC and no table to the schemas this file describes. Its six money tables —
+// packages, orders, payment attempts, payment events, refunds, policy — are all in `private`, which is
+// not exposed to PostgREST and is not named by `--schema`, so they appear nowhere here by design; the
+// only thing a browser session may execute is `api.commerce_host_summary`, and it is the single new
+// entry above. This one was regenerated rather than authored: CLI 2.121.0 — the version on this machine
+// now, where Stage 9 recorded 2.120.0 — was run as
+// `supabase gen types typescript --local --schema public --schema api` against the migrated
+// `localvivaahvarnam` stack and its stdout captured in `q10-logs/s10-dbtypes-1.txt`. The generator again
+// printed `Generated TypeScript is unformatted. Format it with: npx oxfmt <generated-file.ts>`, and as
+// at Stages 7 and 9 `oxfmt` is not a dependency and nothing was installed to obtain it: the raw stdout
+// was diffed against this file instead. That diff is two things, both recorded here rather than
+// smoothed over. The one new function entry was applied in this file's existing one-key-per-line style,
+// with the generator's own alphabetical position (its `Args` are one parameter, `Returns: Json`) — and
+// every table in the generated text carries a `ComputedFields: never` line this file has never carried
+// for any of them, which is the third suppression described above, unchanged and still twenty tables
+// wide because Stage 10 added no public table to make it twenty-one.
 export type Json =
   | string
   | number
@@ -146,6 +163,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      commerce_host_summary: {
+        Args: { p_wedding_id: string }
+        Returns: Json
+      }
       create_invitation_version: {
         Args: { p_wedding_id: string }
         Returns: Json

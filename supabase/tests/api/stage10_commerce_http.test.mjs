@@ -5,7 +5,7 @@
 // `supabase/tests/stage10/80_commerce_ledger.sql` walks the whole state machine on a throwaway Postgres
 // (every kind, every order status, every hold, the staleness rule, both idempotency levels).
 // `supabase/tests/stage10/90_commerce_functions.sql` measures reachability four ways — catalog privilege
-// facts, RLS posture, trigger wiring and live DML refusals per role — plus the fifteen derived projection
+// facts, RLS posture, trigger wiring and live DML refusals per role — plus the thirteen derived projection
 // states, the paid-status forgery suite, the publish gate as a trigger, and §12's negative build. That
 // tier cannot see PostgREST, GoTrue, Kong's routing or a JWT, and `auth.uid()` — the only thing the host
 // door authorises against — does not exist there. So this file asks only what needs the stack:
@@ -191,10 +191,11 @@ const CODE = {
   retry: money('retry'),
   cashfree: money('cashfree'),
   poison: money('poison'),
+  failed: money('failed'),
 };
 const PRICE = {
   classic: 490000, unapproved: 550000, second: 610000, stale: 300000, expire: 200000,
-  gate: 250000, retry: 170000, cashfree: 190000, poison: 230000,
+  gate: 250000, retry: 170000, cashfree: 190000, poison: 230000, failed: 210000,
 };
 
 const emailFor = (who) => `${who}+${RUN_TAG}@example.test`;
@@ -586,10 +587,10 @@ const RECORDED_KEYS = keySet('disposition', 'event_row_id', 'order_id', 'order_s
 const ALREADY_KEYS = keySet('disposition', 'event_row_id', 'order_id', 'hold_reason', 'applied_effect',
   'processing_status');
 const SUMMARY_KEYS = keySet('state', 'wedding_id', 'package_code', 'price_version', 'merchant_reference',
-  'order_status', 'captured_at', 'closed_at', 'quote_expires_at', 'price_available', 'price_display_enabled',
-  'entitlement_status', 'publish_gate', 'refund_kind', 'refund_status');
+  'order_status', 'attempt_status', 'captured_at', 'closed_at', 'quote_expires_at', 'price_available',
+  'price_display_enabled', 'entitlement_status', 'publish_gate', 'refund_kind', 'refund_status');
 // §7: while display is unapproved the amount is *absent*, and `price_display_enabled` is already one of the
-// base fifteen — it flips, it does not arrive. So approval adds exactly these two names. An earlier line
+// base sixteen — it flips, it does not arrive. So approval adds exactly these two names. An earlier line
 // here also counted the flag as an arrival and failed on its own guesswork, not on the product (run r8).
 const PAID_SUMMARY_KEYS = keySet('amount_minor', 'currency');
 
@@ -902,7 +903,7 @@ describe('S10 SUMMARY DOOR', () => {
   test('S-01: the owner\'s own wedding through the product\'s spelling: 200 and the projection', async () => {
     const res = await summary('hostA', weddingOf('hostA'));
     assert.equal(res.status, 200, `S-01: ${res.status} ${json(res.body)}`);
-    assert.equal(keysOf(res.body), SUMMARY_KEYS, 'S-01: the projection is not the fifteen names §7 measured');
+    assert.equal(keysOf(res.body), SUMMARY_KEYS, 'S-01: the projection is not the sixteen names §7 measured');
   });
 
   test('S-02: anon at the same door is refused by the grant, not by the wedding', async () => {
@@ -1022,7 +1023,7 @@ describe('S10 PRICE POSTURE', () => {
     assert.ok(!('amount_minor' in res.body),
       `P-04: the projection carried an amount (§7 requires absence, not null): ${json(res.body)}`);
     assert.ok(!('currency' in res.body), `P-04: ${json(res.body)}`);
-    assert.equal(keysOf(res.body), SUMMARY_KEYS, 'P-04: the unapproved projection is the base fifteen');
+    assert.equal(keysOf(res.body), SUMMARY_KEYS, 'P-04: the unapproved projection is the base sixteen');
   });
 
   test('P-05: approving the display adds exactly the two money names, and their values', async () => {
@@ -1034,7 +1035,7 @@ describe('S10 PRICE POSTURE', () => {
     assert.equal(added.join(','), PAID_SUMMARY_KEYS, `P-05: approval added ${json(added)}`);
     assert.equal(added.length, 2, `P-05: approval added ${json(added)}`);
     assert.equal(res.body.price_display_enabled, true,
-      `P-05: the flag is one of the base fifteen and must flip, not arrive: ${json(res.body)}`);
+      `P-05: the flag is one of the base sixteen and must flip, not arrive: ${json(res.body)}`);
     assert.equal(res.body.amount_minor, PRICE.classic, 'P-05: the approved amount is the frozen quote');
     assert.equal(res.body.currency, 'INR', 'P-05: the approved currency is the frozen quote');
   });
@@ -1643,6 +1644,58 @@ describe('S10 DELIVERIES', () => {
       'D-15: a refused edit still changed the row, so one of the refusals above was not a refusal');
     assert.equal(count('from private.commerce_payment_events', 'the ledger after the edit attempts'), rowsBefore,
       'D-15: a refused UPDATE was answered by writing a second row');
+  });
+
+  test('D-17: the failure D-10 keeps off the order reaches the host door, and a retry in flight takes it off again', async () => {
+    // Requirement 8's fourth word, over the wire. D-10b proves the *stored* answer — a failed attempt
+    // closes the attempt and leaves the purchase `payment_pending` — and that is exactly why the door has
+    // nothing to say to the host: pending and just-refused looked identical. `attempt_status` and the
+    // `payment_attempt_failed` state read the newest attempt at the moment of the read, so this arm drives
+    // the sequence the way a customer does — initiation, failure, retry — and asks the deployed door after
+    // each step. On its own wedding, because the tie-break would otherwise answer for whichever of
+    // workshop's four unfinished purchases is newest rather than the one under test.
+    insertPackage(CODE.failed, { approved: false });
+    const w = await weddingOnly('hostA', 'failed');
+    quote('failed', { weddingId: w, packageCode: CODE.failed, actor: uidOf('hostA') });
+    const mr = orders.failed.merchant_reference;
+    const rz = (caseId, notif, ref, event, status, createdAt) => deliver(caseId, {
+      eventId: idFor(notif),
+      body: rzBody(event, idFor(notif), createdAt, {
+        payment: { entity: { ...payEntity(mr, ref, PRICE.failed), status } },
+        order: { entity: orderEntity(mr, ref) },
+      }),
+    });
+
+    resultOf('D-17a', rz('D-17a', 'FA1n', 'FA1', 'payment.created', 'created', t0 - 300));
+    const failed = resultOf('D-17b', rz('D-17b', 'FA1f', 'FA1', 'payment.failed', 'failed', t0 - 240));
+    assert.equal(failed.applied_effect, 'attempt_failed', `D-17b: ${json(failed)}`);
+    assert.equal(failed.order_status, 'payment_pending', `D-17b: ${json(failed)}`);
+
+    const first = await summary('hostA', w);
+    assert.equal(first.status, 200, `D-17: ${json(first.body)}`);
+    assert.equal(keysOf(first.body), SUMMARY_KEYS, `D-17: ${json(first.body)}`);
+    assert.equal(first.body.state, 'payment_attempt_failed',
+      `D-17: the door still says pending, so requirement 8 has no failed word: ${json(first.body)}`);
+    assert.equal(first.body.order_status, 'payment_pending',
+      'D-17: the new word is derived, not written — the order the failure left behind still says pending');
+    assert.equal(first.body.attempt_status, 'failed', `D-17: ${json(first.body)}`);
+    assert.equal(first.body.entitlement_status, null, 'D-17: a refused card grants nothing');
+    assert.equal(first.body.price_display_enabled, false, 'D-17: this arm is quoted on the unapproved price');
+    assert.ok(!('amount_minor' in first.body) && !('currency' in first.body),
+      `D-17: the failed state showed a host a price nobody approved: ${json(first.body)}`);
+    // A host is told *that* it failed, not which of the provider's objects failed: §11 keeps the evidence
+    // in the ledger, where `commerce_reconcile` — which no client can call — reads it.
+    for (const name of ['provider_order_ref', 'provider_payment_ref', 'failed_at', 'checkout_url', 'attempt_id']) {
+      assert.ok(!(name in first.body), `D-17: the projection carried ${name}: ${json(first.body)}`);
+    }
+
+    resultOf('D-17c', rz('D-17c', 'FA2n', 'FA2', 'payment.created', 'created', t0 - 180));
+    const second = await summary('hostA', w);
+    assert.equal(second.body.state, 'payment_pending',
+      `D-17: the door kept the older failure on the screen after the customer already retried: ${json(second.body)}`);
+    assert.equal(second.body.attempt_status, 'initiated', `D-17: ${json(second.body)}`);
+    assert.equal(observe('failed').attempts.length, 2,
+      'D-17: the retry minted no attempt row, so this reading proved nothing about "newest"');
   });
 });
 

@@ -13,7 +13,7 @@
 --   R  every Stage 10 door called by every request-bearing role, as SQLSTATE *and* sentence
 --   T  the table boundary, measured four ways at once: catalog privilege facts, RLS posture, trigger
 --      wiring, and live DML refusals by three roles over the six tables
---   H  the host projection: the twelve derived states over the cast's residue, the amount that appears
+--   H  the host projection: the thirteen derived states over the cast's residue, the amount that appears
 --      only under an approved price, and the identically-worded refusals that keep the door from being an
 --      enumeration oracle
 --   V  the paid-status forgery suite: every write a host can imagine making about its own purchase, and the
@@ -236,6 +236,29 @@ LANGUAGE sql AS $fn$
   SELECT pg_temp.s10f_call('authenticated', p_uid,
     'SELECT api.commerce_host_summary(' || quote_literal(p_wed) || '::uuid)')
 $fn$;
+
+-- A delivery applied through the ledger's only writer rather than planted into the table. Group H needs an
+-- order in a state the *state machine* produced — pending, with a failed attempt behind it — and a
+-- projection proven only against hand-made rows would be measuring this file, not the product. Same
+-- posture as battery 1's cast: `record_commerce_event` is SECURITY INVOKER and the chain runs as its owner.
+CREATE FUNCTION pg_temp.s10f_deliver(
+  p_event_id text, p_kind text, p_ref text, p_amount bigint,
+  p_order_ref text, p_pay_ref text, p_actor uuid,
+  p_occurred timestamptz DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql AS $fn$
+DECLARE v jsonb;
+BEGIN
+  BEGIN
+    SELECT internal_api.record_commerce_event(
+      'razorpay', p_event_id, 'payment.candidate.' || p_kind, p_kind, 'synthetic',
+      md5(p_event_id) || md5(p_event_id || '|body'), true, NULL, p_ref,
+      p_amount, 'INR', p_order_ref, p_pay_ref, coalesce(p_occurred, now()), p_actor) INTO v;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('_error', SQLSTATE || ' | ' || SQLERRM);
+  END;
+  RETURN v;
+END $fn$;
 
 -- The same money digest battery 1 uses for the five money tables, plus `commerce_packages`: this file must
 -- not move any of them, so the baseline is taken at A and closed at Z. `commerce_policy` is deliberately
@@ -1002,15 +1025,19 @@ BEGIN
 END $guard$;
 
 -- --------------------------------------------------------------------------- H. the host projection
--- One door, seventeen keys, and an amount that is either in the answer or not in it. The states below are
+-- One door, eighteen keys, and an amount that is either in the answer or not in it. The states below are
 -- battery 1's residue read through the host's own door, which is the pairing the two files are for: a
 -- change to what `record_commerce_event` ends a purchase as has to move a reading here, or it did not
--- happen at all.
+-- happen at all. H23..H33 then drive the door with the product's own writers, because the fourth state
+-- requirement 8 asks for is the one battery 1's residue cannot supply: §4 leaves the ORDER pending after a
+-- failed attempt, so `payment_attempt_failed` is read off the newest attempt at the moment of the read and
+-- no stored row says it.
 DO $proj$
 DECLARE
   s s10res%ROWTYPE;
   v jsonb;
   wed_h uuid; wed_v uuid; ord_h uuid;
+  wed_f uuid; ord_f uuid; ref_f text; del jsonb;
   base text; aud bigint;
 BEGIN
   SELECT * INTO s FROM s10res;
@@ -1037,12 +1064,13 @@ BEGIN
   PERFORM pg_temp.s10f_eq('H09 named as a refund by kind rather than by a status column', v ->> 'refund_kind', 'refund');
   PERFORM pg_temp.s10f_eq('H09b and the refund''s own status is part of the answer', v ->> 'refund_status', 'succeeded');
 
-  -- The key set, in both display postures. Fifteen always-present keys, plus the two money keys only under
+  -- The key set, in both display postures. Sixteen always-present keys, plus the two money keys only under
   -- a price the catalogue says is displayable.
   PERFORM pg_temp.s10f_keys('H10 the answer carries exactly the documented keys, amount included', v,
-    ARRAY['amount_minor','captured_at','closed_at','currency','entitlement_status','merchant_reference',
-          'order_status','package_code','price_available','price_display_enabled','price_version',
-          'publish_gate','quote_expires_at','refund_kind','refund_status','state','wedding_id']);
+    ARRAY['amount_minor','attempt_status','captured_at','closed_at','currency','entitlement_status',
+          'merchant_reference','order_status','package_code','price_available','price_display_enabled',
+          'price_version','publish_gate','quote_expires_at','refund_kind','refund_status','state',
+          'wedding_id']);
 
   -- An unapproved price: minted here, for a wedding minted here, because the cast's QQUIET rows have all
   -- been moved by battery 1's deliveries and the projection can only be asked about a live quote at the
@@ -1064,9 +1092,9 @@ BEGIN
   PERFORM pg_temp.s10f_eq('H12 its state is a live quote', v ->> 'state', 'quote_open');
   PERFORM pg_temp.s10f_eq('H13 and the projection says the price is not displayable', v ->> 'price_display_enabled', 'false');
   PERFORM pg_temp.s10f_keys('H14 and does not carry the money keys at all — absent, not null', v,
-    ARRAY['captured_at','closed_at','entitlement_status','merchant_reference','order_status',
-          'package_code','price_available','price_display_enabled','price_version','publish_gate',
-          'quote_expires_at','refund_kind','refund_status','state','wedding_id']);
+    ARRAY['attempt_status','captured_at','closed_at','entitlement_status','merchant_reference',
+          'order_status','package_code','price_available','price_display_enabled','price_version',
+          'publish_gate','quote_expires_at','refund_kind','refund_status','state','wedding_id']);
   PERFORM pg_temp.s10f_absent('H15 the two amount names appear nowhere in that answer',
     v #>> '{}', ARRAY['amount_minor','currency']);
   PERFORM pg_temp.s10f_eq('H16 and the package it quotes is still named, because the wedding and the package are not the price',
@@ -1095,6 +1123,67 @@ BEGIN
     pg_temp.s10f_money(), base);
   PERFORM pg_temp.s10f_eq('H22 reading the projection through the host door wrote no audit event either',
     (SELECT count(*) FROM private.audit_events), aud);
+
+  -- The failed arm, which is requirement 8's word that this door did not yet answer. §4 lets a failed
+  -- attempt leave the order `payment_pending` — a later attempt may still succeed, and closing the order
+  -- on one failure would be the ledger claiming a purchase died when only a card did — so *nothing stored
+  -- at order level says "failed"*. The host nonetheless has to be told, and the only honest way to tell it
+  -- is to read the newest attempt at the moment of the read. This arm runs the product's own writers to
+  -- get there; the projection is then asked what it says.
+  INSERT INTO public.weddings (id, owner_user_id, title, primary_language, additional_languages, style_settings)
+    VALUES (gen_random_uuid(), s.owner_a, 'S10F-FAIL f', 'en', ARRAY[]::text[], '{"font":"Playfair Display"}'::jsonb)
+    RETURNING id INTO wed_f;
+  SELECT internal_api.create_commerce_order(wed_f, 'QQUIET', s.owner_a) INTO v;
+  ord_f := (v ->> 'order_id')::uuid;
+  ref_f := v ->> 'merchant_reference';
+
+  del := pg_temp.s10f_deliver('h-f-init', 'payment_initiated', ref_f, 199900, 'po_h_f1', NULL,
+    s.owner_a, now() - interval '4 minutes');
+  PERFORM pg_temp.s10f_eq('H23a the arm''s initiation is applied by the state machine, not planted',
+    del ->> 'applied_effect', 'attempt_initiated');
+  del := pg_temp.s10f_deliver('h-f-fail', 'payment_failed', ref_f, 199900, 'po_h_f1', 'pay_h_f1',
+    s.owner_a, now() - interval '2 minutes');
+  PERFORM pg_temp.s10f_eq('H23b and the failure is applied against that same attempt',
+    del ->> 'applied_effect', 'attempt_failed');
+
+  v := pg_temp.s10f_sum(s.owner_a::text, wed_f::text);
+  PERFORM pg_temp.s10f_eq('H24 the host can be told the attempt failed, which is the state the brief asks for',
+    v ->> 'state', 'payment_attempt_failed');
+  PERFORM pg_temp.s10f_eq('H25 while the order it was read from still says pending, because the state is derived',
+    v ->> 'order_status', 'payment_pending');
+  PERFORM pg_temp.s10f_eq('H26 the answer names which attempt it read, so the sentence is retraceable',
+    v ->> 'attempt_status', 'failed');
+  PERFORM pg_temp.s10f_eq('H27 and a failed attempt grants nothing: no entitlement status is in the answer',
+    coalesce(v ->> 'entitlement_status', '(none)'), '(none)');
+  PERFORM pg_temp.s10f_absent('H28 and the new state leaks no price: this arm is quoted on the unapproved row',
+    v #>> '{}', ARRAY['amount_minor', 'currency']);
+  PERFORM pg_temp.s10f_absent('H29 nor does it carry the provider''s own object names, which a host never needed',
+    v #>> '{}', ARRAY['provider_order_ref', 'provider_payment_ref']);
+
+  -- The derivation follows the *newest* attempt, so a second try in flight reads as pending again rather
+  -- than keeping the previous failure on the screen after the customer has already retried.
+  del := pg_temp.s10f_deliver('h-f-init2', 'payment_initiated', ref_f, 199900, 'po_h_f2', NULL,
+    s.owner_a, now());
+  PERFORM pg_temp.s10f_eq('H30 a second initiation on a pending order is §4''s attempt_recorded, not a re-initiation',
+    del ->> 'applied_effect', 'attempt_recorded');
+  PERFORM pg_temp.s10f_eq('H30b and it really is a second attempt object, which is the row the derivation now reads',
+    (SELECT count(*) FROM private.commerce_payment_attempts WHERE order_id = ord_f), 2::bigint);
+  v := pg_temp.s10f_sum(s.owner_a::text, wed_f::text);
+  PERFORM pg_temp.s10f_eq('H31 and the host now reads pending, not the older failure',
+    v ->> 'state', 'payment_pending');
+  PERFORM pg_temp.s10f_eq('H32 with the newer attempt named, so the two readings differ by the row they read',
+    v ->> 'attempt_status', 'initiated');
+
+  -- This arm's own rows, removed the way H20 removed its quote, so the digest this file closes on is the
+  -- reading taken before it. Order of deletion is the foreign keys' order: evidence, then attempts, then
+  -- the order, then the wedding the order pointed at (money rows reference weddings NO ACTION, §11).
+  DELETE FROM private.commerce_payment_events WHERE event_id IN ('h-f-init', 'h-f-fail', 'h-f-init2');
+  DELETE FROM private.commerce_payment_attempts WHERE order_id = ord_f;
+  DELETE FROM private.commerce_orders WHERE id = ord_f;
+  DELETE FROM private.audit_events WHERE subject_key = ord_f;
+  DELETE FROM public.weddings WHERE id = wed_f;
+  PERFORM pg_temp.s10f_eq('H33 the failed arm left nothing behind, and the money state is the earlier reading',
+    pg_temp.s10f_money(), base);
 END $proj$;
 
 -- --------------------------------------------------------------------------- V. the paid-status forgery suite
