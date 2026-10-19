@@ -2,9 +2,11 @@
 
 Branch `stage10/commerce-entitlements`. The stage opened on `main` at `6ac1a6765…` plus ChatGPT's
 `e94c53e docs(stage10): pin commerce threat model and provider-neutral kickoff`; **20 commits** join
-`6ac1a67` and this pass's head (`git rev-list --count 6ac1a67..HEAD`), 19 of them after the kickoff
-commit. The code head this file certifies is `b81c441d969f620bff0fbd036672026b12e8e72d`; the docs slices
-that follow it are listed in §13 with their read-backs. Working clone
+`6ac1a67` and `b81c441` (`git rev-list --count 6ac1a67..b81c441`), 19 of them after the kickoff commit, and
+**21** join it to the first docs head `1f3cf3e` — §13's ledger is what keeps those two numbers traceable to
+the slices. The code head every tier below was driven from is
+`b81c441d969f620bff0fbd036672026b12e8e72d`; the docs slices that follow it change prose, not inputs, and each
+is listed with its read-back. Working clone
 `Documents/Qoder/2026-09-24/37be0a2a/s5qual`. `main` was not modified, nothing was deployed, no hosted
 Supabase project was contacted, GitHub Actions was not used, no live payment order was created, no
 customer was charged, and Stage 11 was not begun.
@@ -256,6 +258,23 @@ All seven gates at `b81c441`, each with its exit code read from the adjacent `ec
 bundle checker checked, and the chunk names in §6 are the names in `dist/assets/`. The two commits after
 `b6556f5` touch only `scripts/`.
 
+**Re-taken at the docs head.** §12's slice carries documentation only — no `src/`, `scripts/`, SQL or
+migration byte — so it needed the gate set run over it, not a re-measurement of any tier. It was run twice:
+once across the working tree on its way to being a commit (`s10-headgate3-*`, seven captures, every one
+`exit_code=0`) and once at the commit itself (`s10-headgate4-*`, seven captures, each opened with
+`# head 1f3cf3e09f21605620f6f381d5d230735a696a7e` and closed by its adjacent `gate=<id> exit_code=…` line).
+Only the `-4` set is a head certification; the `-3` set names no head, because it was captured before the
+SHA existed, and it stays as the measurement the edits were checked against rather than being deleted. Their
+counts are not restated here, for the reason Stage 6 §22.7 and Stage 7 both recorded: a section that
+publishes gate numbers is itself a docs-only head that then needs its own, which is a regress the evidence
+directory exists to absorb. The rule this pass follows instead is that **the commit carrying a further docs
+edit to this file is certified by the next capture set in `q10-logs/`, whose numbers stay in those logs** —
+so no prose in this file is ever one commit stale about a measurement it quotes.
+
+`dist/` was not rebuilt for either set. That is a deliberate omission, not a gap: the diff is
+documentation-only, so the bytes §6's browser tier drove are still the bytes `bundle:check` reads, and the
+build is a separate measurement from the seven node gates rather than one of them.
+
 ## 11. Residue on the shared stack, and the two scoped statements that cleared it
 
 `localvivaahvarnam` is shared with DueWeave, so a reset was never an option and a broad `delete` is never
@@ -339,8 +358,7 @@ reason a retired row's timestamp agrees with its status, which is a different cl
 | `7a2eeb6` | the `client-side-checkout-affordance` rule in the checker and the copy | — |
 | `3071462` | driver reports the database's own refusal sentence | `q10-logs/push-driver-lsremote.txt`, `push-driver-gh.txt` (that pair is the `4a8950d` era capture kept as the instrument's history) |
 | `b81c441` | the browser tier, 893 lines | `q10-logs/s10-readback-b81c441-lsremote.txt` and `s10-readback-b81c441-gh.txt`, both `b81c441d969f…`, equal to local HEAD |
-| the §12 truth sync | the six tracked files whose status sentences Stage 10 falsified | branch-only push; read back with both instruments and captured in `q10-logs/s10-readback-s10docs-lsremote.txt` and `s10-readback-s10docs-gh.txt` |
-| this file | the evidence record | the same push pair — the two logs name both SHAs, because a commit's own hash is not knowable while it is being written |
+| the §12 truth sync + this file | one docs-only slice, `1f3cf3e` — 7 files, 494 insertions: the six tracked files whose status sentences Stage 10 falsified, plus this evidence record | branch-only push (`b81c441..1f3cf3e`, `push_exit_code=0`); read back with both instruments and captured in `q10-logs/s10-readback-s10docs-lsremote.txt` and `s10-readback-s10docs-gh.txt`, both `1f3cf3e09f21…` and equal to local HEAD. A commit's own hash is not knowable while it is being written, which is why the row says "`1f3cf3e`" only now, over the read-back logs |
 
 `git ls-remote` plus `gh api …/git/ref/heads/stage10/commerce-entitlements` are the two instruments; the
 local `origin/stage10/commerce-entitlements` tracking ref is not, because this clone's fetch refspec is
