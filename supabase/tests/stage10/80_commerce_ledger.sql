@@ -14,8 +14,8 @@
 -- message, a wrong amount, a wrong currency, a cross-provider confirmation, a cancellation after money,
 -- or money moving the other way.
 --
---   F  the shipped defaults and the cast: three weddings, two owners, five price rows, six quotes
---   P  §4.2's input refusals and the empty-catalogue refusal, each as SQLSTATE *and* sentence
+--   F  the shipped defaults and the cast: three weddings, two owners, five price rows, six quotes; then
+--      §4.2's input refusals and the empty-catalogue refusal (F08..F18), each as SQLSTATE *and* sentence
 --   Q  the frozen quote: what it copies, what it mints, what it refuses to sit beside, its audit row
 --   D  initiation and capture: the two objects, the two timestamps, the one entitlement, the replay
 --   H  the holds: forged signature, undeclared environment, live capture, unknown order, wrong amount,

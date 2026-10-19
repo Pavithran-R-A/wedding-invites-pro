@@ -71,7 +71,8 @@
 # It does not prove PostgREST, Supabase Auth, the Storage API or an HTTP webhook endpoint: no provider
 # signature is verified here (that is `scripts/stage10-webhook-core.mjs` and the HTTP tier), no
 # `x-provider` header is read by a gateway, no browser opens a pricing panel, and no customer is charged.
-# See docs/audits/stage-10-commerce-foundations.md.
+# The measured tier claims for these batteries, and what each tier is allowed to claim, are in
+# docs/architecture/commerce-foundations.md §13 (threat → control → case id) and §14 (tiers).
 set -euo pipefail
 
 cd "$(dirname "$0")/../../.."   # -> repo root

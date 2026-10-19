@@ -243,7 +243,7 @@ as `scripts/stage9-publish-core.mjs` — with one adapter per provider, and the 
 the facts a successful verification produced.
 
 Contract, provider-neutral, as shipped in `scripts/stage10-webhook-core.mjs` and pinned case by case in
-`scripts/stage10-webhook-core.test.mjs` (WH-00..WH-42):
+`scripts/stage10-webhook-core.test.mjs` (WH-00..WH-46):
 
 ```
 verifyRazorpayWebhook({ rawBody, headers, secret, environment, now?, timestampToleranceMs? })
@@ -278,7 +278,8 @@ The refusal vocabulary is closed, so a caller can branch on it without guessing:
 `unsupported_currency`, `payment_status_unrecognised`, `amount_unrepresentable`, `amount_not_positive`,
 `amount_out_of_range`.
 
-Two rules decided during implementation, because the byte-shape reality forced them:
+Rules decided during implementation, because the byte-shape reality and the ledger's single reference
+column forced them:
 
 - **An unrecognised provider event is recorded, not refused.** Its kind is `other` and it carries no
   facts. A provider adding an event type must not be able to make this build act on something it has not
@@ -288,6 +289,14 @@ Two rules decided during implementation, because the byte-shape reality forced t
   authorises an entitlement would have no subject. A refund or chargeback delivery is recorded with
   whatever it names: refusing one for the shape of a payment webhook would discard exactly the evidence
   §9's hold-for-review and the reconciliation findings are built to read.
+- **A non-payment delivery names its own identity in `providerPaymentRef`.** The ledger has one reference
+  argument for a delivery that is not a payment, and it writes that argument into
+  `private.commerce_refunds.provider_refund_ref` — the column a person reads to find the movement again at
+  the provider. So a refund or chargeback puts its own id there (`rfnd_…`, `refund_id`, `chargeback_id`)
+  and the payment it concerns is only the fallback, while a cancellation — whose subject is an order, whose
+  id already has `providerOrderRef` — puts no order id there at all, because
+  `commerce_attempts_payment_ref_uk` is unique on `(provider, provider_payment_ref)` and an order id in
+  that slot would collide with the payment that arrives later. WH-43..WH-46 pin it on both adapters.
 
 The two adapters, as read from public documentation on 2026-10-17:
 
@@ -357,11 +366,18 @@ Instead, a `BEFORE INSERT ... FOR EACH ROW EXECUTE` and a matching `BEFORE UPDAT
 
 - `publish_gate = 'permissive'` (the shipped default) → no behaviour change. The four free capabilities
   in `v1-scope.md` — sign up, draft, preview, and a guest reading the invitation — keep working, and
-  the 367 HTTP cases and every historical SQL chain that publishes stay green without being weakened.
+  the other nine HTTP suites (368 executed cases, all of them green at this head) and every
+  historical SQL chain that publishes stay green without being weakened.
 - `publish_gate = 'entitlement_required'` → publication demands an `active` row in
   `public.entitlements` for that wedding whose `package_code` is in
   `publish_required_package_codes`. With the default empty set, **nothing can publish** — an owner
   turning the gate on without naming a package is refused rather than silently sold nothing.
+- An empty list is refused with the words `(none named)`, not with `[]`. `array_to_string` of an empty
+  array is `''`, not `NULL`, so the original `coalesce(array_to_string(…), ', '), '(none named)')`
+  could never reach its own fallback and the operator read `for one of []`;
+  `20261019120000_stage10_publish_gate_empty_list.sql` repairs it with `nullif(btrim(…), '')`, and
+  SQL cells `G05c`–`G05g` hold both halves — the empty list says none, the populated list still names
+  the code.
 - The trigger never reads a client argument for its decision; it re-derives from the row's own
   `wedding_id`, which is why a stale tab and a racing webhook land on the same answer.
 
@@ -448,38 +464,48 @@ Stage 10 pretends to have recovered an event we never received.
 
 ## 13. Threat model → control → test
 
-Case ids are the ones the SQL (`supabase/tests/stage10/*`), unit (`scripts/*.test.mjs`) and HTTP
-(`supabase/tests/api/stage10_commerce.test.mjs`) tiers print.
+Case ids are the labels the tiers actually carry, and there are **three disjoint vocabularies**, because
+each tier names its own cells: the unit tier uses `WH-00..WH-46` (`scripts/stage10-webhook-core.test.mjs`)
+and `CD-01..CD-42` (`scripts/stage10-commerce-driver.test.mjs`); the SQL batteries use a bare letter and
+two digits — battery 1 `80_commerce_ledger.sql` carries `F Q D H S C R X K Z` and battery 2
+`90_commerce_functions.sql` carries `A C G H N R T V Z`, each with one shared id `L01` (the count floor,
+the last assertion the file makes about itself), with the reachability and table-boundary matrices
+generating their own labels at run time — and both print `NOTICE: PASS <id> <sentence>` per cell, which the
+runner counts (`supabase/tests/stage10/run.sh:162`); the HTTP tier dashes them (`D-01..D-16`, `G-01..G-08`,
+`N-01..N-05`, `P-01..P-16`, `R-01..R-11`, `S-01..S-11`, `Z-01..Z-04`) and prints them as test names.
+A citation here that no tier carries is a claim, not evidence, which is why this preamble was written
+after the ids were re-derived from the three files rather than from the design draft.
 
 | Threat | Control | Cases |
 | --- | --- | --- |
-| Client `INSERT`/`UPDATE` sets its own paid state | `private` unreachable over REST, no client grants, no RLS policy, `reject_client_write`/`reject_client_delete` | RB-01..05 (anon, owner A, owner B, `service_role`-as-browser, direct `entitlements` write) |
-| Browser supplies a price | no amount/currency parameter exists on the order-creating function | QU-02, QU-03 |
-| Unapproved price surfaced | catalogue has no active row; DTO omits amount when `display_approved` is false | PR-01..04 |
-| Forged webhook signature | verify over raw bytes, constant-time compare, `rejected_signature` records and applies nothing | WH-01..WH-03, WH-20..WH-23, EV-01 |
+| Client `INSERT`/`UPDATE` sets its own paid state | `private` unreachable over REST, no client grants, no RLS policy, `reject_client_write`/`reject_client_delete` | battery 2 `V01..V15` (every write a host can imagine about its own purchase), group `T` (the boundary measured four ways: catalog privilege, RLS posture, trigger wiring, live DML refusal by three roles over the six tables), `N01..N04b`; HTTP `N-01..N-04` |
+| Browser supplies a price | no amount/currency parameter exists on the order-creating function | battery 1 `Q01` (the amount is the active price row's, "not of any argument"), `Q03`; HTTP `P-03`, `P-08` |
+| Unapproved price surfaced | catalogue has no active row; DTO omits amount when `display_approved` is false | battery 1 `F06..F11`; battery 2 `H18`; HTTP `P-01..P-07`, `S-11` |
+| Forged webhook signature | verify over raw bytes, constant-time compare, `rejected_signature` records and applies nothing | unit `WH-01..WH-16`; battery 1 `H01..H14`; HTTP `D-11`, `D-13` |
 | Tampered body around a valid signature | same, plus digest recorded | WH-03, WH-04, WH-23 |
 | One provider's digest presented to the other's scheme | each header checked for the encoding its own scheme requires, before comparison | WH-05, WH-21, WH-22 |
 | Wrong/absent timestamp on a timestamped scheme | Cashfree's signed string includes the timestamp, so a window is enforceable; Razorpay's does not, so the knob is inert there | WH-23, WH-24, WH-25 |
 | Body parsed before verifying, so a proxy's re-serialisation passes | signature first, JSON second | WH-04, WH-06 |
 | Amount rounded, truncated or too wide for the column | string arithmetic, no rounding, safe-integer ceiling | WH-30..WH-33 |
-| Replayed event | `UNIQUE (provider, event_id)`; second delivery returns the first answer | EV-02, EV-03 |
-| Out-of-order delivery | capture applied on its own evidence; missing initiation becomes a finding | EV-04, RC-01 |
-| Late event after a newer one | `stale`, no state change | EV-05 |
-| Wrong amount / wrong currency | `held_for_reconciliation`, order never re-priced | EV-06, EV-07, RC-05 |
-| Wrong environment (live events while live is off) | `live_capture_enabled` default false | EV-08 |
-| Cross-wedding attack | wedding reached through the order; ownership re-derived on every read and write | CO-03, HD-02, RB-03 |
-| Merchant-reference guessing / substitution | unique server-minted reference, signature over the body that names it | QU-04, EV-09 |
-| Browser callback forgery, even with a valid signature | no function accepts a browser-supplied signature | WH-12, WH-41, CB-01, CB-02 |
+| Replayed event | `UNIQUE (provider, event_id)`; second delivery returns the first answer | battery 1 `D09`, `D12`, `D16`, `H15..H17`; HTTP `D-02`, `D-16` |
+| Out-of-order delivery | capture applied on its own evidence; missing initiation becomes a finding | battery 1 `S06..S10` and `K02`, `K03`; the reverse order at `S11..S13` |
+| Late event after a newer one | `stale`, no state change | battery 1 `S01..S03`; HTTP `D-09` |
+| Wrong amount / wrong currency | `held_for_reconciliation`, order never re-priced | battery 1 `H34`, `H35`, `H38..H40`, `K18`; HTTP `D-06` |
+| Wrong environment (live events while live is off) | `live_capture_enabled` default false | battery 1 `F04`, `H20`, `H24`, `H26..H28`, `Z11`, `Z12`; HTTP `D-12`, `Z-02` |
+| Cross-wedding attack | wedding reached through the order; ownership re-derived on every read and write | battery 1 `F13..F15`; battery 2 `R05..R09`; HTTP `P-08`, `S-06`, `S-07 and S-08`, `S-10` |
+| Merchant-reference guessing / substitution | unique server-minted reference, signature over the body that names it | battery 1 `Q05`; battery 2 `A07`, `A10`; HTTP `D-07` |
+| Browser callback forgery, even with a valid signature | no function accepts a browser-supplied signature | unit `WH-12`, `WH-41`; battery 2 `N05`, `N06`; HTTP `N-02`, `N-05` |
 | A secret echoed back through a refusal or a log line | every branch returns a reason name, and each branch is scanned for the secret it was given | WH-01, WH-02, WH-42 |
-| Double-clicked / parallel checkout | partial unique live order per wedding+package | QU-05, QU-06 |
-| Duplicate capture (two events, one truth) | state machine refuses a second grant; `captured` is terminal for granting | EN-02, EN-03 |
-| Refunded order / chargeback | refund row, `hold_for_review` default, revocation only through the trusted path | RF-01..05 |
-| Publish without paying | `publications` trigger under `entitlement_required` | PG-01..04 |
-| Stale tab publishes after a race | the gate is at the row, so the last writer is checked, not the last clicker | PG-03 |
-| Accidental cascade deletion of money history | NO ACTION to weddings, SET NULL to users | DL-01, DL-02 |
-| Ledger rewritten after the fact | absolute no-UPDATE trigger | EV-10 |
-| Provider outage / drift | held rows + reconciliation sweep | RC-02, RC-03 |
-| A new migration quietly exposes a money table | `40_catalog.sql` inventories under `st2_at_least('stage10')`, `check-db-contract.mjs` `NON_CLIENT_SCHEMAS`, `product:check` service-key rule | CD-01..03 |
+| Double-clicked / parallel checkout | partial unique live order per wedding+package | battery 1 `Q12..Q14`; HTTP `P-12` |
+| Duplicate capture (two events, one truth) | state machine refuses a second grant; `captured` is terminal for granting | battery 1 `D33`, `D35`, `D38` |
+| Refunded order / chargeback | refund row, `hold_for_review` default, revocation only through the trusted path | battery 1 `R01..R31`; HTTP `R-01..R-11` |
+| A refund recorded as the payment it reverses, so the reader is sent to the charge | the verifier puts the refund's or chargeback's own id in the single reference slot a non-payment delivery has; the payment id is only the fallback | unit `WH-43..WH-46`; battery 1 `R02`; HTTP `R-01`, `R-05` |
+| Publish without paying | `publications` trigger under `entitlement_required` | battery 2 `G01..G22`; HTTP `G-01..G-06`, `G-08` |
+| Stale tab publishes after a gate change | the gate is at the row, so the answer is derived at write time from the policy and the wedding's own `wedding_id`, not from the click | battery 2 `G03`, `G04`, `G12`, `G13`, `G16b`; HTTP `G-03`, `G-07`. **No concurrent two-writer test exists** — the re-derivation is proven by changing the policy mid-transaction and re-asking, not by racing |
+| Accidental cascade deletion of money history | NO ACTION to weddings, SET NULL to users | **no cell asserts this in any tier yet.** `N04` proves no browser role holds DELETE and `Z08` proves the run deleted nothing, but nothing deletes a *wedding* and reads back the money rows. Recorded as an open finding, not a pass |
+| Ledger rewritten after the fact | absolute no-UPDATE trigger | battery 2 `T73..T79`, `T85`; HTTP `D-15`, `D-16` |
+| Provider outage / drift | held rows + reconciliation sweep | battery 1 `K02..K34`; HTTP `R-08`, `R-11` |
+| A new migration quietly exposes a money table | `40_catalog.sql` inventories under `st2_at_least('stage10')`, `check-db-contract.mjs` `NON_CLIENT_SCHEMAS`, `product:check` service-key rule | `supabase/tests/stage2/40_catalog.sql` (run at the Stage 10 head in the `all` chain), the two Node contract checkers, battery 2 `N07..N11`. These instruments assert by inventory, not by numbered case id; the unit tier's `CD-` prefix is this stage's *commerce driver*, not a catalogue defence |
 
 ## 14. Tiers, and what each is allowed to claim
 
@@ -487,25 +513,71 @@ Case ids are the ones the SQL (`supabase/tests/stage10/*`), unit (`scripts/*.tes
    DTO projection, the state-machine edge table as data. Runs with no database, so it works under the
    disk constraint the host is currently in.
 2. **SQL battery** — `supabase/tests/stage10/80_commerce_ledger.sql`, `90_commerce_functions.sql`,
-   driven by `supabase/tests/stage10/run.sh` with `commerce|guest|family|historic|all`, in a throwaway
-   database built from the migration chain, and `40_catalog.sql` widened behind the head gate.
-3. **HTTP battery** — `supabase/tests/api/stage10_commerce.test.mjs` against the live
+   driven by `supabase/tests/stage10/run.sh` with `commerce|render|guest|family|historic|all`, in a throwaway
+   database built from the migration chain, and `supabase/tests/stage2/40_catalog.sql` widened behind the
+   head gate.
+3. **HTTP battery** — `supabase/tests/api/stage10_commerce_http.test.mjs` against the live
    `localvivaahvarnam` stack through Kong/PostgREST: what a browser can and cannot reach, plus the
-   host DTO. `api/run.sh`'s `leak_census` (`:105-123`) gains the new stores so residue is measured, not
-   assumed.
+   host DTO. `api/run.sh`'s `leak_census` (`:114-139`) gained seven stores — the six
+   `private.commerce_*` tables and `public.entitlements` — and a closing check at `:251` proves the
+   policy singleton is back at `permissive/(none)`, so residue is measured rather than assumed. Its §3
+   preconditions now refuse to run against a stack whose recorded migrations are behind the repository,
+   instead of advising a reset.
 4. **Browser tier** — the host panel's states, and proof that guest and RSVP routes gained no payment
    dependency. Requires headroom; if it cannot run, it is reported as unrun.
 5. **Regressions** — every historical chain and suite. A foundation that weakens Stage 3's publication
    or Stage 8's guest privacy is not a foundation.
 6. **Sandbox tier** — **not run.** No credentials, no provider contact.
 
-**Measured versus pending, as of this writing.** Tier 1 has been run: the verifier core's 32 WH cases
-pass on Node alone, with no engine, no network and no provider, and the whole unit suite is green at
-1279 tests across 59 files. Tiers 2, 3, 4 and 5 have **not** been run against the Stage 10 schema,
-because the migration that creates it is written next and an engine is not currently available to this
-host; the EV, QU, ST, EN, RF, PG, HD, RC, RB, CB, DL and CD cases named above are therefore promises
-the rest of this stage has to discharge, not results. Reading any of them as a pass would be exactly
-the claim class Stage 0 was written to remove.
+**Measured versus pending, as of this writing.** Every number below was read out of a run log taken at
+this tree. The logs live in `q10-logs/` beside the working copy, not inside the repository: they are
+task-owned evidence for this pass, and the cited path below each number is that directory's file name.
+Anything not measured is named as unrun.
+
+- **Tier 1 — measured.** `npx vitest run` → 1327 tests across 60 files, exit 0
+  (`q10-logs/s10-unit-final-1.txt`, re-run over this tree as `q10-logs/s10-unit-truthsync-2.txt`; the
+  passes in between, `s10-node-truthsync-1.txt` and `s10-unit-truthsync-1.txt`, gave the same totals).
+  Stage 10's own share is 79:
+  `stage10-webhook-core.test.mjs` 36 cases
+  (`WH-00..WH-46`, the gaps at 17–19, 28–29 and 34–39 being deliberate — one id per rule, not one per
+  arrangement) and `stage10-commerce-driver.test.mjs` 43 (`CD-01..CD-42`). No engine, no network, no
+  provider.
+- **Tier 2 — measured on two engines, and they agree.** `run.sh commerce` with `STAGE10_LOCAL=1` on the
+  host's native `PostgreSQL 17.10` → ledger 291, functions 277 (`q10-logs/s10-sql-truthsync-3.txt`,
+  re-run over this tree as `q10-logs/s10-sql-truthsync-4.txt`).
+  `run.sh all` with no local override starts the engine the product ships on, `postgres:16-alpine`,
+  rebuilds six chains and comes back green on every suite — Stage 10 291/277, Stage 9 134/94,
+  Stage 8 182/185, Stage 7 255/116, Stage 2 50/464/106/77, Stage 3 46/49/284, Stage 4 428/57,
+  Stage 5 122/50/124, Stage 6 91/80 — 66 `PASSED (n)` lines, no `!!`, no FAIL, exit 0
+  (`q10-logs/s10-sql-pg16-all-1.txt`). The two logs' suite-total multisets differ in exactly one number,
+  functions 276 → 277, and that is the `G05h` cell added between the runs, not the engine
+  (`q10-logs/s10-sql-all-repair-1.txt` is the earlier 17.10 sweep). This closes the parity question this
+  stage had recorded as owed: the batteries are no longer proven only on a Windows-native 17.10.
+- **Tier 3 — measured, and the arm that was red is now green.** `supabase/tests/api/run.sh` runs the ten
+  HTTP suites against the live `localvivaahvarnam` stack and exits 0: stage10 67, stage3_publication 39,
+  stage3_security 56, stage4 28, stage5_admin_cli 36, stage5_pack_driven 28, stage6 34, stage7 61,
+  stage8 56, stage9 30 → **435 executed cases, 0 failures**, with all seven money stores back to 0 rows
+  (policy singleton 1) and the posture check reading `permissive/(none)`
+  (`q10-logs/s10-http-full-1.txt`). Quote executed counts, not `test(` occurrences: the other nine suites
+  hold 339 literal `test(` sites but execute 368 cases, because several generate cases in loops.
+  The same battery's history stays in the record: at 2026-10-19 12:5x it ran 67 tests / 66 pass / 1 fail
+  with `G-02` red, because the stack still ran the pre-repair publish-gate function
+  (`q10-logs/http-s10http-1792394672-r10.txt`, `node_test_code=1`) — and that run was *suite-only*, so the
+  census and posture checks in the same commit had not been executed at all. The assertion was not
+  adjusted to match a schema that was behind: `20261019120000_stage10_publish_gate_empty_list.sql` was
+  applied to this repository's own local stack with `npx supabase db push --local --skip-vault` after a
+  `--dry-run` showed exactly one pending file (journal 25 → 26), once the Docker daemon was running again.
+- **Tier 4 — unrun.** The browser tier has not been executed at the Stage 10 head, and it cannot be yet:
+  §11's host panel is the next slice, so there is no pending/failed/cancelled/verified UI to drive. Nothing
+  here is evidence about a rendered page.
+- **Tier 5 — measured on both halves.** The `run.sh all` sweep above is the historical SQL regression at
+  this head, and the ten-suite chain in Tier 3 is the historical HTTP regression: Stage 3's publication and
+  security suites, Stage 8's guest privacy and Stage 9's delivery suite all pass with Stage 10's schema and
+  grant surface present.
+- **Tier 6 — not run by design**, per §15's open provider decision.
+
+Reading any unrun line as a pass, or any red arm as a near-miss, is the claim class Stage 0 was written
+to remove.
 
 ## 15. Open decisions that are genuinely the owner's
 
