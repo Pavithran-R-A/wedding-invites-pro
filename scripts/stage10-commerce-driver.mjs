@@ -430,10 +430,17 @@ function runPsql(target, text) {
       + 'how the wrong database gets a payment event.', 1);
   }
   if (res.status !== 0) {
-    const text2 = `${res.stderr ?? ''}${res.stdout ?? ''}`.trim().split('\n').pop() ?? 'the statement failed';
     // The database's own sentence, first line only: it names the constraint or the RAISE that fired,
     // which is the thing an operator needs, and it cannot contain a credential.
-    throw Object.assign(new Error(text2.slice(0, 300)), { exitCode: 1 });
+    // `psql` writes `ERROR:` first and its `CONTEXT:`/`DETAIL:` frames after it, so the last line of
+    // stderr is the *least* informative one — taking `.pop()` printed
+    // "PL/pgSQL function internal_api.record_commerce_event(...) line 231 at SQL statement" and dropped
+    // the unique constraint beneath it, which is how a fixture collision on the shared stack was
+    // mistaken for a substrate fault (measured 2026-10-19, second run of `stage10-browser-commerce.mjs`).
+    const lines = `${res.stderr ?? ''}${res.stdout ?? ''}`.split('\n')
+      .map((line) => line.trim()).filter((line) => line.length > 0);
+    const refusal = lines.find((line) => /^ERROR:/.test(line)) ?? lines[0] ?? 'the statement failed';
+    throw Object.assign(new Error(refusal.slice(0, 300)), { exitCode: 1 });
   }
   return res.stdout.trim();
 }
