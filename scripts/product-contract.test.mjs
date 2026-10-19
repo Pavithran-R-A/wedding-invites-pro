@@ -5,6 +5,7 @@ import {
   RULES,
   SHIPPED_GUEST_DOOR_COPY,
   SHIPPED_REVIEWER_COPY,
+  SHIPPED_COMMERCE_COPY,
   isScannedPath,
   scanContent,
   scanRepository,
@@ -66,6 +67,10 @@ describe("product contract checker", () => {
         // download it. The line is the harness owner's own import, which is why the rule's only
         // exemption has to be a path: `src/pages/Index.tsx` is not it.
         `import { create } from "qrcode/lib/core/qrcode.js";`,
+        // `client-side-checkout-affordance` — Stage 10's §12 guard, and the reason it is a call shape
+        // rather than a word: this build exposes no function that starts a payment, so a line like this
+        // can only be a second door. The sentences it must *not* eat are pinned cell by cell below.
+        `const { data } = await supabase.schema('api').rpc('commerce_initiate_payment', { p_wedding_id: id });`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());
@@ -285,6 +290,58 @@ describe("product contract checker", () => {
     for (const sentence of SHIPPED_GUEST_DOOR_COPY) {
       expect(shippedGuestDoorSource, sentence).toContain(sentence);
       expect(MUST_NOT_MATCH, sentence).toContain(sentence);
+    }
+  });
+
+  it("pins Stage 10's payment refusals to the copy the money panel actually prints", () => {
+    // Two questions, both asked of shipped source. First: are these the sentences? §12's guard is a
+    // source-level shape rule, so its value depends on the panel still *saying* it takes no money — the
+    // same reason Stage 7 and Stage 8 read their refusal copy back out of the files that print it.
+    // Second: does the new rule stay narrow? The generic allow-list is scanned at a `docs/` path, and the
+    // checkout rule is scoped to `src/`, so nothing else in this file would notice if the rule that
+    // forbids a pay button also ate the sentence explaining why there isn't one.
+    const commerceSourcePaths = [
+      "src/components/invitation/CommerceStatusPanel.tsx",
+      "src/lib/commerceStatus.ts",
+      "src/integrations/supabase/commerceStatus.ts",
+      "src/components/landing/HowItWorksSection.tsx",
+    ];
+    // Collapse each line's leading comment marker before joining, because two of the sentences below are
+    // written as `//` prose and wrap across lines: a plain whitespace collapse would keep the `//` in the
+    // middle of the sentence and match nothing. Code lines are untouched by the transform, so the
+    // planning-list entry is still read from the string it is written in.
+    const shipped = commerceSourcePaths
+      .map((path) =>
+        readFileSync(path, "utf8")
+          .split(/\r?\n/)
+          .map((line) => line.trim().replace(/^\/{2,}\s*/, ""))
+          .join(" ")
+          .replace(/\s+/g, " "),
+      )
+      .join(" ");
+    for (const sentence of SHIPPED_COMMERCE_COPY) {
+      expect(shipped, sentence).toContain(sentence);
+      expect(MUST_NOT_MATCH, sentence).toContain(sentence);
+      expect(scanContent("src/components/invitation/CommerceStatusPanel.tsx", sentence), sentence)
+        .toEqual([]);
+    }
+
+    // The rule's own precision, at the two paths that decide whether it is worth having: the one money
+    // read this build makes stays clean where it is written, and a checkout door is a finding everywhere
+    // in `src/` — including inside the module that owns the read.
+    expect(
+      scanContent(
+        "src/integrations/supabase/commerceStatus.ts",
+        `const { data } = await supabase.schema('api').rpc('commerce_host_summary', { p_wedding_id: weddingId });`,
+      ),
+    ).toEqual([]);
+    for (const path of [
+      "src/integrations/supabase/commerceStatus.ts",
+      "src/components/invitation/CommerceStatusPanel.tsx",
+      "src/pages/EditProject.tsx",
+    ]) {
+      const hits = scanContent(path, `<Button onClick={() => startPayment(weddingId)}>Pay now</Button>`);
+      expect(hits.map((v) => v.rule), path).toContain("client-side-checkout-affordance");
     }
   });
 

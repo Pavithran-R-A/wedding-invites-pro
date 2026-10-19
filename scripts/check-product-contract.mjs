@@ -480,6 +480,44 @@ export const RULES = [
     scope: ["src/"],
     exclude: ["src/render/qrPlate.ts"],
   },
+  {
+    id: "client-side-checkout-affordance",
+    // §12 of `docs/architecture/commerce-foundations.md` refuses a browser session any way to start a
+    // payment, and Stage 10's host panel is the first surface that talks about money to a customer, so
+    // the refusal needs a keeper. The design note's own row names this rule set as that keeper, which is
+    // how §12 became a fact about this repository rather than a paragraph.
+    //
+    // Shapes, not nouns, in the Stage 4 sense: a sentence denying a checkout has to stay writable
+    // ("there is no checkout yet", "no initiation call", "starts no payment"), while a call that *makes*
+    // one has no legitimate use here. So each alternative is an operator or an imperative, and a bare
+    // identifier is only a finding when it is applied — `startPayment` in a comment is prose,
+    // `startPayment(` is a door.
+    //
+    // The label arms are the exception, and they cost something: a denial that quotes a label exactly is
+    // itself a finding. This was measured rather than predicted — the first draft of the citation this
+    // rule protects, written in the header of the panel it guards, named the two-word label and fired
+    // `product:check` on its own file. So shipped prose says "a pay-button label", and the exact strings
+    // live only in the fixtures below and in `docs/architecture/`, which is outside this rule's scope.
+    //
+    // Measured before writing, because a rule that fires on the shipped surface is a rule that gets
+    // switched off: the twenty-two functions this build exposes in `api` (every
+    // `CREATE FUNCTION api.…` across `supabase/migrations/`) contain none of `initiate`, `checkout`,
+    // `capture`, `refund` or `dispute`, so the first alternative matches nothing today by construction,
+    // not by exemption. And no `src/` file names a provider SDK — `Razorpay` appears only in the cookie
+    // policy's denial, which the noun rule deliberately does not read.
+    //
+    // What this is not: the authority on whether a payment happened. That is the ledger and
+    // `supabase/tests/stage10/80_commerce_ledger.sql`; and the panel's own "nothing to press" claim is
+    // measured on the rendered DOM by `src/test/commerceStatusPanel.test.tsx`, which sweeps the actual
+    // control list in all thirteen states. This rule is the source-level tripwire for the day somebody
+    // adds the affordance the substrate has no door for — the edit that clears it must be the same commit
+    // that adds an exposed function and decides §12 is over.
+    pattern: /(?:\.rpc\(\s*['"`][^'"`]*(?:initiate|checkout|capture|refund|dispute)[^'"`]*['"`]|\b(?:startPayment|initiatePayment|createCheckout\w*|openCheckout|getCheckoutUrl)\s*[(=:]|\bnew\s+Razorpay\b|\bwindow\.(?:Razorpay|Cashfree)\b|checkout\.(?:razorpay|cashfree)\.com|\b(?:pay|buy)\s+now\b|\bproceed\s+to\s+(?:pay|payment|checkout)\b|\b(?:complete|finish)\s+(?:your|the)\s+payment\b)/gi,
+    message: "gives a browser session a way to start, address or promise a payment; §12 keeps this build read-only about money",
+    fix: "the host panel prints a state and a re-read and nothing else — if a checkout is ever built, it needs a new exposed api function, and this rule is edited in the commit that decides §12 no longer applies",
+    scope: ["src/"],
+    exclude: ["src/test/"],
+  },
 ];
 
 /** Copy the reviewer's door prints today, quoted verbatim from `src/pages/FamilyReview.tsx` and
@@ -509,6 +547,26 @@ export const SHIPPED_GUEST_DOOR_COPY = [
   "the answers submitted are not in the shape this invitation records",
   "too many answers in one submission",
   "the same event was answered twice",
+];
+
+/** What Stage 10's money surfaces actually print to refuse a payment, quoted from the shipped sources
+ *  (`src/components/invitation/CommerceStatusPanel.tsx`, `src/lib/commerceStatus.ts`,
+ *  `src/integrations/supabase/commerceStatus.ts` and the landing section's planning list). The rule
+ *  `client-side-checkout-affordance` is scoped to `src/`, so the generic allow-list below — which is
+ *  scanned at a `docs/` path — cannot prove they stay writable against *that* rule; the Stage 10 test cell
+ *  reads them back out of the four files and re-scans them at a `src/` path. They are in
+ *  `MUST_NOT_MATCH` as well, for every rule that carries no scope. Sentences are given in their
+ *  unwrapped form and compared against source whose line breaks and leading `//` markers have been
+ *  collapsed, because three of them wrap in the JSX or the comment they were written in and a fragment
+ *  would pin less than the claim §12 makes. */
+export const SHIPPED_COMMERCE_COPY = [
+  "Nothing here takes money, and pressing anything on it starts no payment.",
+  "Nothing is on sale for this invitation right now, so there is nothing to pay for it yet.",
+  "No figure is printed here. This page shows a price only once that price is approved for display; the amount on your order has not changed by that.",
+  "A figure is recorded for this order, but it is named in a currency this page has no symbol for, so no amount is printed here.",
+  "There is no `startPayment`, no checkout address and no provider name in this file or in the projection it reads",
+  "There is no initiation call, no checkout address and no provider name in this file",
+  "Payment and checkout",
 ];
 
 /** Copy that must stay acceptable: the honest replacement wording, plus planning vocabulary. */
@@ -577,6 +635,10 @@ export const MUST_NOT_MATCH = [
   // widening of that pattern started firing on them, the fix would be the pattern, not the code.
   `import { buildQrPlate } from "./qrPlate";`,
   `import QrCanvas from "./QrCanvas";`,
+  // Stage 10's refusals, on the same terms as the reviewer and household lists: they are the sentences
+  // this build prints to say it takes no money, and a rule about checkout shapes that ate them would be
+  // switched off rather than read.
+  ...SHIPPED_COMMERCE_COPY,
 ];
 
 export function isScannedPath(relativePath) {
@@ -715,6 +777,18 @@ export function selfTest() {
       `import QRCode from "qrcode";`,
       `const { toCanvas } = await import("qrcode/lib/browser.js");`,
       `const png = require('qrcode');`,
+    ],
+    "client-side-checkout-affordance": [
+      `const { data } = await supabase.schema('api').rpc('commerce_initiate_payment', { p_wedding_id: id });`,
+      `const { data } = await supabase.schema('api').rpc('commerce_create_checkout', { p_order_id: orderId });`,
+      `const onClick = () => startPayment(weddingId);`,
+      `const url = await getCheckoutUrl(order);`,
+      `const rzp = new Razorpay({ key: "rzp_test_123" });`,
+      `await window.Cashfree.openCheckout({ sessionId });`,
+      `script.src = "https://checkout.razorpay.com/v1/checkout.js";`,
+      `<Button onClick={pay}>Pay now</Button>`,
+      `<Button>Proceed to payment</Button>`,
+      `<p>Complete your payment to publish.</p>`,
     ],
   };
   for (const [ruleId, fixture] of Object.entries(fixtures)) {
@@ -991,6 +1065,23 @@ export function selfTest() {
   });
   for (const failure of encoderChecks) {
     if (failure) failures.push(failure);
+  }
+
+  // Stage 10's §12 guard has to survive contact with the one money call this build does make. Both lines
+  // below are read at the adapter's own path, which the rule deliberately does not exempt: the read is the
+  // shipped shape and must stay clean, and an initiation call is a finding even inside the module that
+  // would be tempted to grow one — that is what makes the rule a tripwire rather than a vocabulary list.
+  const commerceRead = `const { data } = await supabase.schema('api').rpc('commerce_host_summary', { p_wedding_id: weddingId });`;
+  const commerceReadHits = scanContent("src/integrations/supabase/commerceStatus.ts", commerceRead);
+  if (commerceReadHits.length > 0) {
+    failures.push(
+      `the host summary read was flagged: ${commerceReadHits.map((v) => v.rule).join(", ")}`,
+    );
+  }
+  const commerceWrite = `const { data } = await supabase.schema('api').rpc('commerce_initiate_payment', { p_wedding_id: weddingId });`;
+  if (!scanContent("src/integrations/supabase/commerceStatus.ts", commerceWrite)
+    .some((v) => v.rule === "client-side-checkout-affordance")) {
+    failures.push("an initiation call inside the money adapter was not a finding");
   }
 
   for (const phrase of MUST_NOT_MATCH) {
