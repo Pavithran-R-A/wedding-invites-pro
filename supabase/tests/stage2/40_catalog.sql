@@ -282,7 +282,7 @@ DECLARE
             THEN ARRAY['invitation_outputs(wedding_id)->weddings=NOACTION',
                        'invitation_outputs(wedding_id+version_id)->invitation_versions=NOACTION']
             ELSE ARRAY[]::text[] END
-    -- Stage 10's eight, and the split across them is the whole design of the ledger in one column: the
+    -- Stage 10's nine, and the split across them is the whole design of the ledger in one column: the
     -- rows that *decide* money reference NO ACTION, so a wedding, an attempt or an order cannot be
     -- deleted out from under a live quote; the rows that *record* what arrived reference SET NULL, so a
     -- piece of evidence outlives the row it is evidence about rather than being silently deleted with it
@@ -291,6 +291,15 @@ DECLARE
     -- delete of an order into a refusal to keep the audit, while a CASCADE would destroy exactly the
     -- receipt a dispute is settled with. `commerce_orders.owner_user_id` mirrors `audit_events`: a user
     -- delete nulls the attribution and keeps the row.
+    --
+    -- The ninth edge is the one the redelivery repair added, and it is NO ACTION rather than SET NULL for
+    -- a reason specific to a self-reference: nulling `supersedes_event_row_id` would silently re-root a
+    -- superseded arrival, making it once again the row that owns its provider identity, and a second root
+    -- for one identity is precisely the state the partial unique index exists to refuse. CASCADE is worse
+    -- still — deleting the refused row would delete the corrected capture that followed it. So a delete
+    -- of an earlier ledger row is *refused*, which is the correct outcome for an append-only table whose
+    -- own guards (`commerce_events_append_only_no_update`, `commerce_events_no_client_delete`) already
+    -- mean no ordinary path deletes one at all.
     || CASE WHEN pg_temp.st2_at_least('stage10')
             THEN ARRAY[
               'commerce_orders(wedding_id)->weddings=NOACTION',
@@ -299,6 +308,7 @@ DECLARE
               'commerce_payment_attempts(order_id)->private.commerce_orders=NOACTION',
               'commerce_payment_events(order_id)->private.commerce_orders=SETNULL',
               'commerce_payment_events(attempt_id)->private.commerce_payment_attempts=SETNULL',
+              'commerce_payment_events(supersedes_event_row_id)->private.commerce_payment_events=NOACTION',
               'commerce_refunds(order_id)->private.commerce_orders=NOACTION',
               'commerce_refunds(event_id)->private.commerce_payment_events=SETNULL']
             ELSE ARRAY[]::text[] END;

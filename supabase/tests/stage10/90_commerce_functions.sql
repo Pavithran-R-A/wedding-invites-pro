@@ -436,14 +436,14 @@ BEGIN
   PERFORM set_config('s10f.ord', coalesce((SELECT o.id::text FROM private.commerce_orders o
     WHERE o.merchant_reference = v ->> 'merchant_reference'), ''), false);
 
-  PERFORM pg_temp.s10f_eq('A01 the three cast weddings are each pinned exactly once',
-    (SELECT count(*) FROM public.weddings WHERE title LIKE 'Ledger %'), 3::bigint);
+  PERFORM pg_temp.s10f_eq('A01 the residue is five cast weddings — battery 1''s three, group P''s order and the flap''s own — and the three this file names are the ones pinned above',
+    (SELECT count(*) FROM public.weddings WHERE title LIKE 'Ledger %'), 5::bigint);
   PERFORM pg_temp.s10f_eq('A02 and the three cast users',
     (SELECT count(*) FROM auth.users WHERE email LIKE 's10-%@stage10qual.test'), 3::bigint);
   PERFORM pg_temp.s10f_ok('A03 wedding A carries at least one order, so group R can name a real one',
     (SELECT count(*) FROM private.commerce_orders WHERE wedding_id = s.wed_a) >= 1);
-  PERFORM pg_temp.s10f_eq('A04 the shipped price catalogue is still the cast''s five rows',
-    (SELECT count(*) FROM private.commerce_packages), 5::bigint);
+  PERFORM pg_temp.s10f_eq('A04 the shipped price catalogue is still the cast''s six rows',
+    (SELECT count(*) FROM private.commerce_packages), 6::bigint);
   PERFORM pg_temp.s10f_eq('A05 and the policy row is still the single row the gate reads',
     (SELECT count(*) FROM private.commerce_policy), 1::bigint);
   PERFORM pg_temp.s10f_eq('A06 it is still permissive when this file starts, because G has not run yet',

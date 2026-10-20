@@ -26,6 +26,9 @@
 --      revokes whatever the policy row says
 --   X  expiry: the quote's own clock, and the capture that arrives after it
 --   K  §10's reconciliation: six named findings from real rows, and a sweep that changes nothing
+--   P  the corrected re-delivery: a refused provider event identity that a later, valid delivery of the
+--      same identity must be able to recover — both as a changed body (P04..P23) and as the identical body
+--      delivered a second time with the verdict flipped (P24..P35) (§14's finding 4)
 --   Z  the census this file leaves behind
 --   L  the floor
 --
@@ -48,8 +51,12 @@
 --      being recorded verbatim so a reader sees the posture instead of inferring it.
 --
 -- Nothing here contacts a provider, mints a checkout object or reads a secret: the deliveries are
--- synthesised, with a digest of their own event id in `raw_body_sha256`, and the environment is
--- `synthetic` except in the cells whose whole subject is a live or undeclared environment.
+-- synthesised, and the environment is `synthetic` except in the cells whose whole subject is a live or
+-- undeclared environment. `raw_body_sha256` is a digest of the event id everywhere but in the part of group P
+-- whose subject is one provider event id arriving twice with two *different* bodies (P04..P23), which passes
+-- the digest explicitly through `s10l_deliver_raw`'s last parameter; the flap (P24..P35) is the same
+-- provider identity arriving twice with the same digest and only the verification bit changed, so it leaves
+-- that parameter at its default on both arrivals.
 
 SET client_min_messages = notice;
 SET search_path = public, pg_temp;
@@ -136,15 +143,22 @@ CREATE FUNCTION pg_temp.s10l_wed(n text) RETURNS uuid
 LANGUAGE sql STABLE AS $fn$
   SELECT CASE n WHEN 'a' THEN current_setting('s10l.wed_a')::uuid
                 WHEN 'b' THEN current_setting('s10l.wed_b')::uuid
-                WHEN 'c' THEN current_setting('s10l.wed_c')::uuid END $fn$;
+                WHEN 'c' THEN current_setting('s10l.wed_c')::uuid
+                WHEN 'd' THEN current_setting('s10l.wed_d')::uuid
+                WHEN 'e' THEN current_setting('s10l.wed_e')::uuid END $fn$;
 
 -- One delivery, written once. Errors come back as `_error` rather than aborting the run, so a delivery
 -- the machine cannot answer fails as a named cell carrying the code and the sentence.
+--
+-- `p_sha` is the last parameter and defaults to NULL, which means "the digest this harness derives from
+-- the event id". Group P needs the other case: one provider event id carrying two different bodies, which
+-- is what a corrected re-delivery *is*. Without the override the digest is a pure function of the id and
+-- the instrument physically cannot express the scenario §14's finding 4 describes.
 CREATE FUNCTION pg_temp.s10l_deliver_raw(
   p_event_id text, p_kind text, p_env text, p_verified boolean, p_ref text,
   p_amount bigint, p_currency text, p_order_ref text, p_pay_ref text,
   p_occurred timestamptz, p_event_type text DEFAULT NULL, p_provider text DEFAULT 'razorpay',
-  p_reason text DEFAULT NULL, p_actor uuid DEFAULT NULL
+  p_reason text DEFAULT NULL, p_actor uuid DEFAULT NULL, p_sha text DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql AS $fn$
 DECLARE v jsonb;
@@ -152,7 +166,7 @@ BEGIN
   BEGIN
     SELECT internal_api.record_commerce_event(
       p_provider, p_event_id, p_event_type, p_kind, p_env,
-      pg_temp.s10l_sha(p_event_id), p_verified, p_reason, p_ref,
+      coalesce(p_sha, pg_temp.s10l_sha(p_event_id)), p_verified, p_reason, p_ref,
       p_amount, p_currency, p_order_ref, p_pay_ref, p_occurred,
       coalesce(p_actor, pg_temp.s10l_actor())) INTO v;
   EXCEPTION WHEN OTHERS THEN
@@ -1403,8 +1417,22 @@ BEGIN
   PERFORM pg_temp.s10l_eq('K28 the sweep names a held delivery older than fifteen minutes',
     (SELECT count(*) FROM jsonb_array_elements(v -> 'findings') f
       WHERE f ->> 'code' = 'held_event_unapplied'), 1::bigint);
-  PERFORM pg_temp.s10l_ok('K29 and says nothing edits a held row retroactively, which is the remedy it refuses',
-    (SELECT bool_or(f ->> 'detail' LIKE '%re-record the delivery as a new event id%')
+  -- The remedy sentence, re-measured by `20261020140000_stage10_reconcile_refusals.sql`. It used to read
+  -- "re-record the delivery as a new event id", and that instruction was never followable — a provider owns
+  -- its event ids, this build does not mint them — which is why §10 could describe the stranding without
+  -- escaping it. K29 pins what is true now instead: which re-deliveries are judged again and which are not.
+  -- K29b keeps the half of the old sentence worth keeping, and K29c is the repair's own claim, stated as
+  -- the absence of the advice that misled — the assertion that would pass on any text mentioning a held row
+  -- is not the assertion that says the misleading text is gone.
+  PERFORM pg_temp.s10l_ok('K29 and describes the recovery that exists: corrected bytes under the same provider id are a new arrival, identical ones are not',
+    (SELECT bool_or(f ->> 'detail' LIKE '%same provider event id with a corrected body lands as its own row%'
+                    AND f ->> 'detail' LIKE '%identical bytes are answered from the recorded row%')
+       FROM jsonb_array_elements(v -> 'findings') f));
+  PERFORM pg_temp.s10l_ok('K29b and still refuses the retroactive edit that the original sentence was guarding',
+    (SELECT bool_or(f ->> 'detail' LIKE '%nothing here edits a held row retroactively%')
+       FROM jsonb_array_elements(v -> 'findings') f));
+  PERFORM pg_temp.s10l_ok('K29c and no longer asks an operator for an event id this build does not own',
+    (SELECT bool_and(f ->> 'detail' NOT LIKE '%as a new event id%')
        FROM jsonb_array_elements(v -> 'findings') f));
   DELETE FROM private.commerce_payment_events WHERE id = 9000001;
   PERFORM pg_temp.s10l_eq('K30 the plant is removed, so the census below counts only real deliveries',
@@ -1440,19 +1468,357 @@ BEGIN
     ARRAY[aud::text, (swp + 1)::text]);
 END $recon$;
 
+-- --------------------------------------------------------------------------- P. the corrected re-delivery
+-- Finding 4 of §14, stated as the case that was never run: a provider sends one event, the first delivery
+-- of it is refused, and the second delivery — the same event identity, the correct bytes — arrives after
+-- whatever made the first one wrong is fixed. The signature verifier is outside Postgres (§6), so the
+-- realistic shapes of "wrong the first time" are a body that failed HMAC, a timestamp outside the
+-- verifier's window, a key rotation, a truncated read, or a retry whose bytes arrived reordered. In every
+-- one of them the provider's `event_id` is the same string and the money is the same money.
+--
+-- Level 1 answers a replay by finding the *row*, and a refused row is a row. So the second delivery is
+-- answered `already_recorded`, and because the ledger refuses UPDATE to every role (H13/H14) and the
+-- identity is globally unique per provider (`commerce_events_provider_event_uk`), no third path exists
+-- either: the capture can never be applied and the family's order can never be captured. §10's own advice
+-- to an operator — "re-record the delivery as a new event id" — asks for an id the provider owns, not one
+-- we mint, so it cannot be followed. The reconciler does not see the stranding either: `held_event_unapplied`
+-- counts `held_for_reconciliation` only, and a refusal is recorded as `rejected_signature`.
+--
+-- What these cells pin after the repair, in the order they ask for it: the corrected delivery is answered
+-- from its own row and evaluated on its own bytes (P04..P09); the refusal it follows survives as its own
+-- row and stays the root of the identity (P10..P11, P19); a body that follows the same identity but
+-- disagrees about the amount is held rather than applied, and moves no money (P12..P15); a body that
+-- agrees but arrives after the capture is a duplicate, not a second grant (P16..P18); and the three shapes
+-- that keep an identity a line — one root, one supersession per row, no forward link — are each measured as
+-- a refusal at the index or the named CHECK (P20..P23). P04's expectation moved when the repair landed: it
+-- first read `recorded`, which is the disposition of a delivery that was written and then declined, while a
+-- corrected capture is written *and applied*. The RED that established the defect is on file at
+-- `q10-logs/s10r-P-red-2.txt` against the pre-repair code, where this same cell answered `already_recorded`.
+--
+-- P24..P35 then ask the harder half, on a second fixture order: one event id carrying ONE body, refused,
+-- then verified. Every cell above changes the bytes to make the correction; the flap changes nothing but
+-- the verification bit, so it is the only case here that can tell "the key includes `signature_valid`"
+-- apart from "the key includes the digest". It ends in a grant (P27, P28) and keeps both halves
+-- answerable by a later retry (P32, P34) — which is the property the HTTP tier's D-11 arm reads over a real
+-- HMAC, measured here at the tier that can run without a stack. No RED run exists for these cells: the
+-- battery aborts at P04 against the pre-repair code, so it never reached a cell after it, and the
+-- pre-repair key is quoted in `20261020120000_stage10_event_redelivery.sql:197-204` rather than re-measured.
+-- What is on file as the before-state is that run's `already_recorded` at P04 on the same mechanism.
+--
+-- P03b..P03d and P11b..P11d ask the other half of the question, and it is the half a key change cannot
+-- answer: whether a human sweeping the order can *see* the stranding. Their RED is on file at
+-- `q10-logs/s10r-recon-red-2.txt`, measured against the ledger repair already in place and the reconciler
+-- repair withheld, where P03b answered `got [0] want [1]` — the sweep reported nothing wrong with an order
+-- whose capture had been refused. Two of these cells are honest about being one-sided before the repair:
+-- P11b and P11c passed in that RED because a finding that does not exist is also a finding that is absent
+-- after a correction, so they mean something only read beside P03b, which is why the pair is adjacent and
+-- the census counts sweeps for this order in both arms.
+--
+-- This block is placed last, after the reconciliation group, because the repair it asks for changes the
+-- ledger's shape and every census cell above counts rows in that table. The census below therefore carries
+-- this group's residue rather than the group being spliced into an earlier one's arithmetic.
+--
+-- Deliberately isolated: two weddings no earlier group touches (the fifth exists only for the flap, so a
+-- grant can be measured there) and one sixth price row shared by both, so nothing here can move a D, H2, S,
+-- C, R, X or K expectation and the poisoning is reproduced on orders no earlier group named.
+DO $poison_plant$
+DECLARE s s10r%ROWTYPE; v jsonb; w uuid := gen_random_uuid(); w2 uuid := gen_random_uuid();
+BEGIN
+  SELECT * INTO s FROM s10r;
+  INSERT INTO public.weddings (id, owner_user_id, title, primary_language, additional_languages,
+                               style_settings)
+    VALUES (w, s.owner_a, 'Ledger G weds H', 'en', ARRAY[]::text[],
+            '{"font":"Playfair Display"}'::jsonb);
+  -- A second wedding for the flap cells, and deliberately not a second price row: the flap must end in a
+  -- grant, and a grant needs an order that is still capturable. Order 7 is captured by P06 before P24
+  -- runs, so the same bytes delivered to *it* would be answered by the state machine as a duplicate —
+  -- true, but it would measure the machine rather than the key. Reusing `QREDELIVER` costs one wedding row
+  -- and no catalogue row, so Z09 stays the six prices this file planted.
+  INSERT INTO public.weddings (id, owner_user_id, title, primary_language, additional_languages,
+                               style_settings)
+    VALUES (w2, s.owner_a, 'Ledger I weds J', 'en', ARRAY[]::text[],
+            '{"font":"Playfair Display"}'::jsonb);
+  INSERT INTO private.commerce_packages (package_code, currency, amount_minor, price_version, status,
+                                         display_approved)
+    VALUES ('QREDELIVER', 'INR', 299900, 1, 'active', true);
+  v := pg_temp.s10l_quote(w, 'QREDELIVER', s.owner_a);
+  IF v ? '_error' THEN
+    RAISE EXCEPTION 'FAIL P00 the re-delivery fixture could not be quoted — %', v ->> '_error';
+  END IF;
+  PERFORM set_config('s10l.o7', v ->> 'order_id', false);
+  PERFORM set_config('s10l.r7', v ->> 'merchant_reference', false);
+  PERFORM set_config('s10l.wed_d', w::text, false);
+  v := pg_temp.s10l_quote(w2, 'QREDELIVER', s.owner_a);
+  IF v ? '_error' THEN
+    RAISE EXCEPTION 'FAIL P00b the flap fixture could not be quoted — %', v ->> '_error';
+  END IF;
+  PERFORM set_config('s10l.o8', v ->> 'order_id', false);
+  PERFORM set_config('s10l.r8', v ->> 'merchant_reference', false);
+  PERFORM set_config('s10l.wed_e', w2::text, false);
+  PERFORM pg_temp.s10l_eq('P00 the re-delivery fixture is one live quote at the frozen 299900 paise',
+    (SELECT amount_minor || '/' || status FROM private.commerce_orders
+      WHERE id = pg_temp.s10l_order('7')), '299900/open');
+  PERFORM pg_temp.s10l_eq('P00b and the flap fixture is a second one, on a wedding no earlier cell touched',
+    (SELECT amount_minor || '/' || status FROM private.commerce_orders
+      WHERE id = pg_temp.s10l_order('8')), '299900/open');
+END $poison_plant$;
+
+DO $redeliver$
+DECLARE
+  v jsonb; w jsonb; st text; st2 text; r7 text := pg_temp.s10l_ref('7');
+  v_refusal bigint; v_head bigint;
+BEGIN
+  st := pg_temp.s10l_state();
+
+  -- The first delivery: an unverified body naming a capture. Exactly H01's attack, on a fresh order.
+  v := pg_temp.s10l_deliver_raw('p-poison-1', 'payment_captured', 'synthetic', false,
+    r7, 299900, 'INR', 'po_p1', 'pay_p1', now(), 'payment.candidate.payment_captured');
+  PERFORM pg_temp.s10l_eq('P01 the first delivery is refused as a signature failure',
+    v ->> 'processing_status', 'rejected_signature');
+  PERFORM pg_temp.s10l_eq('P02 and refused with no state change', pg_temp.s10l_state(), st);
+
+  -- The provider retries the same forgery. This half of the rule is already on file (H15..H18) and stays:
+  -- identical bytes under identical identity must keep answering one row, or the ledger stops being
+  -- evidence about what arrived.
+  v := pg_temp.s10l_deliver_raw('p-poison-1', 'payment_captured', 'synthetic', false,
+    r7, 299900, 'INR', 'po_p1', 'pay_p1', now(), 'payment.candidate.payment_captured');
+  PERFORM pg_temp.s10l_eq('P03 a retry of the refused bytes is answered from the row that refused them',
+    v ->> 'disposition', 'already_recorded');
+
+  -- The sweep, run while the refusal still stands alone. This is the reading an operator got, and it is the
+  -- half of the defect no key change can fix on its own: every finding in §10 reaches the ledger through
+  -- `order_id`, and §4.2 resolves no order for a delivery whose signature did not verify, so the refusal was
+  -- not on any path the sweep walks. `finding_count` said 0 about an order whose capture had been refused —
+  -- which is how a stranding stays stranded. `20261020140000_stage10_reconcile_refusals.sql` reaches the row
+  -- by the merchant reference its own body claimed, and P03b..P03d pin that this is a *finding*, not a
+  -- repair: naming it moves no money.
+  w := pg_temp.s10l_call('recon-7-standing', 'SELECT internal_api.commerce_reconcile('
+    || quote_literal(pg_temp.s10l_order('7')::text) || '::uuid, '
+    || quote_literal(pg_temp.s10l_actor()::text) || '::uuid)');
+  PERFORM pg_temp.s10l_eq('P03b the sweep names the standing refusal instead of reporting an order with nothing wrong',
+    (SELECT count(*) FROM jsonb_array_elements(w -> 'findings') f
+      WHERE f ->> 'code' = 'refusal_uncorrected'), 1::bigint);
+  PERFORM pg_temp.s10l_ok('P03c and says the reference it matched on is the refused body''s own claim, not a fact this build confirmed',
+    (SELECT bool_or(f ->> 'detail' LIKE '%claimed, not a fact this build confirmed%')
+       FROM jsonb_array_elements(w -> 'findings') f));
+  PERFORM pg_temp.s10l_eq('P03d and a sweep that names it still applies nothing: the order is open, the money unmoved',
+    pg_temp.s10l_state(), st);
+
+  -- The corrected delivery. Same provider, same event id, verified this time, and different bytes — which
+  -- is what "the first body was the wrong body" means in a table whose only view of the wire is a digest.
+  v := pg_temp.s10l_deliver_raw('p-poison-1', 'payment_captured', 'synthetic', true,
+    r7, 299900, 'INR', 'po_p1', 'pay_p1', now(), 'payment.candidate.payment_captured',
+    'razorpay', NULL, NULL, pg_temp.s10l_sha('p-poison-1|corrected'));
+  -- The two halves of the answer a caller actually reads, stated apart because they were wrong for one
+  -- reason and read as two. Before the repair `disposition` said the delivery had already been answered
+  -- from an old row, and `processing_status` said the body it had just verified failed verification.
+  PERFORM pg_temp.s10l_eq('P04 a corrected delivery is answered as its own delivery, not echoed from the refusal',
+    v ->> 'disposition', 'applied');
+  PERFORM pg_temp.s10l_eq('P05 and carries its own verdict: a verified re-delivery is evaluated on its own bytes',
+    v ->> 'processing_status', 'applied');
+  PERFORM pg_temp.s10l_eq('P06 the capture that arrives second still captures the order',
+    (SELECT status FROM private.commerce_orders WHERE id = pg_temp.s10l_order('7')), 'captured');
+  PERFORM pg_temp.s10l_eq('P07 and grants exactly one entitlement for the wedding and package it names',
+    (SELECT count(*) FROM public.entitlements
+      WHERE wedding_id = pg_temp.s10l_wed('d') AND package_code = 'QREDELIVER'
+        AND status = 'active'), 1::bigint);
+  PERFORM pg_temp.s10l_eq('P08 while the refusal it corrects survives as its own row: two rows, one identity',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE provider = 'razorpay' AND event_id = 'p-poison-1'), 2::bigint);
+
+  -- The chain as data. `min`/`max` are the arrival order this file just created, not a guess: the refusal
+  -- was written first and the corrected row second, by the function, in this transaction.
+  SELECT min(id), max(id) INTO v_refusal, v_head FROM private.commerce_payment_events
+    WHERE provider = 'razorpay' AND event_id = 'p-poison-1';
+  PERFORM pg_temp.s10l_eq('P09 the answer names the row it just wrote, so a caller cannot take it for the refusal',
+    (v ->> 'event_row_id')::bigint, v_head);
+  PERFORM pg_temp.s10l_eq('P10 and the corrected row names the refusal it follows',
+    (SELECT supersedes_event_row_id FROM private.commerce_payment_events WHERE id = v_head), v_refusal);
+  PERFORM pg_temp.s10l_eq('P11 while the refusal stays the root of the identity and keeps its own verdict',
+    coalesce((SELECT supersedes_event_row_id::text FROM private.commerce_payment_events
+               WHERE id = v_refusal), '(null)') || '/' ||
+    (SELECT processing_status FROM private.commerce_payment_events WHERE id = v_refusal),
+    '(null)/rejected_signature');
+
+  -- The same sweep again, one delivery later. The finding is written as a remedy in the shape
+  -- `captured_without_entitlement` already uses (K10..K16): it is present while the bad pair exists and
+  -- absent once the good pair has arrived, so its disappearance is evidence about which row cleared it
+  -- rather than about a clock running out. P03b and P11b together are the reason the repair is *auditable*
+  -- and not merely recoverable — an operator who swept before the correction now has a record saying so,
+  -- and one who sweeps after has a clean answer that means something.
+  w := pg_temp.s10l_call('recon-7-corrected', 'SELECT internal_api.commerce_reconcile('
+    || quote_literal(pg_temp.s10l_order('7')::text) || '::uuid, '
+    || quote_literal(pg_temp.s10l_actor()::text) || '::uuid)');
+  PERFORM pg_temp.s10l_eq('P11b and the same sweep after the correction reports no standing refusal at all',
+    (SELECT count(*) FROM jsonb_array_elements(w -> 'findings') f
+      WHERE f ->> 'code' = 'refusal_uncorrected'), 0::bigint);
+  PERFORM pg_temp.s10l_eq('P11c because the refusal is now a superseded row, which is the only state that clears it',
+    (SELECT count(*) FROM private.commerce_payment_events e
+      WHERE e.merchant_reference = r7 AND e.processing_status = 'rejected_signature'
+        AND NOT EXISTS (SELECT 1 FROM private.commerce_payment_events s
+                         WHERE s.supersedes_event_row_id = e.id)), 0::bigint);
+  PERFORM pg_temp.s10l_eq('P11d and the sweep of the corrected order records a second swept row, one per sweep',
+    pg_temp.s10l_audit_count('swept', pg_temp.s10l_order('7')), 2::bigint);
+
+  st2 := pg_temp.s10l_state();
+
+  -- A body that follows the same identity but disagrees about the money. This is the half of the finding
+  -- that the repair must not lose: recovering from a poisoned identity cannot become a way to talk the
+  -- ledger out of a frozen quote. §4.2 rule 4 decides it, and this file adds no rule of its own.
+  v := pg_temp.s10l_deliver_raw('p-poison-1', 'payment_captured', 'synthetic', true,
+    r7, 199900, 'INR', 'po_p1', 'pay_p1', now(), 'payment.candidate.payment_captured',
+    'razorpay', NULL, NULL, pg_temp.s10l_sha('p-poison-1|wrongamount'));
+  PERFORM pg_temp.s10l_eq('P12 a corrected body that disagrees with the frozen quote is held for reconciliation',
+    v ->> 'processing_status', 'held_for_reconciliation');
+  PERFORM pg_temp.s10l_eq('P13 named as an amount mismatch, on its own row',
+    v ->> 'hold_reason', 'amount_mismatch');
+  PERFORM pg_temp.s10l_eq('P14 and the order keeps the price it was captured at, with one entitlement still',
+    (SELECT amount_minor::text || '/' || status FROM private.commerce_orders
+      WHERE id = pg_temp.s10l_order('7')), '299900/captured');
+  PERFORM pg_temp.s10l_eq('P15 with no money moved by the disagreement at all',
+    pg_temp.s10l_state(), st2);
+
+  -- A third body that agrees, arriving after the capture. The state machine, not the identity, answers it.
+  v := pg_temp.s10l_deliver_raw('p-poison-1', 'payment_captured', 'synthetic', true,
+    r7, 299900, 'INR', 'po_p1', 'pay_p1', now(), 'payment.candidate.payment_captured',
+    'razorpay', NULL, NULL, pg_temp.s10l_sha('p-poison-1|again'));
+  PERFORM pg_temp.s10l_eq('P16 a third delivery of a captured order is a duplicate, not a second grant',
+    v ->> 'applied_effect', 'ignored_already_captured');
+  PERFORM pg_temp.s10l_eq('P17 with the money still exactly where P06 left it',
+    pg_temp.s10l_state(), st2);
+  PERFORM pg_temp.s10l_eq('P18 and the identity is now four rows: refusal, capture, hold, duplicate',
+    (SELECT string_agg(processing_status, '+' ORDER BY id) FROM private.commerce_payment_events
+      WHERE provider = 'razorpay' AND event_id = 'p-poison-1'),
+    'rejected_signature+applied+held_for_reconciliation+duplicate');
+  PERFORM pg_temp.s10l_eq('P19 in one line, not a tree: the identity has exactly one root',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE provider = 'razorpay' AND event_id = 'p-poison-1'
+        AND supersedes_event_row_id IS NULL), 1::bigint);
+
+  -- The two shapes that make the line a line, measured as refusals. Neither is reachable through the
+  -- function — it always follows `max(id)` — so each is a plant, and each fails, so neither leaves a row
+  -- to undo. This is the concurrency posture `20261020120000_stage10_event_redelivery.sql` states: the
+  -- loser of a simultaneous pair gets one of these two codes rather than a fork.
+  PERFORM pg_temp.s10l_err('P20 a second unlinked row under one identity is refused by the partial unique index',
+    'INSERT INTO private.commerce_payment_events (provider, event_id, kind, raw_body_sha256, '
+    || 'signature_valid, processing_status) VALUES (''' || 'razorpay' || ''', ''p-poison-1'', '
+    || '''payment_captured'', pg_temp.s10l_sha(''p-poison-1|fork''), true, ''duplicate'')',
+    '23505', '%commerce_events_provider_event_uk%');
+  PERFORM pg_temp.s10l_err('P21 and a second row claiming the same refusal is refused by the supersession index',
+    'INSERT INTO private.commerce_payment_events (provider, event_id, kind, raw_body_sha256, '
+    || 'signature_valid, processing_status, supersedes_event_row_id) VALUES ('
+    || '''razorpay'', ''p-poison-1'', ''payment_captured'', pg_temp.s10l_sha(''p-poison-1|fork2''), '
+    || 'true, ''duplicate'', ' || v_refusal || ')',
+    '23505', '%commerce_events_supersedes_uk%');
+  PERFORM pg_temp.s10l_err('P22 and a row that follows a delivery that has not arrived yet is refused by the named CHECK',
+    'INSERT INTO private.commerce_payment_events (id, provider, event_id, kind, raw_body_sha256, '
+    || 'signature_valid, processing_status, supersedes_event_row_id) '
+    || 'OVERRIDING SYSTEM VALUE VALUES (9000002, ''razorpay'', ''p-poison-1'', ''payment_captured'', '
+    || 'pg_temp.s10l_sha(''p-poison-1|forward''), true, ''duplicate'', 9000003)',
+    '23514', '%commerce_events_supersedes_earlier_row_check%');
+  PERFORM pg_temp.s10l_eq('P23 and all three refusals wrote nothing: the identity is still four rows',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE provider = 'razorpay' AND event_id = 'p-poison-1'), 4::bigint);
+END $redeliver$;
+
+-- P24..P35 ask the version of the same question that P04..P09 cannot: one event id carrying ONE body,
+-- refused and then verified. P04's correction differs from the refusal by its bytes, so the level-1 key
+-- could have been satisfied by a rule as simple as "the second body is a different body". The flap has no
+-- such difference to work with — the two deliveries are indistinguishable except by the verification bit,
+-- which is exactly the field §4.2 says a refusal is evidence about. This is the case the HTTP tier's D-11
+-- arm asserts over a real signature, and the case that a provider's own retry policy makes ordinary: a
+-- rotation or a truncated read makes the genuine body arrive first as a failure and then as a success,
+-- byte for byte the same. If verification state is not part of the key, the identity is burned for good,
+-- the payment is real, and the ledger says nothing happened.
+DO $flap$
+DECLARE
+  v jsonb; st3 text; r8 text := pg_temp.s10l_ref('8');
+  v_refuse bigint; v_paid bigint;
+BEGIN
+  -- Both calls leave `p_sha` at NULL, which means the digest this harness derives from the event id: the
+  -- bytes are the same on the arrival that is refused and the arrival that is paid.
+  v := pg_temp.s10l_deliver_raw('p-flap-1', 'payment_captured', 'synthetic', false,
+    r8, 299900, 'INR', 'po_f1', 'pay_f1', now(), 'payment.candidate.payment_captured');
+  PERFORM pg_temp.s10l_eq('P24 the first arrival of these bytes is refused as a signature failure',
+    v ->> 'processing_status', 'rejected_signature');
+
+  v := pg_temp.s10l_deliver_raw('p-flap-1', 'payment_captured', 'synthetic', true,
+    r8, 299900, 'INR', 'po_f1', 'pay_f1', now(), 'payment.candidate.payment_captured');
+  PERFORM pg_temp.s10l_eq('P25 the verified arrival of the SAME bytes is not answered from the refusal row',
+    v ->> 'disposition', 'applied');
+  PERFORM pg_temp.s10l_eq('P26 because the verification bit is part of the key, so this delivery is evaluated on its own',
+    v ->> 'processing_status', 'applied');
+  PERFORM pg_temp.s10l_eq('P27 and it pays: the effect is the grant, on bytes identical to the ones that were refused',
+    v ->> 'applied_effect', 'entitlement_granted');
+
+  PERFORM pg_temp.s10l_array('P28 the flap ends with one captured order, one entitlement and one confirmed attempt',
+    ARRAY[(SELECT status FROM private.commerce_orders WHERE id = pg_temp.s10l_order('8')),
+          (SELECT count(*) FROM public.entitlements WHERE wedding_id = pg_temp.s10l_wed('e')
+             AND package_code = 'QREDELIVER' AND status = 'active')::text,
+          (SELECT count(*) FROM private.commerce_payment_attempts
+             WHERE order_id = pg_temp.s10l_order('8') AND status = 'confirmed')::text],
+    ARRAY['captured','1','1']);
+
+  SELECT min(id), max(id) INTO v_refuse, v_paid FROM private.commerce_payment_events
+    WHERE provider = 'razorpay' AND event_id = 'p-flap-1';
+  PERFORM pg_temp.s10l_eq('P29 and the identity is two rows: the refusal was not rewritten into a capture',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE provider = 'razorpay' AND event_id = 'p-flap-1'), 2::bigint);
+  PERFORM pg_temp.s10l_eq('P30 the paid row names the refusal it follows, and the refusal is still the root',
+    (SELECT supersedes_event_row_id::text FROM private.commerce_payment_events WHERE id = v_paid) || '/' ||
+    coalesce((SELECT supersedes_event_row_id::text FROM private.commerce_payment_events
+               WHERE id = v_refuse), '(null)'),
+    v_refuse::text || '/(null)');
+  PERFORM pg_temp.s10l_eq('P31 with the refusal still carrying its own verdict and no order link, which is what a denial is',
+    (SELECT processing_status || '/' || coalesce(order_id::text, '(null)')
+       FROM private.commerce_payment_events WHERE id = v_refuse),
+    'rejected_signature/(null)');
+
+  st3 := pg_temp.s10l_state();
+
+  -- A retry of each half. Both must be answerable, from the row that matches what arrived, and neither may
+  -- move money — which is the other side of the key change: it splits an identity into the statements it
+  -- contains without letting any of them spend twice.
+  v := pg_temp.s10l_deliver_raw('p-flap-1', 'payment_captured', 'synthetic', true,
+    r8, 299900, 'INR', 'po_f1', 'pay_f1', now(), 'payment.candidate.payment_captured');
+  PERFORM pg_temp.s10l_eq('P32 a verified retry is answered from the row that applied',
+    (v ->> 'disposition') || '/' || (v ->> 'processing_status') || '/' ||
+      ((v ->> 'event_row_id')::bigint = v_paid)::text, 'already_recorded/applied/true');
+  PERFORM pg_temp.s10l_eq('P33 and spends nothing a second time', pg_temp.s10l_state(), st3);
+
+  v := pg_temp.s10l_deliver_raw('p-flap-1', 'payment_captured', 'synthetic', false,
+    r8, 299900, 'INR', 'po_f1', 'pay_f1', now(), 'payment.candidate.payment_captured');
+  PERFORM pg_temp.s10l_eq('P34 while an unverified retry is still answered from the refusal, so both halves of the flap stay retrievable',
+    (v ->> 'disposition') || '/' || (v ->> 'processing_status') || '/' ||
+      ((v ->> 'event_row_id')::bigint = v_refuse)::text,
+    'already_recorded/rejected_signature/true');
+  PERFORM pg_temp.s10l_eq('P35 and the identity is still two rows with one head after all four arrivals',
+    (SELECT count(*) FROM private.commerce_payment_events WHERE provider = 'razorpay'
+       AND event_id = 'p-flap-1')::text || '/' ||
+    (SELECT count(*) FROM private.commerce_payment_events WHERE provider = 'razorpay'
+       AND event_id = 'p-flap-1' AND supersedes_event_row_id IS NULL)::text,
+    '2/1');
+END $flap$;
+
 -- --------------------------------------------------------------------------- Z. the census this file leaves
 -- Every expectation below is the value a run produced, not a value this file predicted; the four that are
 -- read back as CENSUS notices in `$print$` at the bottom are printed again after the assertion, so a
 -- reviewer sees the number beside the word.
+--
+-- The flap group (P24..P35) moved seven of them by exactly one row: Z01, Z02, Z03, Z06, Z08, Z13 and Z15.
+-- Those seven were read, not worked out, from `q10-logs/s10r-flap-census-read-1.txt` — a copy of this file
+-- in which only the six harness comparison functions raise a WARNING instead of an exception, so the whole
+-- census could be measured in one pass instead of one cell per chain rebuild. The committed file still
+-- raises, and the pass that certifies these numbers is an ordinary `run.sh commerce` run, below.
 DO $census$
 DECLARE s s10r%ROWTYPE;
 BEGIN
   SELECT * INTO s FROM s10r;
 
-  PERFORM pg_temp.s10l_array('Z01 the eight quotes this file made, by status: four captured, two cancelled, one expired, one left live on purpose',
+  PERFORM pg_temp.s10l_array('Z01 the ten quotes this file made, by status: six captured, two cancelled, one expired, one left live on purpose',
     ARRAY(SELECT status || '=' || count(*)::text FROM private.commerce_orders
            GROUP BY status ORDER BY status COLLATE "C"),
-    ARRAY['cancelled=2','captured=4','expired=1','open=1']);
+    ARRAY['cancelled=2','captured=6','expired=1','open=1']);
   PERFORM pg_temp.s10l_array('Z01b the order left live is exactly the stale quote K21 planted: overage, and never named by a delivery',
     ARRAY[(SELECT count(*) FROM private.commerce_orders WHERE status = 'open')::text,
           (SELECT count(*) FROM private.commerce_orders WHERE status = 'open'
@@ -1464,31 +1830,49 @@ BEGIN
   PERFORM pg_temp.s10l_array('Z02 the attempts, by status: an initiation that failed, and captures that minted their own',
     ARRAY(SELECT status || '=' || count(*)::text FROM private.commerce_payment_attempts
            GROUP BY status ORDER BY status COLLATE "C"),
-    ARRAY['confirmed=4','failed=1','initiated=1']);
+    ARRAY['confirmed=6','failed=1','initiated=1']);
   -- `ORDER BY <ordinal> COLLATE "C"` is not an ordinal at all: the collation clause types the constant, and
   -- Postgres then sorts by the integer 1 and refuses. Each census cell names its own expression.
   PERFORM pg_temp.s10l_array('Z03 the ledger, by processing status: every delivery this file sent, applied or not',
     ARRAY(SELECT processing_status || '=' || count(*)::text FROM private.commerce_payment_events
            GROUP BY processing_status ORDER BY processing_status COLLATE "C"),
-    ARRAY['applied=21','duplicate=1','held_for_reconciliation=12','rejected_signature=2','stale=2']);
-  PERFORM pg_temp.s10l_eq('Z04 each ledger row was written exactly once, including the replays',
-    (SELECT count(*) FROM private.commerce_payment_events),
+    ARRAY['applied=23','duplicate=2','held_for_reconciliation=13','rejected_signature=4','stale=2']);
+  -- The census this file's own repair moved. Before `20261020120000_stage10_event_redelivery.sql` one
+  -- provider event identity was one row, so "no row was written twice" and "one row per identity" were the
+  -- same sentence and this cell compared `count(*)` to `count(DISTINCT provider||'|'||event_id)`. They are
+  -- no longer the same sentence: group P deliberately files four rows under one identity and two under
+  -- another. Dropping the cell would lose the check, so it is split into the three statements that still
+  -- hold — the identity is a line, it has one head, and no link in it is used twice or points forward.
+  PERFORM pg_temp.s10l_eq('Z04 every provider event identity in the ledger has exactly one unlinked head',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE supersedes_event_row_id IS NULL),
     (SELECT count(DISTINCT provider || '|' || event_id) FROM private.commerce_payment_events));
+  PERFORM pg_temp.s10l_eq('Z04b and the rows that follow a head are one per superseded row: a line, never a fork',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE supersedes_event_row_id IS NOT NULL),
+    (SELECT count(DISTINCT supersedes_event_row_id) FROM private.commerce_payment_events));
+  PERFORM pg_temp.s10l_eq('Z04c with every link naming an earlier row of the same identity that really exists',
+    (SELECT count(*) FROM private.commerce_payment_events c
+      LEFT JOIN private.commerce_payment_events p ON p.id = c.supersedes_event_row_id
+     WHERE c.supersedes_event_row_id IS NOT NULL
+       AND (p.id IS NULL OR c.provider IS DISTINCT FROM p.provider
+            OR c.event_id IS DISTINCT FROM p.event_id OR c.supersedes_event_row_id >= c.id)),
+    0::bigint);
   PERFORM pg_temp.s10l_array('Z05 the refund and dispute records, by kind and status',
     ARRAY(SELECT kind || '/' || status || '=' || count(*)::text FROM private.commerce_refunds
            GROUP BY kind, status ORDER BY (kind || '/' || status) COLLATE "C"),
     ARRAY['chargeback/recorded=2','refund/failed=1','refund/succeeded=4']);
-  PERFORM pg_temp.s10l_array('Z06 the entitlements: granted by capture, one revoked by policy, one recovered',
+  PERFORM pg_temp.s10l_array('Z06 the entitlements: granted by capture, one revoked by policy, three active at the end',
     ARRAY(SELECT status || '=' || count(*)::text FROM public.entitlements
            GROUP BY status ORDER BY status COLLATE "C"),
-    ARRAY['active=1','revoked=4']);
+    ARRAY['active=3','revoked=4']);
   PERFORM pg_temp.s10l_eq('Z07 every entitlement this chain holds came from a capture, not an admin',
     (SELECT count(*) FROM public.entitlements WHERE source <> 'service'), 0::bigint);
   PERFORM pg_temp.s10l_eq('Z08 nothing was deleted: the five money tables still carry their full history',
     (SELECT count(*) FROM private.commerce_payment_events WHERE processing_status = 'rejected_signature'),
-    2::bigint);
-  PERFORM pg_temp.s10l_eq('Z09 the price catalogue is exactly the five rows this file planted',
-    (SELECT count(*) FROM private.commerce_packages), 5::bigint);
+    4::bigint);
+  PERFORM pg_temp.s10l_eq('Z09 the price catalogue is exactly the six rows this file planted',
+    (SELECT count(*) FROM private.commerce_packages), 6::bigint);
   PERFORM pg_temp.s10l_array('Z10 the policy row is back on every shipped default after the two deliberate flips',
     ARRAY(SELECT publish_gate || '/' || coalesce(array_length(publish_required_package_codes,1),0)::text
                 || '/' || live_capture_enabled::text || '/' || refund_revocation_mode
@@ -1499,16 +1883,16 @@ BEGIN
        AND processing_status = 'applied'), 0::bigint);
   PERFORM pg_temp.s10l_eq('Z12 and no live environment was ever applied for any order',
     (SELECT count(*) FROM private.commerce_payment_attempts WHERE environment = 'live'), 0::bigint);
-  PERFORM pg_temp.s10l_eq('Z13 the wedding rows are the three this file made, and no others',
-    (SELECT count(*) FROM public.weddings), 3::bigint);
+  PERFORM pg_temp.s10l_eq('Z13 the wedding rows are the five this file made, and no others',
+    (SELECT count(*) FROM public.weddings), 5::bigint);
   PERFORM pg_temp.s10l_eq('Z14 the accounts are the three this file made',
     (SELECT count(*) FROM auth.users), 3::bigint);
   PERFORM pg_temp.s10l_array('Z15 the audit actions this file produced, named and counted, so a verb that stopped writing its record is caught',
     ARRAY(SELECT action || '=' || count(*)::text FROM private.audit_events
            GROUP BY action ORDER BY action COLLATE "C"),
     ARRAY['attempt_failed=1','attempt_initiated=4','cancelled_by_provider=2','chargeback_opened=2',
-          'expired=1','failure_recorded=1','granted_by_commerce_capture=5','order_captured=4',
-          'quote_created=8','refund_failed=1','refund_succeeded=4','revoked=4','swept=14']);
+          'expired=1','failure_recorded=1','granted_by_commerce_capture=7','order_captured=6',
+          'quote_created=10','refund_failed=1','refund_succeeded=4','revoked=4','swept=16']);
   PERFORM pg_temp.s10l_eq('Z16 every money verb this file called recorded its actor as an account that exists',
     (SELECT count(*) FROM private.audit_events ae
       JOIN auth.users u ON u.id = ae.actor_user_id),
@@ -1538,11 +1922,15 @@ BEGIN
 
   n := coalesce(nullif(current_setting('s10l.passed', true), ''), '0')::int;
   -- A floor, not an equality: the count this file prints is the number of assertions it ran, and a future
-  -- cell added to any group moves it upward. 290 is the count read at this point by the run that produced
+  -- cell added to any group moves it upward. 290 was the count read at this point by the run that produced
   -- this file (`q10-logs/live/s10-battery1-18.txt`, which ended `STAGE10 LEDGER TESTS PASSED (291)` — the
-  -- 291st is this cell, which adds itself after the read). It is set from a run rather than from a guess so
-  -- that a suite which silently skips a group is caught rather than read as a smaller pass.
-  IF n < 290 THEN
+  -- 291st is this cell, which adds itself after the read). Group P and the Z04 split moved the read to 316
+  -- (`q10-logs/s10r-P-green-4.txt`, ending `PASSED (317)`), and the reconciler's two sweeps of order 7 plus
+  -- the cells that read them move it again (`q10-logs/s10r-recon-green-1.txt`, ending `PASSED (325)`);
+  -- P00b and the flap's twelve cells take it to 338 (`q10-logs/s10r-flap-green-1.txt`), so the floor tracks
+  -- the last run that passed. It is set from a run rather than from a guess so that a suite
+  -- which silently skips a group is caught rather than read as a smaller pass.
+  IF n < 337 THEN
     RAISE EXCEPTION 'FAIL L01 the ledger battery ran % assertions, which is fewer than the floor', n;
   END IF;
   RAISE NOTICE 'PASS L01 the ledger battery ran at least its floor of assertions (%)', n;
