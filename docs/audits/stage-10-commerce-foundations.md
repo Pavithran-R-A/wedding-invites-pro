@@ -433,3 +433,67 @@ there. What is *not* blocked by any of them is everything in §§3–10.
 
 Reading any unrun line as a pass, or any red arm as a near-miss, is the claim class Stage 0 was written to
 remove from this repository.
+
+## 16. Finding 4, closed at the SQL and unit tiers (2026-10-20)
+
+§14's item 4 was the stage's worst financial defect, and it was worse than "a refusal sticks": the ledger
+answered a repeat of `(provider, event_id)` from the row it already held *before* it looked at the new
+delivery's verdict. So a forged request that named the id a later genuine capture would carry did not
+merely fail — it burned that identity, and the real payment was then answered with the forgery's refusal
+and granted nothing.
+
+**Reproduced first.** `q10-logs/s10r-P-red-1.txt` and `q10-logs/s10r-P-red-2.txt` are the same battery
+against the pre-repair schema, and they fail at the two shapes of the defect: `P04` prints
+`got [rejected_signature] want [applied]` when the corrected delivery changes its bytes, and
+`got [already_recorded] want [recorded]` when it changes nothing but its own verification. That is the
+only RED the poisoning has, and it is also why no per-cell RED exists for the twelve flap cells below:
+the battery aborts at `P04`, so the pre-repair behaviour of the later assertions is not measurable, and
+the pre-repair key is quoted from `20261017120000_stage10_commerce_foundations.sql` rather than
+re-derived. Stated, not smoothed over.
+
+**The repair is two forward migrations, not an edit.** `20261020120000_stage10_event_redelivery.sql`
+replaces the ledger body so the level-1 identity is `(provider, event_id, raw_body_sha256,
+signature_valid)` answered `ORDER BY id DESC`, links a corrected arrival to the row it corrects through
+`supersedes_event_row_id`, and keeps the properties the old key got by accident and one more it did not:
+one root per provider identity (`commerce_events_provider_event_uk`, partial), at most one correction per
+row (`commerce_events_supersedes_uk`), no correction that points at a later row (
+`commerce_events_supersedes_earlier_row_check`). `20261020140000_stage10_reconcile_refusals.sql` then
+adds the finding `refusal_uncorrected`, so a stranding is an operator-visible fact rather than a property
+of a code path nobody sweeps.
+
+**What measures it.** SQL: battery 1 is 338 assertions and battery 2 is 290 (`s10r-flap-green-2.txt`, and
+the same totals inside `s10r-chain-all-3.txt`, which runs all six chains green). Group P now carries both
+digest postures on purpose — `P04..P23` pass an explicit digest, so a correction that changes the bytes is
+judged, while `P24..P35` deliberately leave `p_sha` at NULL so the two arrivals are *byte-identical* and
+only the verification bit differs. The flap runs on its own freshly-quoted order (`P00b`), because reusing
+an already-captured order would have measured the state machine instead of the key; it ends with one
+captured order, one active entitlement, one confirmed attempt, two rows under one identity with the paid
+row naming the refusal, and both halves still answerable by a provider retry without moving money twice.
+Battery 2's residue census moved to five cast weddings with it, the FK census in Stage 2's catalogue to
+nine Stage 10 edges, and battery 1's own closing census was re-read from a measurement copy rather than
+predicted — the paragraph above `Z01` names which.
+
+**Node.** The trusted instrument's `CD-08` used to read one migration; with a second declaration of the
+same function on the head, that check no longer constrained the signature the driver would actually face.
+It now scans every migration in `supabase/migrations`, and `q10-logs/s10r-cd08-red-green-1.txt` records
+three separate drifts it catches — an argument reordered in the newer file, a newer file that declares the
+function and revokes nothing, and a brand-new migration with a sixteenth argument that the old single-file
+check could not have seen at all. `scripts/stage10-webhook-core.test.mjs` 36/36 (`wh-core-after-repair.txt`),
+the driver suite 43/43, the whole unit sweep 1375 tests in 63 files, and `dbtypes:check`, `product:check`,
+`typecheck` and `lint` (0 errors, the 9 pre-existing `react-refresh` warnings) all exit 0.
+
+**What did NOT run, and so proves nothing about finding 4.** `D-11`, `D-16` and `Z-01` in the HTTP battery
+were rewritten to the repaired contract — row-targeted reads, a `digestOfRow` helper, the forged-then-genuine
+sequence over a real HMAC — and are **not executed**: the Docker engine was down for the whole of this
+segment and starting it is the human partner's action. They are the arm that would prove the repaired rule
+against actual signature bytes rather than a declared validity bit. The browser tier is likewise unrun.
+The third limitation is a fact about the wire, not about this repair: the driver's refusal shape casts every
+fact column NULL and takes its identity only from a transport header, so a refusal that names no merchant
+reference is invisible to `refusal_uncorrected`, and reading those still needs a cluster-wide view of the
+`rejected_signature` strand that §10 never defined. The reconcile migration says so in its own header, which
+is where this pass also corrected a sentence that had begun to describe the pre-repair ledger as if it were
+still live.
+
+**Disposition.** §14's item 4: **CLOSED at the SQL and unit tiers, with the HTTP and browser arms explicitly
+unexecuted.** No other item in §14 is touched by this section, and none of §15's owner decisions is answered
+by it.

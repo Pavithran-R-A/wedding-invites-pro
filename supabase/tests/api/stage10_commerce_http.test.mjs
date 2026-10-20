@@ -15,8 +15,8 @@
 //   P  what that door projects, per price posture: the amount *absent* (not null, not zero) while display
 //      approval is missing, the three names an approval adds, and the names no state ever adds;
 //   D  a purchase driven end to end by the instrument — signed Razorpay and Cashfree deliveries over real
-//      bytes, the two idempotency levels, both adapters' refusal spellings, and the poisoning property
-//      the ledger's own lookup order creates;
+//      bytes, the two idempotency levels, both adapters' refusal spellings, and what one provider event
+//      identity is allowed to become once a correction arrives under it;
 //   R  refunds, chargebacks, expiry, cancellation and reconciliation as the ledger records them, with the
 //      §9 commercial question named where the schema forces an answer;
 //   G  the publish gate behind the browser's own verb rather than behind a trigger test, in both row
@@ -52,6 +52,16 @@
 // `run.sh` runs this file serially with the others and fails the whole gate if any census count moves, so
 // the shared-posture writes below are only safe because `before()` refuses to start unless the stack is in
 // the shipped posture and `after()` restores unconditionally.
+//
+// NOT EXECUTED SINCE THE REDELIVERY REPAIR. The remediation runs of 2026-10-20 (`q10-logs/s10r-*.txt`)
+// could not start this tier: it needs GoTrue for every account it signs a JWT for, and the Docker engine
+// was down for the whole of them. D-11, D-16 and Z-01 were therefore rewritten to the repaired contract by
+// reading `internal_api.record_commerce_event`, not by measuring it here. Each property they now assert is
+// measured in a tier that did run — group P of `supabase/tests/stage10/80_commerce_ledger.sql` (P01..P27)
+// for the ledger's own decisions, CD-22/CD-23/CD-28 of `scripts/stage10-commerce-driver.test.mjs` for what
+// a refusal is allowed to carry — so nothing here is the only evidence for anything. It is still the case
+// that these three arms have never been green, and the first run that makes them so is the tier's own, not
+// this stage's report.
 
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -557,12 +567,13 @@ function deliver(caseId, {
   }
   assert.equal(out.recorded, true, `${caseId}: a verified delivery must reach the ledger`);
   assert.match(out.digest, HEX64, `${caseId}: the digest this run computed is not 64-hex`);
-  // Only a delivery that *wrote* a row goes on the evidence list. An `already_recorded` answer (D-02,
-  // D-11b, D-16b) computed this run's digest over bytes the ledger deliberately kept unread, so the row
-  // under that id holds somebody else's digest — comparing them is the poisoning property, which has its
-  // own cases, and not the claim Z-01 makes about every row this run signed into the ledger.
+  // Only a delivery that *wrote* a row goes on the evidence list. An `already_recorded` answer (D-02, D-16c)
+  // wrote nothing: level 1 matched those very bytes to a row this run already attested when it sent the
+  // delivery that first carried them, so listing the answer again would count one row twice rather than add
+  // evidence.
   if (out.result?.disposition !== 'already_recorded') {
-    digests.push({ caseId, provider, eventId: eventId ?? null, digest: out.digest, kind: out.kind });
+    digests.push({ caseId, provider, eventId: eventId ?? null, digest: out.digest, kind: out.kind,
+      rowId: out.result?.event_row_id ?? null });
   }
   return out;
 }
@@ -616,11 +627,22 @@ const rowField = (row, name) => {
   return found[1];
 };
 
-/** The one column of that row a case needs on its own, because two ledger rows holding the same digest is
- *  how this file proves two deliveries carried the same bytes. */
-const digestFor = (eventId) => cell(
-  `select raw_body_sha256 from private.commerce_payment_events where event_id = '${eventId}'`,
-`the body digest of ${eventId}`);
+/** The digest of one *row*, named by the `event_row_id` the ledger returned for the delivery that wrote it.
+ *  Since `20261020120000_stage10_event_redelivery.sql` one provider event identity can hold several rows,
+ *  so a digest read by `event_id` is only defined for an identity this run delivered once — and `cell`
+ *  answers a two-row identity with `did not read exactly one row` rather than with a guess of its own.
+ *  Every case that wrote a row is handed that row's id, so none of them needs the guess. */
+const digestOfRow = (rowId) => cell(
+  `select raw_body_sha256 from private.commerce_payment_events where id = '${rowId}'`,
+  `the body digest of ledger row ${rowId}`);
+
+/** The same row read for the three things that describe its place in the identity's arrival order. A
+ *  repaired identity is a *line* of rows, so "the earlier row was not rewritten by the later arrival" is
+ *  only proved by reading the earlier row again — by its own id, after the second delivery landed. */
+const rowShape = (rowId) => cell(`
+  select 'status=' || processing_status || ' sig=' || signature_valid::text
+    || ' digest=' || raw_body_sha256 || ' supersedes=' || coalesce(supersedes_event_row_id::text, '-')
+  from private.commerce_payment_events where id = '${rowId}'`, `the shape of ledger row ${rowId}`);
 
 const OBSERVED_LISTS = ['events', 'attempts', 'refunds'];
 
@@ -1432,7 +1454,7 @@ describe('S10 DELIVERIES', () => {
     assert.equal(obs.entitlement.status, 'active', 'D-10d: the entitlement is the retry\'s, not the failure\'s');
   });
 
-  test('D-11: a forged delivery is ledgered under the transport\'s own claim, and that claim poisons the id', () => {
+  test('D-11: a forged delivery is ledgered under the transport\'s own claim, and that claim decides nothing for the genuine capture', () => {
     insertPackage(CODE.poison);
     quote('poison', { weddingId: workshop, packageCode: CODE.poison, actor: uidOf('hostA') });
     const mr = orders.poison.merchant_reference;
@@ -1441,8 +1463,8 @@ describe('S10 DELIVERIES', () => {
       order: { entity: orderEntity(mr, 'PS') },
     });
 
-    deliver('D-11a', { eventId: idFor('poison'), body: captureBody, signWith: WRONG_SECRET,
-      verified: false, reason: 'signature_mismatch' });
+    const forged = resultOf('D-11a', deliver('D-11a', { eventId: idFor('poison'), body: captureBody,
+      signWith: WRONG_SECRET, verified: false, reason: 'signature_mismatch' }));
     const forgery = ledgerRow(idFor('poison'));
     for (const [name, want] of [['kind', 'other'], ['status', 'rejected_signature'], ['effect', '-'],
       ['hold', '-'], ['refusal', 'signature_mismatch'], ['sig', 'false'], ['order', '-'],
@@ -1450,42 +1472,62 @@ describe('S10 DELIVERIES', () => {
       assert.equal(rowField(forgery, name), want,
         `D-11a: an unverified body names nothing about itself — ${name}: ${shown(forgery)}`);
     }
+    // Read by row id from here on: this identity is about to hold two rows, and `ledgerRow`/`digestFor` ask
+    // the ledger for *the* row of an event id — a question `cell` refuses to answer with a guess.
+    const forgedRow = forged.event_row_id;
+    const forgedShape = rowShape(forgedRow);
 
-    // The property that follows from level-1 idempotency reading before the refusal chain: whoever forged
-    // first chooses the event id the genuine capture will later carry, and the genuine capture is then
-    // answered with the forgery's verdict. It is a real consequence of the design, not a mistake in this
-    // file's arithmetic, and it is reported to the human partner rather than quietly engineered away.
+    // What the forgery used to do, and what it now does. Level-1 idempotency used to key on
+    // `(provider, event_id)` alone, so whoever forged first chose the answer every later delivery under
+    // that identity got: this arm measured `already_recorded` / `rejected_signature` here, the order stayed
+    // `open`, and the family's invitation stayed unpaid for money the provider had taken
+    // (`20261020120000_stage10_event_redelivery.sql` reproduces it as P04 of
+    // `supabase/tests/stage10/80_commerce_ledger.sql`, red in `q10-logs/s10r-P-red-2.txt`). The key is now
+    // the identity *and the bytes and the verification state*, which is the triple a provider retry
+    // preserves and a correction changes — so the genuine capture of these very same bytes is a delivery
+    // this build has never seen, is judged from the top, and pays.
     const replay = resultOf('D-11b', deliver('D-11b', { eventId: idFor('poison'), body: captureBody }));
-    assert.equal(keysOf(replay), ALREADY_KEYS, `D-11b: ${json(replay)}`);
-    assert.equal(replay.disposition, 'already_recorded', `D-11b: ${json(replay)}`);
-    assert.equal(replay.processing_status, 'rejected_signature',
+    assert.equal(keysOf(replay), APPLIED_KEYS, `D-11b: ${json(replay)}`);
+    assert.equal(replay.disposition, 'applied', `D-11b: ${json(replay)}`);
+    assert.equal(replay.processing_status, 'applied',
       'D-11b: the genuine capture was answered with the forgery\'s verdict');
-    assert.equal(replay.applied_effect, null, 'D-11b: and so nothing was granted');
-    assert.equal(replay.order_id, null, 'D-11b: the poisoned row carries no link either');
-    const poisoned = observe('poison');
-    assert.equal(poisoned.order.status, 'open',
-      'D-11b: the genuine capture, answered with the forgery\'s verdict, paid nothing');
-    assert.deepEqual(poisoned.attempts, [], 'D-11b: and minted no attempt');
-    assert.equal(poisoned.entitlement, null, 'D-11b: and granted no right');
+    assert.equal(replay.applied_effect, 'entitlement_granted', `D-11b: ${json(replay)}`);
+    assert.equal(replay.order_status, 'captured', 'D-11b: and the order it corrects is paid');
+    assert.notEqual(String(replay.event_row_id), String(forgedRow),
+      `D-11b: the genuine capture answered from the forgery's row ${replay.event_row_id}: ${json(replay)}`);
+    const paid = observe('poison');
+    assert.equal(paid.order.status, 'captured', 'D-11b: the capture that arrived second still captured');
+    assert.deepEqual(paid.attempts.map((a) => `${a.provider}:${a.status}`), ['razorpay:confirmed'],
+      `D-11b: a capture with no initiation still mints exactly its own attempt: ${json(paid.attempts)}`);
+    assert.equal(paid.entitlement.status, 'active', 'D-11b: and grants one right');
 
-    // The forger burned one id, so recovery is a re-delivery under a fresh one — and that re-delivery
-    // cannot be the *same bytes*. `verifyRazorpayWebhook` cross-checks the header's claim against the body's
-    // own `event_id` and refuses a disagreement with `event_id_mismatch`, which is what this arm asked for
-    // when it reused `captureBody` under the new header id (measured in run r9). What has to be identical is
-    // the money, so the assertion below says precisely that: the two documents differ only in the delivery's
-    // own identity, which is the one field the forger chose.
-    const recoveredBody = rzBody('payment.captured', idFor('poison_ok'), t0, {
-      payment: { entity: payEntity(mr, 'PS', PRICE.poison) },
-      order: { entity: orderEntity(mr, 'PS') },
-    });
-    assert.equal(recoveredBody.replace(idFor('poison_ok'), idFor('poison')), captureBody,
-      'D-11c: the recovery delivery is not the same payment under a different id, so this arm proves '
-      + 'nothing about poisoning');
-    const recovered = resultOf('D-11c', deliver('D-11c', { eventId: idFor('poison_ok'), body: recoveredBody }));
-    assert.equal(recovered.applied_effect, 'entitlement_granted',
-      `D-11c: the same payment under an id nobody burned does pay: ${json(recovered)}`);
-    assert.equal(digestFor(idFor('poison_ok')), digests.find((d) => d.eventId === idFor('poison_ok')).digest,
-      'D-11c: the ledger\'s digest is not this run\'s digest of those bytes');
+    // Two rows, one identity, and the arrival order is data rather than arithmetic: the corrected row names
+    // the forgery it follows, and the forgery keeps its own verdict and its place as the root.
+    assert.equal(rowField(rowShape(replay.event_row_id), 'supersedes'), String(forgedRow),
+      `D-11b: the corrected row does not name the row it corrects: ${shown(rowShape(replay.event_row_id))}`);
+    assert.equal(count(`from private.commerce_payment_events where event_id = '${idFor('poison')}'`), '2',
+      'D-11b: a correction that writes a row left the identity with something other than two rows');
+
+    // The forgery retried, now that a good row exists under the same identity. It is still answered from the
+    // forgery's own row — the newest row carrying *those bytes with that verification state* — and it moves
+    // nothing. This is the half the repair must not lose: recovery is not a licence to re-decide a replay,
+    // and a flapping delivery is described by the row that matches what the provider just sent.
+    const flap = resultOf('D-11c', deliver('D-11c', { eventId: idFor('poison'), body: captureBody,
+      signWith: WRONG_SECRET, verified: false, reason: 'signature_mismatch' }));
+    assert.equal(keysOf(flap), ALREADY_KEYS, `D-11c: ${json(flap)}`);
+    assert.equal(flap.disposition, 'already_recorded', `D-11c: ${json(flap)}`);
+    assert.equal(String(flap.event_row_id), String(forgedRow),
+      `D-11c: the replay of the forgery answered from a row that is not the forgery's: ${json(flap)}`);
+    assert.equal(flap.processing_status, 'rejected_signature',
+      'D-11c: and re-stated the forgery\'s verdict, which is what its row says');
+    assert.equal(rowShape(forgedRow), forgedShape,
+      'D-11c: the earlier row was rewritten when the later one arrived — the ledger is not append-only');
+    const stillPaid = observe('poison');
+    assert.equal(stillPaid.order.status, 'captured', 'D-11c: the replay moved the order');
+    assert.equal(stillPaid.attempts.length, 1, 'D-11c: and the replay minted a second attempt');
+    assert.equal(count(`from public.entitlements where wedding_id = '${workshop}'`
+      + ` and package_code = '${CODE.poison}'`), '1',
+      'D-11c: and the replay granted a second right');
   });
 
   test('D-12: a live-environment delivery is held, and the instrument itself refuses to name live', () => {
@@ -1591,32 +1633,59 @@ describe('S10 DELIVERIES', () => {
       `order_captured/commerce_event/${uidOf('hostA')}/mode=-`, 'D-14: the capture audit row is missing');
   });
 
-  test('D-16: one event id is one body — a second, different body under it never reaches the ledger', () => {
-    // Level-1 idempotency reads the event id before the refusal chain and before the state machine, so the
-    // first body an id arrives with is the only body that id will ever have in this ledger. D-11 measures
-    // the exploitable form (a forgery chooses the id); this measures the property itself, on an unknown
-    // reference so neither arm disturbs another case's order, and it exists because run r8 caught D-10b and
-    // Z-01 hitting it by accident instead of on purpose.
+  test('D-16: one event id is one arrival chain — a second body gets its own row and rewrites nothing', () => {
+    // What this case used to measure — "the first body an id arrives with is the only body that id will
+    // ever have" — is the defect, stated as if it were a property, and `20261020120000_stage10_event_-
+    // redelivery.sql` removed it (P04 of the ledger battery is its RED). The two things it was guarding
+    // are still guarded here, on the identity's now-multiple rows: no row's bytes are ever replaced, and
+    // a body the ledger cannot place mints no machine. D-11 measures the exploitable form (a forgery
+    // chooses the id); this measures the ordinary one, on a reference belonging to no order, so neither
+    // arm disturbs another case's purchase.
     const ghost = (amount, at) => rzBody('payment.captured', idFor('dup'), at, {
       payment: { entity: payEntity(NOT_A_REFERENCE, 'G16', amount) },
       order: { entity: orderEntity(NOT_A_REFERENCE, 'G16') },
     });
-    const first = resultOf('D-16a', deliver('D-16a', { eventId: idFor('dup'), body: ghost(PRICE.classic, t0) }));
-    assert.equal(first.hold_reason, 'unknown_order', `D-16a: ${json(first)}`);
-    const heldRow = first.event_row_id;
-    const bytesA = digestFor(idFor('dup'));
+    const first = deliver('D-16a', { eventId: idFor('dup'), body: ghost(PRICE.classic, t0) });
+    const a = resultOf('D-16a', first);
+    assert.equal(keysOf(a), RECORDED_KEYS, `D-16a: ${json(a)}`);
+    assert.equal(a.disposition, 'recorded', `D-16a: ${json(a)}`);
+    assert.equal(a.hold_reason, 'unknown_order', `D-16a: ${json(a)}`);
+    assert.equal(rowField(rowShape(a.event_row_id), 'digest'), first.digest,
+      'D-16a: the row written for the first body does not hold this run\'s digest of those bytes');
+    const shapeA = rowShape(a.event_row_id);
 
-    const again = resultOf('D-16b', deliver('D-16b',
-      { eventId: idFor('dup'), body: ghost(PRICE.classic + 1000, t0 + 60) }));
-    assert.equal(again.disposition, 'already_recorded', `D-16b: ${json(again)}`);
-    assert.equal(again.event_row_id, heldRow,
-      `D-16b: the second body was answered with row ${again.event_row_id}, not the first body's row ${heldRow}`);
-    assert.equal(digestFor(idFor('dup')), bytesA,
-      'D-16b: the second body replaced the bytes stored under a known event id — the ledger is not append-only');
-    assert.equal(count(`from private.commerce_payment_events where event_id = '${idFor('dup')}'`), '1',
-      'D-16: two bodies under one event id produced two ledger rows');
+    const second = deliver('D-16b', { eventId: idFor('dup'), body: ghost(PRICE.classic + 1000, t0 + 60) });
+    const b = resultOf('D-16b', second);
+    assert.equal(b.disposition, 'recorded',
+      `D-16b: a second body under a known id was echoed from the first row instead of kept as its own: ${json(b)}`);
+    assert.equal(b.hold_reason, 'unknown_order', `D-16b: ${json(b)}`);
+    assert.notEqual(String(b.event_row_id), String(a.event_row_id),
+      `D-16b: both bodies were answered with row ${b.event_row_id}: ${json(b)}`);
+    assert.equal(rowField(rowShape(b.event_row_id), 'digest'), second.digest,
+      'D-16b: the row written for the second body does not hold this run\'s digest of those bytes');
+    assert.notEqual(rowField(rowShape(b.event_row_id), 'digest'), rowField(shapeA, 'digest'),
+      'D-16b: two different bodies stored one digest, so the ledger cannot tell them apart');
+    assert.equal(rowField(rowShape(b.event_row_id), 'supersedes'), String(a.event_row_id),
+      `D-16b: the second row does not name the arrival it follows: ${shown(rowShape(b.event_row_id))}`);
+    assert.equal(rowShape(a.event_row_id), shapeA,
+      'D-16: the second body replaced or re-decided the bytes stored under a known event id — the ledger '
+      + 'is not append-only');
+    assert.equal(count(`from private.commerce_payment_events where event_id = '${idFor('dup')}'`), '2',
+      `D-16: two bodies under one event id wrote ${count(`from private.commerce_payment_events where `
+        + `event_id = '${idFor('dup')}'`)} rows, not the chain of two this case describes`);
     assert.equal(count(`from private.commerce_payment_attempts where provider_payment_ref = 'pay_G16'`), '0',
       'D-16: a body the ledger never read still reached the machine');
+
+    // And a *retry* of the first body is still one row and one answer. Without this arm the pair above
+    // would only prove that different bytes split, which is the half that could have been bought by
+    // dropping idempotency altogether.
+    const retry = resultOf('D-16c', deliver('D-16c', { eventId: idFor('dup'), body: ghost(PRICE.classic, t0) }));
+    assert.equal(keysOf(retry), ALREADY_KEYS, `D-16c: ${json(retry)}`);
+    assert.equal(retry.disposition, 'already_recorded', `D-16c: ${json(retry)}`);
+    assert.equal(String(retry.event_row_id), String(a.event_row_id),
+      `D-16c: the retry of the first body answered from the second body's row: ${json(retry)}`);
+    assert.equal(count(`from private.commerce_payment_events where event_id = '${idFor('dup')}'`), '2',
+      'D-16c: a retry of a recorded body wrote a third row');
   });
 
   test('D-15: the ledger refuses to be edited by any role, including the one that wrote it', () => {
@@ -2393,8 +2462,15 @@ describe('S10 EVIDENCE AND RESIDUE', () => {
     assert.ok(signed.length >= 20,
       `Z-01: only ${signed.length} verified deliveries were made, which is too few for this to mean anything`);
     for (const entry of signed) {
-      assert.equal(digestFor(entry.eventId), entry.digest,
-        `Z-01: ${entry.caseId} (${entry.eventId}) — the row's digest is not the digest over the signed bytes`);
+      // Row by row, not identity by identity. A provider event id can legitimately hold several rows since
+      // the redelivery repair — D-16a/D-16b and D-11a/D-11b are two of them written in this very run — so
+      // the claim is about *the row this answer named*, and it is the stronger form: it also catches a
+      // ledger that returned an id for a row it never wrote.
+      assert.match(String(entry.rowId), /^\d+$/,
+        `Z-01: ${entry.caseId} (${entry.eventId}) — a delivery that wrote a row answered with no row id`);
+      assert.equal(digestOfRow(entry.rowId), entry.digest,
+        `Z-01: ${entry.caseId} (${entry.eventId}) — row ${entry.rowId}'s digest is not the digest over the `
+        + 'signed bytes');
     }
   });
 

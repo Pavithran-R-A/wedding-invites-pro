@@ -9,13 +9,19 @@
 //   1. **it lets the delivery say things about itself** — an amount, an order reference, a kind, an
 //      environment, or its own digest — instead of deriving every one of those from bytes it verified
 //      and from facts the operator declared. CD-20, CD-21, CD-23, CD-24.
-//   2. **it quotes an attacker's identity into the ledger's idempotency key.** `record_commerce_event`
-//      answers a repeat of `(provider, event_id)` from the row it already holds, *before* it looks at the
-//      new delivery's verdict (`supabase/migrations/20261017120000_stage10_commerce_foundations.sql:960-973`).
-//      A forged delivery that names the id a later genuine one will carry therefore makes the genuine
-//      capture read as `already_recorded` and never grant. So a refusal is ledgered only under an
-//      identity the *transport* named in a header, and the instrument refuses to invent one otherwise:
-//      CD-26, CD-27 and CD-28 pin that, including the case where no statement is sent at all.
+//   2. **it quotes an attacker's identity into the ledger's idempotency key.** A refusal is ledgered only
+//      under an identity the *transport* named in a header, and the instrument refuses to invent one
+//      otherwise: CD-26, CD-27 and CD-28 pin that, including the case where no statement is sent at all.
+//      The rule was written when it could do real damage — `record_commerce_event` used to answer a repeat
+//      of `(provider, event_id)` from the row it already held, *before* looking at the new delivery's
+//      verdict, so a forged delivery naming the id a later genuine one would carry made that genuine
+//      capture read `already_recorded` and never grant (§14's finding 4; the RED is on file at
+//      `q10-logs/s10r-P-red-2.txt`). `20261020120000_stage10_event_redelivery.sql` widened that key to
+//      `(provider, event_id, raw_body_sha256, signature_valid)`, which is what stops an attacker's claim
+//      burning an identity, and group P's P24..P35 measure the flap it closes: the same bytes arriving
+//      refused and then verified are two rows, and the second one pays. The header-only rule stays for the
+//      reason that has nothing to do with the key — an unverified body is not evidence of its own identity,
+//      and a ledger row whose id came from the bytes being filed would be quoting the forgery.
 //   3. **it bends a statement.** Every value is one standard literal with its quotes doubled, or a cast
 //      NULL, and every document leaves base64-encoded; the encoding gate that makes the literals safe is
 //      asserted before a statement is sent. CD-01..CD-03, CD-14, CD-34.
@@ -29,7 +35,7 @@
 // declaration out of the migration and compares.
 
 import { createHmac } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -95,6 +101,41 @@ if (isAbsolute(MIGRATION_RELATIVE) || !existsSync(MIGRATION_PATH)) {
   throw new Error(`${MIGRATION_RELATIVE} was not found from ${process.cwd()}; this test runs from the repository root`);
 }
 const migration = readFileSync(MIGRATION_PATH, 'utf8');
+
+/** Every migration that (re)declares or revokes the ledger function, in deployment order.
+ *
+ *  The instrument calls `internal_api.record_commerce_event` with `RECORD_EVENT_ARGS`, and for the first
+ *  nine months of this stage that meant one declaration, in `MIGRATION_RELATIVE`. The idempotency repair
+ *  (finding 4) added a second one — `20261020120000_stage10_event_redelivery.sql` replaces the body with a
+ *  `CREATE OR REPLACE` — so "the migration declares fifteen arguments" no longer constrains the schema the
+ *  driver will actually face: a head that widened the list would still satisfy a check that reads only the
+ *  foundations file, and the failure would surface as a statement Postgres refuses to parse, against a real
+ *  provider, at the only moment money moves. So this scans the whole migrations directory by filename,
+ *  which is exactly the order `supabase/tests/stage10/run.sh` applies it in. */
+const LEDGER_FUNCTION = /internal_api\.record_commerce_event\s*\(/g;
+const ledgerMigrations = readdirSync(resolve(process.cwd(), 'supabase/migrations'))
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => ({
+    name,
+    relative: `supabase/migrations/${name}`,
+    text: readFileSync(resolve(process.cwd(), 'supabase/migrations', name), 'utf8'),
+  }))
+  .filter((file) => {
+    LEDGER_FUNCTION.lastIndex = 0;
+    return LEDGER_FUNCTION.test(file.text);
+  });
+
+/** The fifteen names/types of one `CREATE [OR REPLACE] FUNCTION` declaration, comments dropped. */
+function declaredArguments(text) {
+  const declared = /CREATE (?:OR REPLACE )?FUNCTION internal_api\.record_commerce_event\(\s([\s\S]*?)\)\sRETURNS jsonb/.exec(text);
+  if (!declared) return null;
+  return declared[1]
+    .split('\n')
+    .map((line) => line.replace(/--[\s\S]*/, '').trim().replace(/,$/, ''))
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/));
+}
 
 // Read from the module namespace rather than a hand-typed list, so the inventory CD-37 asserts against
 // cannot drift away from the file it describes.
@@ -275,18 +316,33 @@ describe('the literal renderers', () => {
 // ------------------------------------------------------------------ the statement builders
 
 describe('the statement builders', () => {
-  it('CD-08: names the ledger\u2019s fifteen arguments exactly as the migration declares them', () => {
-    const declared = /CREATE FUNCTION internal_api\.record_commerce_event\(\s([\s\S]*?)\)\sRETURNS jsonb/.exec(migration);
-    expect(declared, 'the function this instrument calls is still declared in that migration').not.toBeNull();
-    const params = declared[1]
-      .split('\n')
-      .map((line) => line.replace(/--[\s\S]*/, '').trim().replace(/,$/, ''))
-      .filter(Boolean)
-      .map((line) => line.split(/\s+/));
-    expect(params.map(([name, type]) => [name.replace(/^p_/, ''), type])).toEqual(RECORD_EVENT_ARGS);
-    // The revocation that keeps it unreachable from a token names the same fifteen types, in order.
-    const revoked = /REVOKE ALL ON FUNCTION internal_api\.record_commerce_event\(([a-z,\s]+)\)/.exec(migration);
-    expect(revoked[1].split(',').map((s) => s.trim())).toEqual(RECORD_EVENT_ARGS.map(([, type]) => type));
+  it('CD-08: names the ledger\u2019s fifteen arguments exactly as every migration declares them', () => {
+    expect(ledgerMigrations.map((file) => file.relative), 'the scan reaches the migration this instrument ' +
+      'was written against, not only a directory it cannot read')
+      .toContain(MIGRATION_RELATIVE);
+
+    const types = RECORD_EVENT_ARGS.map(([, type]) => type);
+    let declarations = 0;
+    for (const file of ledgerMigrations) {
+      const params = declaredArguments(file.text);
+      if (!params) continue;
+      declarations += 1;
+      expect(params.map(([name, type]) => [name.replace(/^p_/, ''), type]),
+        `${file.relative} declares the ledger function with arguments this driver would not send`)
+        .toEqual(RECORD_EVENT_ARGS);
+
+      // The same file must revoke the signature it just made. `CREATE OR REPLACE` keeps an existing
+      // function's grants, so a body change alone cannot re-expose the writer — but a *changed argument
+      // list* is a different function, and a new pg_proc row arrives with the default EXECUTE grant to
+      // PUBLIC and to the three client roles. A migration that widens this signature without revoking it
+      // would therefore hand a token-holder a direct call into the money path, and the driver's own
+      // statement list would still look correct.
+      const revoked = [...file.text.matchAll(
+        /REVOKE ALL ON FUNCTION internal_api\.record_commerce_event\(([\s\S]*?)\)/g)]
+        .map((match) => match[1].split(',').map((type) => type.trim()).filter(Boolean).join(','));
+      expect(revoked, `${file.relative} declares the ledger function but never revokes that signature`).toContain(types.join(','));
+    }
+    expect(declarations, 'at least one migration declares the function this instrument calls').toBeGreaterThan(0);
   });
 
   it('CD-09: renders one base64-wrapped SELECT of exactly fifteen casts, in the declared order', () => {
@@ -617,10 +673,14 @@ describe('what a refused delivery may be recorded as being', () => {
     expect(outcome.statement).toBe(null);
   });
 
-  it('CD-28: the poisoning this rule exists to stop: a forged id must not pre-empt a genuine delivery', () => {
-    // Two deliveries, one body. The forged one carries the identity the genuine one will arrive under;
-    // if it were ledgerable under that identity, the level-1 idempotency read would answer the genuine
-    // capture with the forged row's `rejected_signature` verdict and no entitlement would ever appear.
+  it('CD-28: a forged delivery and the genuine delivery of the same bytes are two statements, and only the second carries facts', () => {
+    // Two deliveries, one body. The forged one carries the identity the genuine one will arrive under,
+    // because that is what the transport claims. What this pins is the pair the ledger's repaired
+    // idempotency key needs in order to tell them apart: the same digest arriving twice, once with
+    // `signature_valid = false` and once with `true`, and the facts present in exactly one of the two.
+    // The pre-repair key was the identity alone, so the first of these two statements chose the answer to
+    // the second — the poisoning `20261020120000_stage10_event_redelivery.sql` removes, measured red as
+    // P04 in `q10-logs/s10r-P-red-2.txt` and green as P24..P27 of the ledger battery.
     const body = captureBody('vv1_orderreference', 'evt_shared');
     const genuine = razorpayDelivery({ body, secret: SECRET, eventId: 'evt_shared' });
     const forged = razorpayDelivery({ body, secret: 'a-different-key', eventId: 'evt_shared' });
@@ -629,12 +689,20 @@ describe('what a refused delivery may be recorded as being', () => {
     expect(first.verified).toBe(false);
     expect(first.recorded).toBe(true);
     expect(calls[0]).toContain("'signature_mismatch'::text");
+    const forgedDigest = sha256Of(forged.rawBody);
+    expect(calls[0]).toContain(`'${forgedDigest}'::text`);
+    expect(calls[0]).toContain('false');
     runDelivery({ sql, delivery: genuine, secret: SECRET, environment: 'synthetic', actorUserId: ACTOR, now: NOW });
     // This instrument records both deliveries under the identity the transport claimed, which is the
     // ledger's own design. What it must never do is let the *unverified* one supply a fact: the forged
     // row carries no merchant reference and no amount, so the order it names is untouched either way.
     expect(calls[0]).not.toContain('vv1_orderreference');
     expect(calls[1]).toContain('vv1_orderreference');
+    // The one thing this case is really about: the two statements describe the same bytes, so the only
+    // difference the ledger can key on is the verification it was told about.
+    expect(sha256Of(genuine.rawBody)).toBe(forgedDigest);
+    expect(calls[1]).toContain(`'${forgedDigest}'::text`);
+    expect(calls[1]).toContain('true');
   });
 });
 

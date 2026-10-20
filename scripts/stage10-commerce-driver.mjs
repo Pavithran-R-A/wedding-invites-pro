@@ -18,17 +18,21 @@
 //   * **A delivery never speaks for itself about money.** Every fact column comes from the verifier's
 //     answer over authenticated bytes. An unverified body contributes one thing only: the identity the
 //     *transport* named in a header. Nothing else in it is read, quoted, or stored.
-//   * **That identity rule is load-bearing, and it is why this file refuses.** `record_commerce_event`
-//     answers a repeat of `(provider, event_id)` from the row it already holds, before it looks at the
-//     new delivery (`...20261017120000_stage10_commerce_foundations.sql:960-973`). A forged delivery that
-//     quotes the id a later genuine one will carry therefore makes the genuine capture read as
-//     `already_recorded` under `rejected_signature` and never grant. So: a refusal is ledgered under
-//     `x-razorpay-event-id` when the transport supplied one — Razorpay names its event in a header — and
-//     is **not ledgered at all** when it has no such identity. Cashfree signs `<timestamp>.<body>` and
-//     keeps its id inside the body, so a refused Cashfree delivery is unverifiable *including* its
-//     identity, and this instrument says so instead of inventing one. `no_trusted_event_identity` is that
-//     sentence. A Stage 11 receiver that wants Cashfree refusals in the ledger must decide that trade
-//     explicitly; this file will not decide it quietly.
+//   * **A refusal is filed under the transport's own claim, or not at all.** Razorpay names its event in
+//     `x-razorpay-event-id`, so a delivery that failed verification can still be recorded under the
+//     identity the transport asserted — shape-checked, and with every fact column NULL. Cashfree signs
+//     `<timestamp>.<body>` and keeps its id inside the body, so a refused Cashfree delivery is
+//     unverifiable *including* its identity, and this instrument says so instead of inventing one.
+//     `no_trusted_event_identity` is that sentence. A Stage 11 receiver that wants Cashfree refusals in
+//     the ledger must decide that trade explicitly; this file will not decide it quietly.
+//     Why a claimed identity is safe to file at all is the repair in
+//     `20261020120000_stage10_event_redelivery.sql`: level-1 idempotency keys on the identity *and the
+//     bytes and the verification state*, so a forgery that burned a real event id answers only replays of
+//     its own bytes, and the genuine capture that arrives under that id later is judged from the top.
+//     Before that file the identity alone was the key — a forgery chose the answer every later delivery
+//     under it got, which is the finding this stage was asked to close. It is reproduced as group P of
+//     `supabase/tests/stage10/80_commerce_ledger.sql` and was recorded red in
+//     `q10-logs/s10r-P-red-2.txt`.
 //   * **The environment is declared, never derived.** The operator names `synthetic`/`sandbox`/`test`,
 //     the value travels to the ledger as the operator's assertion, and a verifier that echoed a different
 //     one is a refusal here rather than a row there. `live` is refused outright: a local instrument has
@@ -318,8 +322,11 @@ function refusedEventArgs({ provider, eventId, rawBodySha256, reason, environmen
 }
 
 /** The identity a *refused* delivery may be recorded under: the transport's own header claim, shape-
- *  checked, or nothing. Reading a body here would quote an attacker's string into the ledger's unique
- *  key, which is the poisoning the header comment describes. */
+ *  checked, or nothing. A body is not read here because its `event_id` is the one field an attacker can
+ *  choose freely — the header at least belongs to the transport — and because every fact column stays NULL,
+ *  the row records that something unverifiable arrived under a claimed identity, and nothing else. What the
+ *  ledger then does with that claim is `20261020120000_stage10_event_redelivery.sql`'s business: identity,
+ *  bytes and verification state together decide whether a later delivery is a replay or a correction. */
 function claimedRefusalIdentity({ provider, headers }) {
   if (provider !== 'razorpay') return null;
   const wanted = RAZORPAY_EVENT_ID_HEADER.toLowerCase();
