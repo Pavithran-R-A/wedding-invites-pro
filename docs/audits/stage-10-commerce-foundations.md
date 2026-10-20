@@ -630,3 +630,124 @@ the trail migration, group W, `s10tguard`, `G17b`/`G20b` and `C31`, with the thr
 tier here. Its under-revocation half is correct-by-design and measured (`B04`), while the three-entitlements-
 on-one-wedding question beneath it stays an **OWNER DECISION in §15**, unchanged. HTTP and browser arms:
 **unexecuted.**
+
+## 18. Item 3, both halves: a refund the ledger kept, and a refund it refused to adjudicate (2026-10-20)
+
+§14's item 3 named two things in one sentence — a partial refund that is "not modelled end to end", and (as
+item 6) the nested revoke that "aborts a delivery". They are not the same defect and were not closed the same
+way: one needed a repair, the other needed the battery to say what the build already does. This section
+carries both, and keeps them apart.
+
+**The abort was measured before it was believed** (`q10-logs/s10r-nested-probe-1.txt`, a throwaway Postgres on
+127.0.0.1:55441 built by `../s10r-measure/build_probe_chain.sh` and driven by
+`../s10r-measure/nested_refund_probe.sql`). Capture an order under `revoke` mode, refund it once — the
+entitlement goes `revoked` — then refund it again. The second delivery does not return a refusal: it raises
+`P0001 … order … has no live entitlement to revoke` out of `internal_api.record_commerce_event` (`N05`), and
+the arm that follows it (`N05b`) reads **`ledger_rows_for_identity: 0`**. The provider said the money went
+back, and after this call the database contains no row, no refund record and no audit trail saying so. `N06b`
+is the second half of the harm: replay the same delivery and the caller gets `already_recorded`, because
+level-1 idempotency is a read of a table the aborted call never wrote — so the retry is answered from a row
+that does not exist, and the genuine refund can never be recorded by the path that received it.
+
+**Root cause, in one clause:** the ledger `INSERT`, the refund row and the audit rows are written in the same
+subtransaction as the revocation step, so a raise from inside that step unwinds the evidence of the event as
+well as the decision it made. `20261020180000_stage10_nested_revocation.sql` contains the step. It wraps only
+the `PERFORM internal_api.revoke_commerce_entitlement(…)` call in a `BEGIN … EXCEPTION WHEN OTHERS` block
+(lines 563-575), records `SQLSTATE || ' | ' || SQLERRM` in `v_rev_error` (line 568), writes one
+`audit_events` row with action `revocation_refused` naming the event row, the refund row, the kind, the mode
+and that sentence (lines 569-574), and puts `revocation_error` in the applied answer (line 601, `NULL` on a
+clean step). A reviewer of a nested refund now reads two rows — `applied` / `entitlement_revoked` and
+`revocation_refused` / `… has no live entitlement to revoke` — and the pair is the truth: the money moved
+back, the policy said revoke, there was nothing left to revoke.
+
+**Three rejections that are part of the repair, not omissions.** Not a pre-check read of `public.entitlements`
+before calling: that would put a second implementation of "what is a live entitlement" beside the body that
+owns it (`20261017120000_stage10_commerce_foundations.sql:786-840`), and this stage has already written down
+that two implementations is how one of them drifts (`20261020120000_stage10_event_redelivery.sql:518`). Not an
+idempotent revoke that answers "already revoked" as success: `R33` exists to prove the second revocation is
+refused, and quieting it would weaken a test to pass a test. Not a rewrite of `applied_effect` to a new value:
+the ledger refuses `UPDATE`, so a corrected verdict would need a second row and a supersession link for a
+state the delivery already knows the answer to. The migration adds no table, column, index, trigger, grant or
+exposed name, which is why `C31`, `s10tguard`, `50_pack_release` and the 22 `api` / 39 `internal_api` declared
+surface all read unchanged at this head.
+
+**Reproduced RED.** `q10-logs/s10r-nested-red-1.txt` is the battery against the pre-repair tree and aborts at
+its first new cell: `ERROR: FAIL R22b a second refund under revoke is answered, not raised out of the
+delivery`. That is the shape of the RED this defect permits — the delivery raises, so nothing after it in the
+block is measurable, and each later claim is only evidence from the repaired tree.
+
+**What measures it now.** `R22b`..`R22h` (`80_commerce_ledger.sql:1089-1118`) drive the second refund through
+the shipped battery rather than a scratch probe: answered and not raised (`R22b`), one ledger row for the new
+identity (`R22c`), `applied/entitlement_revoked` on it (`R22d`), **two** refund rows because the provider moved
+the money twice (`R22e`), the refusal on record and joined to its own event row by `event_row_id` (`R22f`), the
+clean first revocation not retroactively tagged (`R22g`), and nothing revoked twice — one `revoked`
+entitlement and one `revoked` action (`R22h`). It sits between `R22` and the chargeback arm, so the ordering
+claim the file has always made about `revoke` mode still holds after the insertion.
+
+**The four states the directive asked to keep distinct are each pinned somewhere, and the repair is the only
+place two of them appear together.** A *rejected event* is `processing_status = rejected_signature` with no
+effect and no money row (`V01`..`V04`, `Z03`'s `rejected_signature=4`). A *failed transaction* is a `captured`
+order refused by the state machine and a `payment_failed` attempt (`T*`, `R-03`). A *captured payment* is
+`applied` / `entitlement_granted` with the attempt minted and the quote frozen (`R01`..`R15`, `Z02`, `Z07` —
+`Z07` is the cell that says every entitlement on this chain came from a capture and none from an admin). An
+*activated entitlement* is its own row with its own status (`Z06`), and a *refused effect inside an applied
+delivery* — the new distinction — is `applied` with `revocation_error` populated and a `revocation_refused`
+audit row. A hold is still not any of those four: `R15b`/`R15c` and `Z03`'s `held_for_reconciliation` keep it a
+third disposition, and `Z08` still proves nothing in the money tables was deleted.
+
+**The partial refund is closed as a disposition, not as a model.** `R15b`..`R15i` (`80_commerce_ledger.sql:1020-1053`)
+deliver a refund of 249950 against an order frozen at 499900 and assert what the build actually does: it is
+`held_for_reconciliation` (`R15b`), named `amount_mismatch` by the same guard that holds a wrong-amount capture
+(`R15c`), **no** `commerce_refunds` row is invented for a claim this build will not adjudicate (`R15d`), the
+ledger row keeps the half the provider claimed so a reviewer sees the figure and not only the refusal
+(`R15e`), the entitlement the full money bought stays `active` (`R15f`), the held delivery writes no audit row
+of its own — §4.2's rule that a refusal decides nothing about the money, pinned as a difference against the
+count taken before the delivery (`R15g`) — and `commerce_reconcile` reports it as `amount_drift` (`R15h`)
+naming the order's own frozen price (`R15i`). Placed before the deliberate policy flip, because `R29`'s
+null-amount refund runs under `revoke` mode and legitimately revokes that entitlement: the first draft of
+these cells, placed after it, failed `R18 … got [revoked] want [active]` (`q10-logs/s10r-nested-run-6.txt`),
+which is the harness catching a false claim rather than a defect in the ledger.
+
+**Inventories moved, each re-pinned from the run that failed on it, none predicted.** `Z03` went to
+`applied=24` (`run-2`) and then to `held_for_reconciliation=14` (`run-7`); `Z05`'s refund census to
+`refund/succeeded=5` (`run-3`); `Z15` to `refund_succeeded=5` plus the new `revocation_refused=1` (`run-4`)
+and then `swept=17`, because reading the reconciler's finding about the half-refund is itself a sweep
+(`run-8`). The assertion floor tracks the last passing read: 371 after the nested cells, and **379** after the
+partial-refund cells (`IF n < 379` at `80_commerce_ledger.sql:2193`, set from
+`q10-logs/s10r-nested-run-9.txt`, which ends `STAGE10 LEDGER TESTS PASSED (380)` with functions at 293).
+`q10-logs/s10r-nested-all-1.txt` is the whole runner after all of it: exit 0, thirty-two suite lines green
+across the six chains, and every historical total unchanged — Stage 9's 134/94, Stage 8's 182/185, Stage 7's
+255/116, Stage 2's 464/106/50/77, Stage 3's 284 and 46/49, Stage 4's 428/57, Stage 5's 122/50/124, Stage 6's
+91/80. Node at this tree: `typecheck` clean, `product:check` 260 files / 0 violations, `dbtypes:check` exit 0
+now reading **31** migration files (the 30 §17 recorded plus this repair), and `npm test` 63 files / 1375
+tests passed — the last of these is measured, not inferred, because no JavaScript reads the revocation step.
+
+**Three limitations.** The contained block wraps one call, so any *other* raise inside the effects block — a
+trigger refusing a write, a check the fixtures did not reach — still unwinds that delivery's ledger row; `N05`
+is the only raise the probe could produce, and this section does not claim the class is closed. The refusal is
+recorded, not retried: nothing re-attempts the revocation if a human later mints the entitlement, so a nested
+refund's decision is escalated rather than resolved. And the partial refund stays unmodelled end to end — there
+is no `commerce_refunds` shape for a refund that is less than the price, and whether one should exist, or
+whether a partial refund should revoke proportionally or at all, is a merchant-policy question that §15 keeps.
+
+**The design note moved with it, including one sentence §16 and §17 left stale.** `commerce-foundations.md`
+§13 gains two threat rows — the refund whose own revocation step refuses, and the refund for less than the
+frozen quote — each naming the control, the cells (`R22b..R22h`, `R15b..R15i`) and the tier that does not
+exist for it, and the refunded-order row's range went from `R01..R31` to `R01..R33`, which was already an
+understatement before this pass. §13's case-id preamble also lists battery 1's groups, and it still said
+`F Q D H S C R X K Z` after §16 added group P and §17 added group W; it now reads `C D F H K P Q R S W X Z`,
+re-derived by counting the `s10l_*('<id>` literals in the file rather than by remembering which sections
+inserted a group last. Battery 2's list was measured the same way and is correct as written.
+
+**What did NOT run.** The HTTP and browser tiers are unexecuted for this whole segment — the Docker engine is
+down and starting it is the human partner's action — so nothing here is evidence about a refund webhook that
+arrives over the wire, about `revocation_error` surviving PostgREST's JSON encoding, or about anything the host
+panel shows an operator for a held partial refund.
+
+**Disposition.** §14's item 6 nested-revoke half (`R-06`): **CLOSED at the SQL tier** by the contained block,
+`R22b`..`R22h` and `Z15`'s `revocation_refused`, with the first limitation above as its boundary. §14's item 3
+partial-refund half: **MITIGATED WITH EXPLICIT LIMITATION** — `R15b`..`R15i` prove it is held, named, kept,
+escalated and not adjudicated by the ledger; the modelling question is an **OWNER DECISION in §15**. Items 1
+and 2 of §14 (deletion of money history, publish-gate race) are untouched by this section and stay **OPEN**.
+HTTP and browser arms for everything here: **unexecuted.**
+

@@ -467,7 +467,7 @@ Stage 10 pretends to have recovered an event we never received.
 Case ids are the labels the tiers actually carry, and there are **three disjoint vocabularies**, because
 each tier names its own cells: the unit tier uses `WH-00..WH-46` (`scripts/stage10-webhook-core.test.mjs`)
 and `CD-01..CD-42` (`scripts/stage10-commerce-driver.test.mjs`); the SQL batteries use a bare letter and
-two digits — battery 1 `80_commerce_ledger.sql` carries `F Q D H S C R X K Z` and battery 2
+two digits — battery 1 `80_commerce_ledger.sql` carries `C D F H K P Q R S W X Z` and battery 2
 `90_commerce_functions.sql` carries `A C G H N R T V Z`, each with one shared id `L01` (the count floor,
 the last assertion the file makes about itself), with the reachability and table-boundary matrices
 generating their own labels at run time — and both print `NOTICE: PASS <id> <sentence>` per cell, which the
@@ -498,7 +498,9 @@ after the ids were re-derived from the three files rather than from the design d
 | A secret echoed back through a refusal or a log line | every branch returns a reason name, and each branch is scanned for the secret it was given | WH-01, WH-02, WH-42 |
 | Double-clicked / parallel checkout | partial unique live order per wedding+package | battery 1 `Q12..Q14`; HTTP `P-12` |
 | Duplicate capture (two events, one truth) | state machine refuses a second grant; `captured` is terminal for granting | battery 1 `D33`, `D35`, `D38` |
-| Refunded order / chargeback | refund row, `hold_for_review` default, revocation only through the trusted path | battery 1 `R01..R31`; HTTP `R-01..R-11` |
+| Refunded order / chargeback | refund row, `hold_for_review` default, revocation only through the trusted path | battery 1 `R01..R33`; HTTP `R-01..R-11` |
+| A refund whose own revocation step refuses takes the evidence of the refund with it | the revoke call is contained, so the ledger row, the refund row and the money survive it; the step's refusal becomes its own audit verb and its own key on the answer | battery 1 `R22b..R22h`, `Z15`'s `revocation_refused`; repair `20261020180000_stage10_nested_revocation.sql`. **No HTTP or browser arm exists** — the tiers that would drive it over a wire did not run |
+| A refund for less than the frozen quote | `amount_mismatch` holds it, names it, keeps the claimed amount, invents no refund row, and the reconciler reports it as drift | battery 1 `R15b..R15i`. **Whether a partial refund should be modelled at all is an owner decision**, recorded in the Stage 10 audit §15 and §18 |
 | A refund recorded as the payment it reverses, so the reader is sent to the charge | the verifier puts the refund's or chargeback's own id in the single reference slot a non-payment delivery has; the payment id is only the fallback | unit `WH-43..WH-46`; battery 1 `R02`; HTTP `R-01`, `R-05` |
 | Publish without paying | `publications` trigger under `entitlement_required` | battery 2 `G01..G22`; HTTP `G-01..G-06`, `G-08` |
 | Stale tab publishes after a gate change | the gate is at the row, so the answer is derived at write time from the policy and the wedding's own `wedding_id`, not from the click | battery 2 `G03`, `G04`, `G12`, `G13`, `G16b`; HTTP `G-03`, `G-07`. **No concurrent two-writer test exists** — the re-derivation is proven by changing the policy mid-transaction and re-asking, not by racing |
