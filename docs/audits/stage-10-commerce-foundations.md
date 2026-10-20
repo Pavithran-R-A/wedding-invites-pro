@@ -751,3 +751,134 @@ escalated and not adjudicated by the ledger; the modelling question is an **OWNE
 and 2 of §14 (deletion of money history, publish-gate race) are untouched by this section and stay **OPEN**.
 HTTP and browser arms for everything here: **unexecuted.**
 
+## 19. Item 4's remaining half: two writers at once, and a delete that reaches for money history (2026-10-20)
+
+§18 left §14's items 1 and 2 open on purpose: item 2 was "no concurrent publish-gate race test" and item 1
+was "nothing deletes a *wedding* and reads the money rows back". Both are measurement gaps, so both close with
+a measurement rather than with an argument. This section carries the tier that makes them, what it proved, and
+the two postures it exposed — one of which is a decision, not a defect.
+
+**The tier is a seventh chain, `race`, in the same runner.** `supabase/tests/stage10/run.sh:85` accepts it,
+`:433-436` builds it and drops its database, and `run_race_battery` (`:295`) drives it. Its chain (`st10qual_race`)
+runs nothing else, for the reason §17's census gives for every other chain here: the closing counts are
+cluster-wide. It is the only chain that ever holds two live sessions at once, so `start_session` (`:108`) exists
+in both backends and `marker()` gates each pair — a rendezvous that did not happen aborts the run with
+`DRIVER_TIMEOUT … arm is invalid` instead of letting the assert files read a serialised non-race as proof.
+The four counted suites are `70_race_fixtures` (1, cell `RF00`), `73_race_arm1_asserts` (`RA00`..`RA09`),
+`76_race_arm2_asserts` (`RB00`..`RB07`) and `77_race_del_asserts` (`RM00`..`RM20`): **33 cells**, all of them
+state claims. Their ids carry an `R` prefix because this project cites a bare letter-and-two-digits id by group
+alone — battery 1 already owns `A`…`Z` including `X`, battery 2 owns `A` — and a race cell that could be read as
+either of them is a citation a later reader cannot check. Session chronology is deliberately *not* counted: a
+log line is not an assertion, so `session_log` prints it masked and fails it only on a nonzero psql exit.
+
+**Arm 1: the flip that was written but not committed.** Sessions `71_race_a1_flip.sql` /
+`72_race_b1_publish.sql`. Advisory 7700 (`71:14`, `72:13`) makes B's publish start *after* A's
+`UPDATE private.commerce_policy SET publish_gate='entitlement_required', publish_required_package_codes=ARRAY['QCLASSIC']`
+is written; B then announces by *holding* 7701 (`72:31`) across its own INSERT, and A polls `pg_locks` for a
+different pid holding it (`71:28`). A symmetric second `pg_advisory_lock` cannot substitute — the first arriver
+wins, which measures the safe case and calls it a race. The measured chronology
+(`q10-logs/s10r-race-tier-10.txt:39-45`, the post-rename run; `s10r-race-tier-9.txt:38-44` recorded the same
+sequence before the ids were renamed) is the point: `A1_LOCKED= at 17:00:42`, `A1_SEES_B1_HOLDING_ANNOUNCE after
+3 polls`, `B1_POLICY_SEEN_BY_THIS_TX=permissive`, `B1_OUTCOME=ACCEPTED`, `A1_COMMITTED=entitlement_required/QCLASSIC`
+at 17:00:42 — B read the last committed policy while A's flip was written but uncommitted, and A's commit
+followed. Nothing in this arm activates paid publishing: `live_capture_enabled` is never touched (the
+chain's own census prints `LIVE_CAPTURE=false`), the flip is reverted inside its own assert file, and the
+publication it accepts is a fixture wedding with no order and no money behind it.
+
+**What RA00..RA09 pin, and the posture that follows.** `RA00` the flip is now the committed policy; `RA01`/`RA02`
+the un-entitled publication *survives* it, one row, zero entitlements; `RA03` (`73_race_arm1_asserts.sql:93`)
+the identical insert against the committed flip is refused with the full `42501` sentence; `RA04` the refused
+wedding has no publication; `RA05` (`:117`) revert to `permissive` and the same statement succeeds — so `RA03`
+refused because of the policy and not because of anything about w4; `RA06`..`RA08` no money row moved
+(`orders=1`, `ledger=0`, `entitlements=0` chain-wide); `RA09` the floor (`:134`). **The gate reads the last
+committed policy at statement time and is not retroactive: an accepted publication outlives a flip that would
+have refused it.** Whether the product wants a flip to preempt in-flight publishers is the owner's call — the
+repair is a `SELECT … FOR UPDATE` on the policy row for the duration of the publish, which trades a
+second-level write-skew for serialising every publish against every policy change. §15's list grows by that
+one line. The tier records the behaviour; it does not quietly choose.
+
+**Arm 2: one provider event identity, two concurrent captures.** Sessions `74_race_a2_first.sql` /
+`75_race_b2_second.sql`, gating on advisory 7710 (`74:12`, `75:15`), with A holding its transaction open for
+`pg_sleep(2)` after its own answer (`74:33`) so B's delivery lands while A's rows are still uncommitted.
+Measured (`q10-logs/s10r-race-tier-10.txt:52-59`, post-rename; `s10r-race-tier-9.txt:52-58` recorded the same
+shape before the ids were renamed): A applied `applied/entitlement_granted` at 17:00:44 and committed at
+17:00:46; **B's first attempt blocked from 17:00:44 to 17:00:46 and came back `RAISED 23505 …
+commerce_attempts_payment_ref_uk`** — the logical proof of overlap, because a committed A would have been
+answered by the idempotency pre-read instead of hitting the index; B's second attempt, after A's commit,
+answered `already_recorded/entitlement_granted`. `76_race_arm2_asserts.sql:57` (RB00) re-proves the identity
+serialised — `already_recorded` echoing the original applied effect — and RB01..RB06 count the aftermath: one
+ledger row, one head (`supersedes_event_row_id IS NULL`), one row that is `processing_status='applied'` with
+the capture effect, one attempt for `pay_conc2`, the order `captured/true`, one entitlement and one
+`granted_by_commerce_capture` audit row. RB07 is the floor (`:110`). Two concurrent deliveries and a third
+replay, one of everything.
+
+**The sharp edge is recorded, not smoothed.** The first clash of a collision surfaces as a raw `23505`, so a
+gateway in front of this function would return a 500 for a delivery that is, from the database's point of
+view, already handled; the provider's at-least-once retry is what converges it, and the retry then gets the
+graceful answer. That is tolerable for an idempotent ledger and would not be for a non-idempotent write. If a
+later pass turns the first clash into a graceful `already_recorded`, RB00 is the cell that says so, because the
+arm as written would no longer be able to produce the answer it asserts.
+
+**The deletion arms close item 1 in the order a real delete meets it.** `77_race_del_asserts.sql` builds w3's
+history through the product's own writers (`RM00` quote, `RM01` capture, `RM02` `captured/1`), asserts w3 arrived
+with exactly one version (`RM03`, `:91` — the precondition for what follows), and then deletes. `RM04` (`:95`)
+refuses with `23503` naming `invitation_versions_wedding_id_fkey`; the file strips w3's versions inside the
+same transaction and `RM06` (`:105`) refuses again, this time with `entitlements_wedding_id_fkey` — so the
+money side is a blocker of its own, not an afterthought behind the version history. `RM08` deletes w5, the
+version-less money-less wedding, cleanly, which is the half that proves the refusals above are about history
+rather than "weddings cannot be deleted". `RM09` (`:130`) erases the owner through `auth.users` and is refused
+by the frozen-quote guard its own SET NULL cascade provokes — `23514 … is a frozen quote: wedding, owner,
+reference, package, price version, amount and currency may never change` — and `RM10`..`RM12` read the owner,
+w3's order and entitlement and w2's captured order and ledger row back as still present. `RM14` (`:159`) is the
+"changed nothing" digest at `2/2/2/2/0`, and `RM20` (`:173`) is the floor at thirteen pre-floor cells.
+
+**RED before each correction, and one correction that was not measured.** The tier was driven through five
+named failures (`q10-logs/s10r-race-tier-1.txt` … `-8.txt`): the runner dying silently at the fixture, which
+was an *instrument* defect — an uncounted suite file makes `grep -oE` return 1 inside a command substitution
+and `set -e` kills the script before `suite()`'s own handler can speak, so the fixture became a counted suite
+rather than the checker being softened; a `42703 column "applied" does not exist`, corrected to
+`processing_status = 'applied'` because that is the ledger's own vocabulary (`20261017120000_stage10_commerce_foundations.sql:310-316`);
+a `23502 null value in "publish_required_package_codes"`, because the column is NOT NULL with default `'{}'`
+and the permissive revert must write `ARRAY[]::text[]`; `RM14`'s digest off by one order, because the expected
+value had been carried over from a probe fixture that planted one order more — the run printed the real value
+and the cell now matches it; and the floor at 14 against thirteen actual cells, which is arithmetic, not a
+weakened claim: the same thirteen labels are asserted before and after. The one correction that was **not**
+measured is `RM03`'s rewrite from an INSERT into an asserted count — `invitation_versions` carries
+`UNIQUE (wedding_id, version_number)` (`20260925120200_stage2_versions_and_publication.sql:36`) and the shared
+fixture already gives w3 a version (`70_race_fixtures.sql:40-45`), so the insert would have died on `23505`
+before `RM04` could ever be reached; that is read from the schema, and file 77 was never executed with the
+insert in it.
+
+**Inventories did not move.** The race chain's head census is byte-for-byte the one the other chains print:
+`API_NAMES=22 INTERNAL_NAMES=39 PUBLIC_TABLES=20 COMMERCE_TABLES=6`, `POLICY=permissive GATE_PACKAGES=0
+LIVE_CAPTURE=false REFUND_MODE=hold_for_review STORAGE_BUCKETS=3`. No migration, no declared name, no table,
+no bucket — this section adds test files and one runner mode, so `C31`, `s10tguard`, `50_pack_release`,
+`check-db-contract` and `dbtypes:check` have nothing to re-pin.
+
+**What did NOT run.** Nothing here is evidence over a wire. The HTTP and browser tiers are unexecuted for this
+whole segment (the Docker engine is down and starting it is the human partner's action), so the collision's
+500-shaped surface, PostgREST's encoding of `already_recorded`, and any host-panel consequence of a refused
+wedding delete are unmeasured. The race tier runs on plain Postgres with the role/auth shim: two live psql
+sessions, which is a genuine two-writer test of the *database*, not of a gateway, a queue or a provider.
+
+**The whole runner, with the new chain inside it.** `q10-logs/s10sql-all-after-race-2.txt` is `run.sh all` on
+the throwaway cluster at the post-rename tree: exit 0, **thirty-six** suite lines green across the seven
+chains — four more than §18 recorded, and they are this tier's — with every historical total unchanged:
+Stage 10's own 380/293, Stage 9's 134/94, Stage 8's 182/185, Stage 7's 255/116, Stage 2's 464/106/50/77,
+Stage 3's 284 and 46/49, Stage 4's 428/57, Stage 5's 122/50/124, Stage 6's 91/80. The pre-rename sweep
+(`s10sql-all-after-race-1.txt`) recorded the same thirty-six lines and the same totals; the rename changed
+cell labels and comments, not behaviour.
+
+**Disposition.** §14's item 1 (no deletion-of-money-history test): **CLOSED at the SQL tier** by `RM03`..`RM14` —
+the boundary is exercised in the order a real delete meets it, the permissive control is `RM08`, and the owner
+path is refused by the freeze guard rather than by a missing grant. Its boundary is stated in §14's own terms
+and stays true: item 9's retention question (what an account erasure *should* do about a wedding with a
+purchase) is still Stage 13's, and `N04` still means no browser role could have issued these DELETEs anyway —
+this tier proves the relational guard beneath that, not an authorization decision. §14's item 2 (no concurrent
+publish-gate race test): **MITIGATED WITH EXPLICIT LIMITATION** — the race now exists, is arranged rather than
+hoped for, and its outcome is pinned (`RA01`/`RA02` alongside `RA03`); the limitation is that the gate is a
+last-committed read and therefore not retroactive, which is a posture the tier records and the owner must
+choose. Arm 2's first-clash `23505` is the same class of finding: safe for an idempotent ledger, sharp for a
+gateway, and recorded as a contract cell rather than repaired silently. HTTP and browser arms for both:
+**unexecuted.**
+

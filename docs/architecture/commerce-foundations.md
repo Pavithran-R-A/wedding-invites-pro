@@ -464,7 +464,7 @@ Stage 10 pretends to have recovered an event we never received.
 
 ## 13. Threat model → control → test
 
-Case ids are the labels the tiers actually carry, and there are **three disjoint vocabularies**, because
+Case ids are the labels the tiers actually carry, and there are **four disjoint vocabularies**, because
 each tier names its own cells: the unit tier uses `WH-00..WH-46` (`scripts/stage10-webhook-core.test.mjs`)
 and `CD-01..CD-42` (`scripts/stage10-commerce-driver.test.mjs`); the SQL batteries use a bare letter and
 two digits — battery 1 `80_commerce_ledger.sql` carries `C D F H K P Q R S W X Z` and battery 2
@@ -472,9 +472,15 @@ two digits — battery 1 `80_commerce_ledger.sql` carries `C D F H K P Q R S W X
 the last assertion the file makes about itself), with the reachability and table-boundary matrices
 generating their own labels at run time — and both print `NOTICE: PASS <id> <sentence>` per cell, which the
 runner counts (`supabase/tests/stage10/run.sh:162`); the HTTP tier dashes them (`D-01..D-16`, `G-01..G-08`,
-`N-01..N-05`, `P-01..P-16`, `R-01..R-11`, `S-01..S-11`, `Z-01..Z-04`) and prints them as test names.
-A citation here that no tier carries is a claim, not evidence, which is why this preamble was written
-after the ids were re-derived from the three files rather than from the design draft.
+`N-01..N-05`, `P-01..P-16`, `R-01..R-11`, `S-01..S-11`, `Z-01..Z-04`) and prints them as test names; and
+the race tier qualifies them — `RF00` (`70_race_fixtures.sql`), `RA00..RA09`
+(`73_race_arm1_asserts.sql`), `RB00..RB07` (`76_race_arm2_asserts.sql`), `RM00..RM20`
+(`77_race_del_asserts.sql`) — because a bare letter-and-two-digits id is cited by group alone (battery 1
+owns `A`…`Z` including `X`, battery 2 owns `A`), so the `R` prefix is what keeps a race cell from being
+read as one of theirs. The race tier's four session files (`71`, `72`, `74`, `75`) print chronology, not
+assertions, and are not counted. A citation here that no tier carries is a claim, not evidence, which is
+why this preamble was written after the ids were re-derived from the files rather than from the design
+draft.
 
 | Threat | Control | Cases |
 | --- | --- | --- |
@@ -503,8 +509,9 @@ after the ids were re-derived from the three files rather than from the design d
 | A refund for less than the frozen quote | `amount_mismatch` holds it, names it, keeps the claimed amount, invents no refund row, and the reconciler reports it as drift | battery 1 `R15b..R15i`. **Whether a partial refund should be modelled at all is an owner decision**, recorded in the Stage 10 audit §15 and §18 |
 | A refund recorded as the payment it reverses, so the reader is sent to the charge | the verifier puts the refund's or chargeback's own id in the single reference slot a non-payment delivery has; the payment id is only the fallback | unit `WH-43..WH-46`; battery 1 `R02`; HTTP `R-01`, `R-05` |
 | Publish without paying | `publications` trigger under `entitlement_required` | battery 2 `G01..G22`; HTTP `G-01..G-06`, `G-08` |
-| Stale tab publishes after a gate change | the gate is at the row, so the answer is derived at write time from the policy and the wedding's own `wedding_id`, not from the click | battery 2 `G03`, `G04`, `G12`, `G13`, `G16b`; HTTP `G-03`, `G-07`. **No concurrent two-writer test exists** — the re-derivation is proven by changing the policy mid-transaction and re-asking, not by racing |
-| Accidental cascade deletion of money history | NO ACTION to weddings, SET NULL to users | **no cell asserts this in any tier yet.** `N04` proves no browser role holds DELETE and `Z08` proves the run deleted nothing, but nothing deletes a *wedding* and reads back the money rows. Recorded as an open finding, not a pass |
+| Stale tab publishes after a gate change | the gate is at the row, so the answer is derived at write time from the policy and the wedding's own `wedding_id`, not from the click | battery 2 `G03`, `G04`, `G12`, `G13`, `G16b`; HTTP `G-03`, `G-07`; **race tier** `71_race_a1_flip.sql` + `72_race_b1_publish.sql` driven concurrently and pinned by `73_race_arm1_asserts.sql` `RA00`..`RA09` (`q10-logs/s10r-race-tier-10.txt`; the pre-rename run is `s10r-race-tier-9.txt`). The measured posture: the gate reads the last *committed* policy at statement time and is **not retroactive** — a publication accepted through an uncommitted flip survives it (`RA01`/`RA02`), and the same statement one moment later is refused (`RA03`). Whether a flip should preempt in-flight publishers is decision 7 in §15. **No HTTP or browser arm exists** — the tiers that would drive it over a wire did not run |
+| Two deliveries of one provider event identity arrive at the same instant | the idempotency pre-read for a committed first delivery; the unique attempt reference for a concurrent one | race tier `74_race_a2_first.sql` + `75_race_b2_second.sql`, pinned by `76_race_arm2_asserts.sql` `RB00`..`RB07`: the loser of the overlap is raised as `23505` on `commerce_attempts_payment_ref_uk` (its wall clock spans the winner's open transaction), the retry after the winner commits is answered `already_recorded/entitlement_granted`, and the chain ends with exactly one ledger row, one head, one attempt, one `captured` order, one entitlement and one grant audit. `RB00` re-proves the identity serialised, so a repair that makes the *first* clash graceful changes that cell's answer and is caught there. Sharp edge kept in view: a gateway sees a 500 at the moment of collision and the provider's retry is what converges |
+| Accidental cascade deletion of money history | NO ACTION to weddings, SET NULL to users, the frozen-quote guard on the order | **race tier** `77_race_del_asserts.sql`: `RM04` refuses a wedding-with-versions delete as `23503 … invitation_versions_wedding_id_fkey`, `RM06` refuses it again after the versions are stripped as `23503 … entitlements_wedding_id_fkey`, `RM08` deletes the version-less money-less wedding (so the refusal is about history, not about weddings), `RM09` refuses the owner erase as `23514` on the frozen-quote guard its own cascade provokes, and `RM10`..`RM14` read every money row back as present. `N04` still proves no browser role holds DELETE, and `Z08` still proves the run deleted nothing — but the relational guard beneath those privilege facts is now exercised, which is what this row used to admit was missing |
 | Ledger rewritten after the fact | absolute no-UPDATE trigger | battery 2 `T73..T79`, `T85`; HTTP `D-15`, `D-16` |
 | Provider outage / drift | held rows + reconciliation sweep | battery 1 `K02..K34`; HTTP `R-08`, `R-11` |
 | A new migration quietly exposes a money table | `40_catalog.sql` inventories under `st2_at_least('stage10')`, `check-db-contract.mjs` `NON_CLIENT_SCHEMAS`, `product:check` service-key rule | `supabase/tests/stage2/40_catalog.sql` (run at the Stage 10 head in the `all` chain), the two Node contract checkers, battery 2 `N07..N11`. These instruments assert by inventory, not by numbered case id; the unit tier's `CD-` prefix is this stage's *commerce driver*, not a catalogue defence |
@@ -514,10 +521,13 @@ after the ids were re-derived from the three files rather than from the design d
 1. **Unit (engine-independent)** — the verifier core and adapters, the order/quote decision rules, the
    DTO projection, the state-machine edge table as data. Runs with no database, so it is the tier that
    answers when the host has no engine — which is why it ran first here.
-2. **SQL battery** — `supabase/tests/stage10/80_commerce_ledger.sql`, `90_commerce_functions.sql`,
-   driven by `supabase/tests/stage10/run.sh` with `commerce|render|guest|family|historic|all`, in a throwaway
-   database built from the migration chain, and `supabase/tests/stage2/40_catalog.sql` widened behind the
-   head gate.
+2. **SQL battery** — `supabase/tests/stage10/80_commerce_ledger.sql`, `90_commerce_functions.sql` and the
+   eight-file `race` tier (`70_race_fixtures.sql` … `77_race_del_asserts.sql`: four counted suites, four
+   session logs), driven by `supabase/tests/stage10/run.sh` with
+   `commerce|render|guest|family|historic|race|all`, in a throwaway database built from the migration
+   chain, and `supabase/tests/stage2/40_catalog.sql` widened behind the head gate. The race chain
+   (`st10qual_race`) runs nothing else, for the reason the batteries do — its closing census counts
+   cluster-wide — and it is the only chain that holds two live sessions at once.
 3. **HTTP battery** — `supabase/tests/api/stage10_commerce_http.test.mjs` against the live
    `localvivaahvarnam` stack through Kong/PostgREST: what a browser can and cannot reach, plus the
    host DTO. `api/run.sh`'s `leak_census` (`:114-139`) gained seven stores — the six
@@ -547,17 +557,18 @@ Anything not measured is named as unrun.
   1327 tests across 60 files (`q10-logs/s10-unit-final-1.txt`, `s10-unit-truthsync-1/2.txt`) before those
   three projection files existed; the earlier capture is kept as the instrument's history, not the number
   to quote.
-- **Tier 2 — measured on two engines, and they agree.** `run.sh commerce` with `STAGE10_LOCAL=1` on the
-  host's native `PostgreSQL 17.10` → ledger 291, functions 277 (`q10-logs/s10-sql-truthsync-3.txt`,
-  re-run over this tree as `q10-logs/s10-sql-truthsync-4.txt`).
-  `run.sh all` with no local override starts the engine the product ships on, `postgres:16-alpine`,
-  rebuilds six chains and comes back green on every suite — Stage 10 291/277, Stage 9 134/94,
-  Stage 8 182/185, Stage 7 255/116, Stage 2 50/464/106/77, Stage 3 46/49/284, Stage 4 428/57,
-  Stage 5 122/50/124, Stage 6 91/80 — 66 `PASSED (n)` lines, no `!!`, no FAIL, exit 0
-  (`q10-logs/s10-sql-pg16-all-1.txt`). The two logs' suite-total multisets differ in exactly one number,
-  functions 276 → 277, and that is the `G05h` cell added between the runs, not the engine
-  (`q10-logs/s10-sql-all-repair-1.txt` is the earlier 17.10 sweep). This closes the parity question this
-  stage had recorded as owed: the batteries are no longer proven only on a Windows-native 17.10.
+- **Tier 2 — measured on the host's native engine at this tree; container-engine parity is unexecuted.**
+  `run.sh all` with `STAGE10_LOCAL=1` on `PostgreSQL 17.10` rebuilds seven chains and comes back green on
+  every suite — Stage 10 ledger 380, functions 293, the race suites 1/10/8/14, and every historical total
+  unchanged: Stage 9 134/94, Stage 8 182/185, Stage 7 255/116, Stage 2 50/464/106/77, Stage 3 46/49/284,
+  Stage 4 428/57, Stage 5 122/50/124, Stage 6 91/80 — **36 verified suite lines**, no `!!`, no FAIL,
+  exit 0 (`q10-logs/s10sql-all-after-race-2.txt`). The earlier container sweep on `postgres:16-alpine`
+  measured the tree before §16–§19 added their cells: Stage 10 291/277, 66 `PASSED (n)` occurrences,
+  exit 0 (`q10-logs/s10-sql-pg16-all-1.txt`); the earlier native runs are kept as the instrument's
+  history (`s10-sql-truthsync-3/4.txt`, `s10-sql-all-repair-1.txt`). The Docker engine is down, so **the
+  race chain has never run on the container engine and this tree's parity with the shipped engine is
+  unexecuted**, not inherited from those older runs; re-running `run.sh all` with the container backend
+  is owed once the engine is available.
 - **Tier 3 — measured, and the arm that was red is now green.** `supabase/tests/api/run.sh` runs the ten
   HTTP suites against the live `localvivaahvarnam` stack and exits 0: stage10 68, stage3_publication 39,
   stage3_security 56, stage4 28, stage5_admin_cli 36, stage5_pack_driven 28, stage6 34, stage7 61,
@@ -620,6 +631,13 @@ Stage 10 proceeds without each of these; none of them blocks the ledger, the gua
    (`edge_runtime` is off locally; kickoff §6 lists server availability as open).
 6. **Merchant/KYC identity** — which legal entity takes the money. Blocks everything that moves real
    funds; blocks nothing here.
+7. **Whether a policy flip preempts in-flight publishers** — the publish gate reads the last committed
+   policy at statement time, so a publication that is accepted while a flip is written but uncommitted
+   survives that flip (`RA01`/`RA02` in the race tier; the same statement against the committed flip is
+   refused, `RA03`). If the owner wants the flip to bind transactions already in flight, the repair is a
+   `SELECT … FOR UPDATE` on the policy row in the publish path, which serialises every publish against
+   every policy change. Blocked either way: nothing today; the measured posture is recorded in the
+   Stage 10 audit §19 rather than silently chosen.
 
 Reporting any one of these as decided would be the kind of claim Stage 0 was written to remove from
 this repository.
