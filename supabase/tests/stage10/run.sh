@@ -10,6 +10,8 @@
 #   bash supabase/tests/stage10/run.sh historic            # the older suites, both chain variants
 #   STAGE10_LOCAL=1 PGHOST=127.0.0.1 PGPORT=55441 PGUSER=postgres \
 #     bash supabase/tests/stage10/run.sh historic          # an already-running cluster
+#   STAGE10_LOCAL=1 PGHOST=127.0.0.1 PGPORT=55441 PGUSER=postgres \
+#     bash supabase/tests/stage10/run.sh race              # the concurrency + deletion tier, at head
 #
 # The shape of this file is Stage 9's, deliberately: a new head gets a new runner whose chain reaches
 # the new head, and every suite below it is re-measured against it. That is not ceremony. Each runner
@@ -18,7 +20,7 @@
 # `stage9` and stops. Running Stage 2's catalogue at a Stage 9 head against a schema that contains
 # Stage 10 would not be a re-measurement, it would be a measurement of a chain that was never built.
 #
-# Why there are five kinds of chain, which is Stage 8's and Stage 9's reason plus one of Stage 10's own.
+# Why there are six kinds of chain, which is Stage 8's and Stage 9's reason plus two of Stage 10's own.
 # Both of Stage 8's batteries, both of Stage 7's, and Stage 9's pair each end with a census that counts
 # *cluster-wide* — how many guest households exist anywhere, how many credentials of each kind are
 # live, the global `rsvp_responses` total, the output manifest's row counts, the bucket inventory. Those
@@ -32,6 +34,8 @@
 #   render    bootstrap -> storage fixture -> published -> stage2..stage10 -> Stage 9's 80, then 90
 #   guest     bootstrap -> storage fixture -> published -> stage2..stage10 -> Stage 8's 80, then 90
 #   family    bootstrap -> storage fixture -> published -> stage2..stage10 -> Stage 7's 80, then 90
+#   race      bootstrap -> storage fixture -> published -> stage2..stage10 -> race fixtures, two
+#             concurrent session pairs with their assert files, then the deletion arms
 #   historic  bootstrap -> storage fixture -> published -> [legacy seed]
 #             -> stage2..stage10 -> Stage 2's outcome, draft, publication, attack and catalog suites
 #             -> Stage 4's two suites -> Stage 5's suites -> Stage 6's suites
@@ -78,7 +82,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."   # -> repo root
 
 MODE="${1:-all}"
-case "$MODE" in commerce|render|guest|family|historic|all) ;; *) echo "usage: $0 [commerce|render|guest|family|historic|all]"; exit 2 ;; esac
+case "$MODE" in commerce|render|guest|family|historic|race|all) ;; *) echo "usage: $0 [commerce|render|guest|family|historic|race|all]"; exit 2 ;; esac
 
 IMAGE="${PG_IMAGE:-postgres:16-alpine}"
 CTR="vivaahvarnam-stage10-$$"
@@ -101,6 +105,10 @@ if [ "${STAGE10_LOCAL:-0}" = "1" ]; then
   run_rollback() { sql_bytes "$1" | psql -d "$DB" -v ON_ERROR_STOP=1 -q; }
   admin_sql()  { psql -U "${PGUSER:-postgres}" -d postgres -v ON_ERROR_STOP=1 -q "$@"; }
   probe_sql()  { psql -d "$DB" -v ON_ERROR_STOP=1 -q -tA "$@"; }
+  # A race session is a *live concurrent client*: `run_tx` cannot express it, so the pair is two
+  # backgrounded psql processes whose rendezvous is in the SQL (advisory locks, see the 7X files).
+  # No ON_ERROR_STOP here except where a file sets it itself; every arm wraps its own risky statement.
+  start_session() { sql_bytes "$1" | psql -d "$DB" -tA -q > "$2" 2>&1 & LAST_PID=$!; }
   echo "==> Backend: existing cluster (PGHOST=${PGHOST:-localhost} PGPORT=${PGPORT:-5432})"
 else
   cleanup() { docker rm -f "$CTR" >/dev/null 2>&1 || true; }
@@ -131,6 +139,10 @@ else
   # unchanged, because a summary line that measures nothing is worse than no summary line.
   probe_sql() { docker exec -i -e PGCLIENTENCODING=UTF8 -e PGOPTIONS="$PGOPTIONS" "$CTR" \
                psql -d "$DB" -U postgres -v ON_ERROR_STOP=1 -q -tA "$@"; }
+  # Same live-client rule as the local branch: `tr -d '\r'` has to happen host-side, before the pipe
+  # crosses into the container, and the container image ships no `tr` to lean on afterwards.
+  start_session() { sql_bytes "$1" | docker exec -i -e PGCLIENTENCODING=UTF8 -e PGOPTIONS="$PGOPTIONS" \
+               "$CTR" psql -d "$DB" -U postgres -tA -q > "$2" 2>&1 & LAST_PID=$!; }
 fi
 
 RESULTS=""
@@ -256,6 +268,72 @@ run_stage10_batteries() {
   fi
 }
 
+# marker <file> <pattern> — the rendezvous gate between two live sessions. The driver waits for a
+# milestone line to appear in the first session's log before starting the second, so the interleaving
+# is *arranged*, not hoped for. A pattern that never appears is an invalid arm, not a pass: this is
+# the only shape of timing evidence the shell can honestly produce, and everything beyond it is
+# carried by the SQL (advisory-lock polls, wall-clock brackets, refused states).
+marker() {
+  local n="${3:-600}"
+  for _ in $(seq 1 "$n"); do
+    grep -q "$2" "$1" 2>/dev/null && return 0
+    sleep 0.05
+  done
+  echo "!! DRIVER_TIMEOUT: '$2' never appeared in $1 — the arm is invalid; read its partial output:"
+  mask < "$1" | tail -20
+  exit 1
+}
+
+session_log() { # session_log <label> <file> <status> — session logs are chronology evidence, never
+  echo "==> $1 (session log, not a counted suite; exit $3)"   # counted assertions — suite() would
+  local body                             # reject their shape, and a race log printing PASS lines it
+  body="$(mask < "$2")"                 # did not assert is exactly the confusion this split prevents.
+  [ "$3" -ne 0 ] && { echo "!! $1 FAILED (psql exit $3). Full tail:"; printf '%s\n' "$body" | tail -40; exit 1; }
+  printf '%s\n' "$body" | { grep -E 'OUTCOME|OUT=|ATTEMPT|POLICY_SEEN|ANNOUNCE|COMMITTED|BLOCKED|WINDOW|GATE=|LOCK' || true; }
+}
+
+run_race_battery() {
+  # The race tier runs on its own chain, for the reason its files give: it commits a real policy flip
+  # (reverted inside its own assert file) and a real capture collision. It is also the only tier here
+  # that needs *concurrent live clients*, which `run_tx` cannot express — hence the two-session shape:
+  # start the first, gate on its rendezvous marker, start the second, wait, then read the residue in a
+  # fresh serialised session. The counted assertions are the assert files; the session logs are
+  # chronology evidence and are printed, masked, never counted.
+  local tmp a1 b1 a2 b2 st LAST_PID
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+  suite "stage 10 70_race_fixtures" supabase/tests/stage10/70_race_fixtures.sql tx lines
+
+  echo "==> ARM 1: an uncommitted entitlement_required flip vs a publish (sessions 71 + 72)"
+  # `start_session` hands back the pid through LAST_PID, never through command substitution: `x=$(f &
+  # echo $!)` puts the backgrounded psql as a child of a subshell that exits immediately, and the
+  # parent's `wait` then returns before the session is done — a trap this driver hit and recorded
+  # during the probe rounds.
+  start_session supabase/tests/stage10/71_race_a1_flip.sql "$tmp/a1.log"; a1=$LAST_PID
+  marker "$tmp/a1.log" 'A1_LOCKED='
+  start_session supabase/tests/stage10/72_race_b1_publish.sql "$tmp/b1.log"; b1=$LAST_PID
+  st=0; wait "$a1" || st=$?; session_log "71_race_a1_flip" "$tmp/a1.log" "$st"
+  st=0; wait "$b1" || st=$?; session_log "72_race_b1_publish" "$tmp/b1.log" "$st"
+  marker "$tmp/a1.log" 'A1_SEES_B1_HOLDING_ANNOUNCE'
+  marker "$tmp/b1.log" 'B1_POLICY_SEEN_BY_THIS_TX=permissive'
+  marker "$tmp/b1.log" 'B1_OUTCOME=ACCEPTED'
+  suite "stage 10 73_race_arm1_asserts" supabase/tests/stage10/73_race_arm1_asserts.sql tx lines
+
+  echo "==> ARM 2: one event identity, two concurrent captures (sessions 74 + 75)"
+  start_session supabase/tests/stage10/74_race_a2_first.sql "$tmp/a2.log"; a2=$LAST_PID
+  marker "$tmp/a2.log" 'A2_LOCK='
+  start_session supabase/tests/stage10/75_race_b2_second.sql "$tmp/b2.log"; b2=$LAST_PID
+  st=0; wait "$a2" || st=$?; session_log "74_race_a2_first" "$tmp/a2.log" "$st"
+  st=0; wait "$b2" || st=$?; session_log "75_race_b2_second" "$tmp/b2.log" "$st"
+  marker "$tmp/a2.log" 'A2_OUT=applied/entitlement_granted'
+  marker "$tmp/a2.log" 'A2_WINDOW='
+  marker "$tmp/b2.log" 'B2_ATTEMPT1=RAISED 23505'
+  marker "$tmp/b2.log" 'B2_ATTEMPT2=already_recorded'
+  suite "stage 10 76_race_arm2_asserts" supabase/tests/stage10/76_race_arm2_asserts.sql tx lines
+
+  echo "==> Deletion arms: money history vs wedding vs owner (serialised, in-file)"
+  suite "stage 10 77_race_del_asserts" supabase/tests/stage10/77_race_del_asserts.sql tx lines
+}
+
 run_stage9_batteries() {
   local found=0 f
   for f in $(ls supabase/tests/stage9/[89]*.sql 2>/dev/null | sort); do
@@ -352,6 +430,12 @@ if [ "$MODE" = all ] || [ "$MODE" = family ]; then
   admin_sql -c "DROP DATABASE IF EXISTS st10qual_family WITH (FORCE)" >/dev/null | mask
 fi
 
+if [ "$MODE" = all ] || [ "$MODE" = race ]; then
+  build_chain race
+  run_race_battery
+  admin_sql -c "DROP DATABASE IF EXISTS st10qual_race WITH (FORCE)" >/dev/null | mask
+fi
+
 if [ "$MODE" = all ] || [ "$MODE" = historic ]; then
   for variant in clean legacy; do
     build_chain "$variant"
@@ -370,6 +454,9 @@ echo "    on chains that had not been given Stage 10's orders or events. No set 
 echo "    evidence about another database, and none of them should be quoted as if it were."
 echo "==> Every total labelled 'at Stage 10 head' is a re-measurement of an older suite against a schema"
 echo "    that contains Stage 10. The older runners' own totals still describe their own heads."
+echo "==> The race tier is the only one here that ran two live sessions at once: its chain's committed"
+echo "    flip was reverted inside its own assert file, its collision used one synthetic event identity,"
+echo "    and its deletion arms deleted only what they planted — the shared stack never sees any of it."
 echo "==> Boundary: plain Postgres + role/auth shim + a storage-schema fixture. PostgREST, Supabase Auth,"
 echo "    the Storage API and any HTTP webhook receiver were not executing, and no provider signature was"
 echo "    verified — the ledger's inputs here are digests and a declared validity bit, not HMAC bytes."
