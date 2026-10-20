@@ -53,15 +53,17 @@
 // the shared-posture writes below are only safe because `before()` refuses to start unless the stack is in
 // the shipped posture and `after()` restores unconditionally.
 //
-// NOT EXECUTED SINCE THE REDELIVERY REPAIR. The remediation runs of 2026-10-20 (`q10-logs/s10r-*.txt`)
-// could not start this tier: it needs GoTrue for every account it signs a JWT for, and the Docker engine
-// was down for the whole of them. D-11, D-16 and Z-01 were therefore rewritten to the repaired contract by
-// reading `internal_api.record_commerce_event`, not by measuring it here. Each property they now assert is
-// measured in a tier that did run — group P of `supabase/tests/stage10/80_commerce_ledger.sql` (P01..P27)
-// for the ledger's own decisions, CD-22/CD-23/CD-28 of `scripts/stage10-commerce-driver.test.mjs` for what
-// a refusal is allowed to carry — so nothing here is the only evidence for anything. It is still the case
-// that these three arms have never been green, and the first run that makes them so is the tier's own, not
-// this stage's report.
+// FIRST EXECUTED AFTER THE REDELIVERY AND NESTED-REVOCATION REPAIRS, 2026-10-20. The remediation runs of
+// that morning (`q10-logs/s10r-*.txt`) could not start this tier: it needs GoTrue for every account it
+// signs a JWT for, and the Docker engine was down for the whole of them. D-11, D-16 and Z-01 were therefore
+// rewritten to §16's repaired contract by reading `internal_api.record_commerce_event`, not by measuring it
+// here. The first run that made them executable (`q10-logs/s10-http-head4797-1.txt`) executed all three:
+// D-16 and Z-01 passed, and D-11 failed on the answer's key set, because `20261020180000` had added
+// `revocation_error` to every applied answer and contained the second-refund abort while this file still
+// asserted the ten-key answer and the abort. Seven cases failed that way or on the old R-06 contract
+// (61/68); R-06 and APPLIED_KEYS are now the HTTP witness of battery 1's `R22b..R22h`, and the repaired
+// tree is green in `q10-logs/s10-http-stage10-targeted-1.txt` (68/68), inside the ten-suite chain at
+// `q10-logs/s10-http-repaired-tree-1.txt` (436/436). Nothing here is evidence that was inferred.
 
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -591,8 +593,12 @@ const keysOf = (value) => Object.keys(value).sort().join(',');
 const keySet = (...names) => [...names].sort().join(',');
 const BASE_ORDER_KEYS = keySet('order_id', 'wedding_id', 'package_code', 'amount_minor', 'currency',
   'price_version', 'merchant_reference', 'status', 'quote_expires_at', 'price_display_approved');
+/** `revocation_error` is `20261020180000`'s key: every applied answer carries it, and it is NULL on a
+ *  step that did not refuse. §18's repair landed while the HTTP tier was unexecutable, so this key set and
+ *  R-06 are the first over-the-wire reading of that answer — the five cases that compare against this set
+ *  failed at head 4797a4f because the product had grown the key, not because any projection was wrong. */
 const APPLIED_KEYS = keySet('disposition', 'event_row_id', 'order_id', 'order_status', 'attempt_id',
-  'entitlement_id', 'hold_reason', 'applied_effect', 'processing_status', 'state_changed');
+  'entitlement_id', 'hold_reason', 'applied_effect', 'processing_status', 'revocation_error', 'state_changed');
 const RECORDED_KEYS = keySet('disposition', 'event_row_id', 'order_id', 'order_status', 'hold_reason',
   'applied_effect', 'processing_status', 'state_changed');
 const ALREADY_KEYS = keySet('disposition', 'event_row_id', 'order_id', 'hold_reason', 'applied_effect',
@@ -678,29 +684,6 @@ function performOf(statement, what) {
   assert.match(inner, /\)$/,
     `${what}: unwrapping the envelope lost the call's own closing parenthesis: ${shown(statement).slice(0, 200)}`);
   return `PERFORM ${inner}`;
-}
-
-/** The exact statement a signed delivery *would* send, captured without sending it. `runDelivery` takes
- *  its SQL channel as an argument, so a channel that records the text and answers with an empty document
- *  measures the same fifteen-argument call the ledger would have received. An arm that must be *refused*
- *  needs this: once a delivery has actually aborted its own transaction, the statement that aborted it is
- *  gone and only `psql`'s last CONTEXT line is left, which names no SQLSTATE. */
-function statementFor(caseId, {
-  provider = 'razorpay', body, eventId, secret = SECRET, signWith = secret, timestamp,
-  environment = 'synthetic', as = 'hostA',
-}) {
-  const delivery = provider === 'razorpay'
-    ? razorpayDelivery({ body, secret: signWith, eventId })
-    : cashfreeDelivery({ body, secret: signWith, timestamp, now: Date.now() });
-  const seen = [];
-  const out = runDelivery({
-    sql: (text) => { seen.push(text); return Buffer.from('{}').toString('base64'); },
-    delivery, secret, environment, actorUserId: uidOf(as),
-  });
-  assert.equal(out.verified, true,
-    `${caseId}: an unverified delivery has no statement to refuse: ${json(out)}`);
-  assert.equal(seen.length, 1, `${caseId}: the delivery never reached a statement: ${json(out)}`);
-  return out.statement;
 }
 
 /** A refusal that never reaches plpgsql, because the role is not allowed to ask: the server's own
@@ -1805,6 +1788,8 @@ describe('S10 REFUNDS, DISPUTES AND RECOVERY', () => {
       'R-01: the refund is evidence about the payment object the order already named');
     assert.equal(r.entitlement_id, before.order.entitlement_id,
       'R-01: under hold_for_review the right is untouched, and the answer says which one');
+    assert.equal(r.revocation_error, null,
+      'R-01: hold_for_review attempts no revocation, and a clean step reports none');
 
     const row = refundOf('classic', r.event_row_id, 'R-01');
     assert.equal(row.kind, 'refund', `R-01: ${json(row)}`);
@@ -1965,26 +1950,77 @@ describe('S10 REFUNDS, DISPUTES AND RECOVERY', () => {
       `revoked/entitlement/${uidOf('hostA')}/mode=-`, 'R-05: the revocation wrote no audit of its own');
   });
 
-  test('R-06: a second refund-driven revocation aborts the whole delivery, ledger row included', () => {
-    const stmt = statementFor('R-06', {
-      eventId: idFor('ref6'),
-      body: rzBody('refund.processed', idFor('ref6'), t1 + 300, {
-        refund: { entity: refundEntity(orders.classic.merchant_reference, 'CL6', PRICE.classic) },
-        order: { entity: orderEntity(orders.classic.merchant_reference, 'CL') },
-      }),
-    });
-    refused(performOf(stmt, 'R-06'), say('P0001', SAY.noLiveEnt, orders.classic.order_id),
-      'R-06: a refund whose nested revocation finds nothing live');
-    // The finding, stated plainly: §9's nested `revoke_commerce_entitlement` raises when the entitlement is
-    // already gone, and because the ledger INSERT is in the same statement's transaction the refund
-    // evidence disappears with it — a provider retry keeps getting the same abort, and a human reading the
-    // table later sees a refund that never arrived. `after()` restores the policy; the arms below run under
-    // the shipped posture again.
-    assert.equal(count(`from private.commerce_payment_events where event_id = '${idFor('ref6')}'`), '0',
-      'R-06: an aborted delivery left a ledger row, which would make this a different finding');
-    assert.equal(count(`from private.commerce_refunds r join private.commerce_payment_events e on e.id = r.event_id
-      where e.event_id = '${idFor('ref6')}'`), '0', 'R-06: an aborted delivery left a refund row');
-    setPolicy(`refund_revocation_mode = 'hold_for_review'`, 'the restore to hold_for_review');
+  test('R-06: a second refund under revoke is answered, and the refused step is recorded beside it', () => {
+    // §14's item 6 as repaired by `20261020180000_stage10_nested_revocation.sql`: the revocation step's
+    // refusal is an answer, not a reason to unwind a delivery that has already recorded money moving back.
+    // This is battery 1's `R22b..R22h` over the wire. Before the repair this call raised P0001 out of
+    // `internal_api.record_commerce_event` and took the ledger row, the refund row and the audit trail with
+    // it; the policy restore lives in `finally` because R-07..R-11 read the shipped posture.
+    try {
+      const before = observe('classic');
+      const out = deliver('R-06', {
+        eventId: idFor('ref6'),
+        body: rzBody('refund.processed', idFor('ref6'), t1 + 300, {
+          refund: { entity: refundEntity(orders.classic.merchant_reference, 'CL6', PRICE.classic) },
+          order: { entity: orderEntity(orders.classic.merchant_reference, 'CL') },
+        }),
+      });
+      const r = resultOf('R-06', out);
+      assert.equal(keysOf(r), APPLIED_KEYS, `R-06: ${json(r)}`);
+      assert.equal(r.disposition, 'applied', `R-06: ${json(r)}`);
+      assert.equal(r.applied_effect, 'entitlement_revoked',
+        `R-06: the policy decided revoke even though nothing was left live: ${json(r)}`);
+      assert.equal(r.hold_reason, null, `R-06: ${json(r)}`);
+      assert.equal(r.order_status, 'captured', `R-06: the purchase stays what the money made it: ${json(r)}`);
+      assert.equal(r.state_changed, false, `R-06: ${json(r)}`);
+      assert.equal(r.entitlement_id, before.order.entitlement_id,
+        `R-06: the answer still names the right R-05 revoked: ${json(r)}`);
+      assert.match(r.revocation_error, /^P0001 \| order /,
+        `R-06: the step's refusal is not on the answer in its own sentence: ${json(r)}`);
+      assert.ok(r.revocation_error.includes(SAY.noLiveEnt)
+        && r.revocation_error.includes(orders.classic.order_id),
+        `R-06: the answer's refusal does not name the step's reason: ${json(r)}`);
+
+      // The evidence the pre-repair abort destroyed: one ledger row and one refund row for the provider's
+      // second credit.
+      assert.equal(count(`from private.commerce_payment_events where event_id = '${idFor('ref6')}'`), '1',
+        'R-06: an answered delivery lost its ledger row');
+      const row = ledgerRow(idFor('ref6'));
+      assert.equal(rowField(row, 'status'), 'applied', `R-06: ${shown(row)}`);
+      assert.equal(rowField(row, 'effect'), 'entitlement_revoked', `R-06: ${shown(row)}`);
+      const refund = refundOf('classic', r.event_row_id, 'R-06');
+      assert.equal(refund.provider_refund_ref, 'rfnd_CL6', `R-06: ${json(refund)}`);
+      assert.equal(refund.status, 'succeeded', `R-06: ${json(refund)}`);
+
+      // The refusal is on the record, joined to its own event row, and the clean first revocation is not
+      // retroactively tagged with it.
+      const refusal = cell(`
+        select coalesce(payload ->> 'kind', '-') || '/' || coalesce(payload ->> 'revocation_mode', '-')
+          || '/' || coalesce(payload ->> 'error', '-')
+        from private.audit_events
+        where action = 'revocation_refused' and subject_key = '${orders.classic.order_id}'::uuid
+          and (payload ->> 'event_row_id')::bigint = ${r.event_row_id}::bigint`,
+        'R-06: the revocation_refused audit row');
+      assert.ok(refusal.startsWith('refund/revoke/'), `R-06: ${shown(refusal)}`);
+      assert.ok(refusal.includes(SAY.noLiveEnt) && refusal.includes(orders.classic.order_id),
+        `R-06: the recorded refusal is not the step's own sentence: ${shown(refusal)}`);
+      assert.equal(count(`from private.audit_events
+        where action = 'revocation_refused'
+          and (payload ->> 'event_row_id')::bigint
+              = (select id from private.commerce_payment_events where event_id = '${idFor('ref5')}')`), '0',
+        'R-06: the clean first revocation was retroactively tagged with a refusal');
+
+      // Nothing revoked twice: the refused step did not reach the already-revoked row, and the audit still
+      // has exactly one `revoked` action for this entitlement.
+      assert.equal(observe('classic').entitlement.status, 'revoked',
+        `R-06: the refused step changed the entitlement: ${json(observe('classic').entitlement)}`);
+      assert.equal(count(`from private.audit_events
+        where action = 'revoked' and subject_type = 'entitlement'
+          and subject_key = '${r.entitlement_id}'::uuid`), '1',
+        'R-06: the refused step revoked the already-revoked entitlement a second time');
+    } finally {
+      setPolicy(`refund_revocation_mode = 'hold_for_review'`, 'the restore to hold_for_review');
+    }
   });
 
   test('R-07: a captured order refuses to be expired, and a cancellation about it is held', async () => {
