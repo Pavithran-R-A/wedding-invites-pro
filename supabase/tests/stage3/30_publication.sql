@@ -1569,7 +1569,67 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
   -- `private` is a schema no browser role can name (G7b). Neither is reachable by `service_role`,
   -- which has no USAGE on this schema at all (G6b) — so the privileged half of Stage 9 is a read
   -- surface, and the artefacts themselves are written by the backend over the table.
-    CASE WHEN pg_temp.st3p_at_least('stage10') THEN
+    CASE WHEN pg_temp.st3p_at_least('stage11') THEN
+      -- Stage 11 slice 1's forty-one: the thirty-nine below plus the two grant bodies this head adds,
+      -- `grant_operator_role` and `revoke_operator_role`. Nothing else moves — no wrapper, no commerce
+      -- name, no render name — and that is the census worth having, because the claim §3 makes is that
+      -- operational authority is one data table plus two trusted-path bodies rather than a new exposed
+      -- surface. Their two rows repeat the posture Stage 10's six write bodies established, which §3 now
+      -- cites as the precedent this stage follows rather than the definer one it had assumed:
+      -- `definer=n`, `lang=plpgsql`, `vol=v`, `search_path=""`, `owner=postgres`, and EXECUTE false for
+      -- `anon`, `authenticated`, `service_role` and `public` alike. `p_actor_user_id` on both is the same
+      -- explicit-actor choice `20261017120000_stage10_commerce_foundations.sql:784-838` makes for the same
+      -- reason: the caller is the trusted path, where `auth.uid()` is NULL by construction, so an actor
+      -- that is not named cannot be attributed afterwards.
+      -- Provenance, stated because the two rows' attributes and their positions were produced differently.
+      -- The attributes were written from §3 before anything was measured; the block was then assembled by
+      -- taking the Stage 10 literal this ladder had already committed and inserting those two rows at
+      -- their `COLLATE "C"` positions; and the result was diffed against
+      -- `q11-logs/s11-internal-api-matrix-1.txt`, which queries a chain that applied Stage 2 through
+      -- Stage 11 using this suite's own expression. The diff came out empty, which is a measurement of the
+      -- migration agreeing with the design, not a restatement of the readout as an expectation.
+      $impl11$approve_tradition_pack_release(p_release_id uuid, p_expected_hash text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+commerce_host_summary(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+commerce_reconcile(p_order_id uuid, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+create_commerce_order(p_wedding_id uuid, p_package_code text, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+create_invitation_version(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+create_tradition_pack(p_pack_key text, p_display_name text, p_scope_statement text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+create_tradition_pack_release(p_pack_key text, p_definition jsonb, p_definition_schema_version integer, p_languages text[], p_author_label text, p_machine_assisted boolean, p_machine_assistance_notes text, p_source_reference text, p_changelog text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+deprecate_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+expire_commerce_order(p_order_id uuid, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+get_approval_requests(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_guest_invitation_state(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_tradition_pack_review_packet(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+grant_commerce_entitlement(p_order_id uuid, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+grant_operator_role(p_user_id uuid, p_scope text, p_reason text, p_actor_user_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+inspect_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+issue_guest_invitations(p_wedding_id uuid, p_household_ids uuid[], p_expires_at timestamp with time zone) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+list_invitation_outputs(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+preview_invitation_document(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+publish_invitation_version(p_wedding_id uuid, p_version_id uuid, p_expires_at timestamp with time zone) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+record_commerce_event(p_provider text, p_event_id text, p_event_type text, p_kind text, p_environment text, p_raw_body_sha256 text, p_delivery_verified boolean, p_refusal_reason text, p_merchant_reference text, p_amount_minor bigint, p_currency text, p_provider_order_ref text, p_provider_payment_ref text, p_occurred_at timestamp with time zone, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+render_invitation_document(p_version_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+request_family_review(p_wedding_id uuid, p_version_id uuid, p_reviewer_display_name text, p_expires_at timestamp with time zone) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+resolve_family_review() -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+resolve_guest_invitation() -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+resolve_public_invitation() -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+revoke_commerce_entitlement(p_order_id uuid, p_actor_user_id uuid, p_reason text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+revoke_family_review(p_request_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+revoke_guest_invitation(p_household_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+revoke_invitation_publication(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+revoke_operator_role(p_user_id uuid, p_scope text, p_reason text, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+rotate_guest_invitation(p_household_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+submit_family_review(p_decision text, p_reviewer_label text, p_message text, p_section_key text) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+submit_guest_rsvp(p_answers jsonb) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=y | authenticated=y | service_role=n | public=n
+submit_tradition_pack_review(p_release_id uuid, p_decision text, p_review_label text, p_review_basis text, p_review_scope text, p_reviewed_languages text[], p_expected_hash text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+tradition_pack_catalog() -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+tradition_pack_retention_report() -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+update_draft_tradition_pack_release(p_release_id uuid, p_patch jsonb) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
+validate_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n$impl11$
+    WHEN pg_temp.st3p_at_least('stage10') THEN
       -- Stage 10's thirty-nine: the thirty-two below plus seven commerce bodies. Six of the seven
       -- carry the reading that makes this head different from every head before it — `definer=n`
       -- *and* `authenticated=n`: `SECURITY INVOKER` bodies held to `postgres` alone, reachable only by
@@ -1776,7 +1836,26 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
                              WHERE ab.nspname = 'api'
                                AND a.proname = i.proname AND a.proargtypes = i.proargtypes)
        ) up),
-    CASE WHEN pg_temp.st3p_at_least('stage10') THEN
+    CASE WHEN pg_temp.st3p_at_least('stage11') THEN
+      -- Nineteen, measured on `q11-logs/s11-pairs-unpaired-1.txt`. The two new names are Stage 11's
+      -- operator-grant pair, and they are wrapper-less for a third reason worth naming, because neither
+      -- reason already in this ladder predicts anything about a new body: the pack bodies are hidden from
+      -- the browser to keep authoring out of reach, the commerce bodies to keep a browser from deciding a
+      -- payment happened, and these are hidden because no session at all may move operational authority —
+      -- `grant_operator_role` and `revoke_operator_role` are `SECURITY INVOKER` and executable by no role,
+      -- not even the server key, which `80_operator_authority.sql` measures as cell A05, while cell A05b
+      -- fails if an `api` wrapper for either name (or for the predicate) ever arrives. Note the shape of
+      -- the pair: adding a body *with* an `api` twin would leave this list untouched, so what grows it is
+      -- a privileged-only implementation, and Stage 11 adds exactly two of those.
+      --
+      -- The other half of the sentence is the absence: no `unpaired-api` row appeared. That is the only
+      -- part of this census that would notice a new browser-facing callable with no privileged body behind
+      -- it — a wrapper reading a table directly, or a name added to `api` and forgotten in `internal_api`.
+      -- A ladder that listed only the internal half would accept that silently, so the expectation is the
+      -- whole string, and the string contains no such row. Order stays mechanical (`ORDER BY t COLLATE
+      -- "C"` over the composed tag, computed by the query above); only membership and reasons are claims.
+      'unpaired-internal approve_tradition_pack_release, unpaired-internal commerce_reconcile, unpaired-internal create_commerce_order, unpaired-internal create_tradition_pack, unpaired-internal create_tradition_pack_release, unpaired-internal deprecate_tradition_pack_release, unpaired-internal expire_commerce_order, unpaired-internal get_tradition_pack_review_packet, unpaired-internal grant_commerce_entitlement, unpaired-internal grant_operator_role, unpaired-internal inspect_tradition_pack_release, unpaired-internal record_commerce_event, unpaired-internal revoke_commerce_entitlement, unpaired-internal revoke_operator_role, unpaired-internal submit_tradition_pack_review, unpaired-internal tradition_pack_catalog, unpaired-internal tradition_pack_retention_report, unpaired-internal update_draft_tradition_pack_release, unpaired-internal validate_tradition_pack_release'
+    WHEN pg_temp.st3p_at_least('stage10') THEN
       -- Seventeen, measured on `q10-logs/live/s10-census-pairs-01.txt`. Six are new, and they are the
       -- six write-side commerce bodies: `commerce_reconcile`, `create_commerce_order`,
       -- `expire_commerce_order`, `grant_commerce_entitlement`, `record_commerce_event`,

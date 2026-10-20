@@ -3966,7 +3966,9 @@ BEGIN
   -- callable surface instead, this line would not have changed at all — I1's list is the one that
   -- would have, which is why both halves are enumerated by name rather than counted.
   PERFORM pg_temp.s4_eq('I2 and the privileged surface is '
-    || CASE WHEN pg_temp.s4_at_least('stage10')
+    || CASE WHEN pg_temp.s4_at_least('stage11')
+         THEN 'exactly these forty-one names — the twenty-two public twins plus the nineteen maintenance functions, of which six are Stage 10''s commerce write paths, two are Stage 11''s operator-grant pair, and eleven are the pack-maintenance names Stage 5 enumerated'
+         WHEN pg_temp.s4_at_least('stage10')
          THEN 'exactly these thirty-nine names — the twenty-two public twins plus the seventeen maintenance functions, of which six are Stage 10''s commerce write paths and eleven are the pack-maintenance names Stage 5 enumerated'
          WHEN pg_temp.s4_at_least('stage9')
          THEN 'exactly these thirty-two names — the twenty-one public twins plus the eleven maintenance functions, listed so an unlisted privilege is a failing assertion'
@@ -3978,7 +3980,38 @@ BEGIN
          THEN 'exactly these nineteen names — the eight public twins plus the eleven maintenance functions, listed so an unlisted privilege is a failing assertion'
          ELSE 'the same seven names, so there is no fourth way into a publication action and no privileged function without a public twin' END,
     v_names,
-    CASE WHEN pg_temp.s4_at_least('stage10') THEN
+    -- Stage 11's forty-one, transcribed from the list this assertion printed when it first refused
+    -- (`q11-logs/s11-iter-next-1.txt`) rather than predicted: the thirty-nine above plus
+    -- `grant_operator_role` and `revoke_operator_role`, and no wrapper for either — which is why the
+    -- twin-less half grows from seventeen to nineteen while the callable half stays at twenty-two. An
+    -- operator door that no browser can name is the whole point of the pair; Stage 10's asymmetry was
+    -- "a host may read the quote, nothing may open an order", and this head's is "no session at all may
+    -- move operational authority from inside the database". Both are stated here as names, because a
+    -- count would not tell a hidden privilege from a deleted one.
+    CASE WHEN pg_temp.s4_at_least('stage11') THEN
+      ARRAY['approve_tradition_pack_release', 'commerce_host_summary',
+            'commerce_reconcile', 'create_commerce_order', 'create_invitation_version',
+            'create_tradition_pack', 'create_tradition_pack_release',
+            'deprecate_tradition_pack_release', 'expire_commerce_order',
+            'get_approval_requests',
+            'get_guest_invitation_state', 'get_invitation_publication_state',
+            'get_tradition_pack_review_packet', 'grant_commerce_entitlement',
+            'grant_operator_role',
+            'inspect_tradition_pack_release',
+            'issue_guest_invitations', 'list_invitation_outputs',
+            'preview_invitation', 'preview_invitation_document',
+            'publish_invitation_version', 'record_commerce_event',
+            'render_invitation_document', 'request_family_review',
+            'resolve_family_review', 'resolve_guest_invitation', 'resolve_public_invitation',
+            'revoke_commerce_entitlement',
+            'revoke_family_review', 'revoke_guest_invitation',
+            'revoke_invitation_publication', 'revoke_operator_role',
+            'rotate_guest_invitation',
+            'rotate_invitation_token', 'submit_family_review', 'submit_guest_rsvp',
+            'submit_tradition_pack_review', 'tradition_pack_catalog',
+            'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
+            'validate_tradition_pack_release']::text[]
+    WHEN pg_temp.s4_at_least('stage10') THEN
       ARRAY['approve_tradition_pack_release', 'commerce_host_summary',
             'commerce_reconcile', 'create_commerce_order', 'create_invitation_version',
             'create_tradition_pack', 'create_tradition_pack_release',
@@ -4059,7 +4092,9 @@ BEGIN
     ELSE v_api END);
 
   PERFORM pg_temp.s4_jq('I3 the shape that makes that split mean something: every `api` function runs as the caller, every `internal_api` one has a pinned search path, and '
-    || CASE WHEN pg_temp.s4_at_least('stage10')
+    || CASE WHEN pg_temp.s4_at_least('stage11')
+         THEN 'exactly the twenty-two with a public twin are DEFINER — the nineteen maintenance bodies are INVOKER, so they add a workflow and no privilege; Stage 11''s operator-grant pair joins the unprivileged half, which is the half that makes the grant bodies write `private.operator_grants` as the calling role — a role with no INSERT on that table cannot mint authority by calling them, whatever it can do with a name'
+         WHEN pg_temp.s4_at_least('stage10')
          THEN 'exactly the twenty-two with a public twin are DEFINER — the seventeen maintenance bodies are INVOKER, so they add a workflow and no privilege; Stage 10''s six commerce write paths are in the unprivileged half, which is the shape that makes "a browser cannot record its own payment" a fact of the grant list rather than a promise in an interface'
          WHEN pg_temp.s4_at_least('stage9')
          THEN 'exactly the twenty-one with a public twin are DEFINER — the eleven maintenance bodies are INVOKER, so they add a workflow and no privilege, and Stage 9''s two render-manifest definers join the twins rather than the unprivileged half'
@@ -4084,7 +4119,10 @@ BEGIN
                                    JOIN pg_namespace n ON n.oid = p.pronamespace
                                   WHERE n.nspname = 'internal_api'
                                     AND p.proconfig @> ARRAY['search_path=""']))),
-      CASE WHEN pg_temp.s4_at_least('stage10')
+      CASE WHEN pg_temp.s4_at_least('stage11')
+             THEN jsonb_build_object('api_invoker', '22', 'api_pinned', '22',
+                                     'internal_definer', '22', 'internal_pinned', '41')
+             WHEN pg_temp.s4_at_least('stage10')
              THEN jsonb_build_object('api_invoker', '22', 'api_pinned', '22',
                                      'internal_definer', '22', 'internal_pinned', '39')
              WHEN pg_temp.s4_at_least('stage9')
@@ -4103,6 +4141,10 @@ BEGIN
                                      'internal_definer', '7', 'internal_pinned', '7') END);
 
   -- ------------------------------------------------------------ the governance machinery
+  -- NOTE, so a reader does not take this group's prose as the census: only the last two paragraphs —
+  -- Stage 10's and Stage 11's — are re-measured at every head from here on. The five above them describe
+  -- the head each of those stages was qualified at, and each states a `private` total (30, 30, 33) that
+  -- later stages grew past. The ladder below is the measurement; this prose is the archive.
   -- Stage 6 adds three functions to `private` — the key minter and the two registry guards — and no
   -- name to `api` or `internal_api`, which is the shape this line measures. The count is not the
   -- interesting half: `usage_anon`/`usage_auth` staying false is what makes the growth invisible to an
@@ -4147,8 +4189,21 @@ BEGIN
   -- only one of the four that writes rather than refuses, so 36 → 37 and the total 97 → 98. It is not
   -- reachable by name from any account either: `SECURITY INVOKER`, revoked from `PUBLIC`, `anon`,
   -- `authenticated` and `service_role`, and fired only by the trigger §2's C31 now lists.
+  --
+  -- Stage 11 is Stage 7's shape and Stage 9's shape at once, and the sentence is worth getting in the
+  -- right order: it adds two names to `internal_api` and one to `private` — `actor_is_operator`, the
+  -- predicate every later Stage 11 body asks before it does anything — and nothing at all to `api`, so
+  -- the callable surface stays at twenty-two and 98 → 101. `private` goes 37 → 38 for the first time
+  -- since Stage 10's trail writer, and this body differs from every guard above it in one respect worth
+  -- naming: it is `SECURITY DEFINER`, because a host must be able to ask whether they are an operator and
+  -- no client role holds `private` USAGE or any grant on the grant table. That is the whole of its
+  -- privilege and `80_operator_authority.sql` measures it — the predicate reads one table and writes
+  -- nothing, and no role but its owner can execute it today (cells A17-A19), so the DEFINER posture buys
+  -- the answer a *nested* caller needs rather than a new door for any account. The three booleans stay
+  -- the load-bearing half: a definer in a schema an account cannot name is a body, not a door.
   PERFORM pg_temp.s4_jq('I4 the whole privileged inventory is '
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN '98'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN '101'
+            WHEN pg_temp.s4_at_least('stage10') THEN '98'
             WHEN pg_temp.s4_at_least('stage9') THEN '86'
             WHEN pg_temp.s4_at_least('stage8') THEN '79'
              WHEN pg_temp.s4_at_least('stage7') THEN '67'
@@ -4164,7 +4219,11 @@ BEGIN
               'usage_anon', (SELECT has_schema_privilege('anon', 'private', 'USAGE')::text),
               'usage_auth', (SELECT has_schema_privilege('authenticated', 'private', 'USAGE')::text),
               'usage_maint', (SELECT has_schema_privilege('service_role', 'private', 'USAGE')::text))),
-      CASE WHEN pg_temp.s4_at_least('stage10')
+      CASE WHEN pg_temp.s4_at_least('stage11')
+             THEN jsonb_build_object('api', '22', 'internal_api', '41', 'private', '38',
+                                     'public', '0', 'usage_anon', 'false',
+                                     'usage_auth', 'false', 'usage_maint', 'true')
+             WHEN pg_temp.s4_at_least('stage10')
              THEN jsonb_build_object('api', '22', 'internal_api', '39', 'private', '37',
                                      'public', '0', 'usage_anon', 'false',
                                      'usage_auth', 'false', 'usage_maint', 'true')
@@ -4327,7 +4386,8 @@ BEGIN
   -- so a zero in the first half is known to be a clean schema rather than a pattern that
   -- matches nothing.
   PERFORM pg_temp.s4_jq('I8 no function in api, internal_api or private is test-shaped: the scan finds none of this stage''s fixture markers in any of the '
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN '98'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN '101'
+            WHEN pg_temp.s4_at_least('stage10') THEN '98'
              WHEN pg_temp.s4_at_least('stage9') THEN '86'
              WHEN pg_temp.s4_at_least('stage8') THEN '79'
              WHEN pg_temp.s4_at_least('stage7') THEN '67'
@@ -4346,7 +4406,8 @@ BEGIN
                                     OR p.prosrc ILIKE '%fixture%'
                                      OR p.proname ILIKE '%test%')))),
     jsonb_build_object('real_scanned',
-      CASE WHEN pg_temp.s4_at_least('stage10') THEN '98'
+      CASE WHEN pg_temp.s4_at_least('stage11') THEN '101'
+            WHEN pg_temp.s4_at_least('stage10') THEN '98'
              WHEN pg_temp.s4_at_least('stage9') THEN '86'
              WHEN pg_temp.s4_at_least('stage8') THEN '79'
              WHEN pg_temp.s4_at_least('stage7') THEN '67'
@@ -4459,7 +4520,8 @@ BEGIN
   SELECT count(*) INTO v_scanned FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname IN ('api', 'internal_api', 'private');
   PERFORM pg_temp.s4_eq('I10b and no residue of the probe is left anywhere in the inventory', v_scanned,
-    CASE WHEN pg_temp.s4_at_least('stage10') THEN 98::bigint
+    CASE WHEN pg_temp.s4_at_least('stage11') THEN 101::bigint
+         WHEN pg_temp.s4_at_least('stage10') THEN 98::bigint
          WHEN pg_temp.s4_at_least('stage9') THEN 86::bigint
          WHEN pg_temp.s4_at_least('stage8') THEN 79::bigint
          WHEN pg_temp.s4_at_least('stage7') THEN 67::bigint

@@ -170,6 +170,16 @@ DECLARE
             THEN ARRAY['commerce_packages','commerce_orders',
                        'commerce_payment_attempts','commerce_payment_events',
                        'commerce_refunds','commerce_policy']
+            ELSE ARRAY[]::text[] END
+    -- Stage 11's one table, and its arrival here is the assertion that matters more than the count it
+    -- moves: operational authority is a credential, and C06 is the line that says a credential lives in
+    -- the schema no browser role can even name. `20_attacks.sql` group 4 and C11/C14 prove the reach half;
+    -- this inventory proves the location half, and a Stage 11 that had put `operator_grants` in `public`
+    -- would fail here before any grant question was asked. Measured on a chain that applied Stage 2
+    -- through Stage 11 — nine names, the eight above plus this one — in
+    -- `q11-logs/s11-catalog-readout-1.txt`.
+    || CASE WHEN pg_temp.st2_at_least('stage11')
+            THEN ARRAY['operator_grants']
             ELSE ARRAY[]::text[] END;
   legacy_tbls     text[] := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
@@ -217,6 +227,13 @@ DECLARE
     || CASE WHEN pg_temp.st2_at_least('stage9')
             THEN ARRAY['invitation_outputs']
             ELSE ARRAY[]::text[] END;
+  -- Stage 10's six commerce tables and Stage 11's grant table deliberately do *not* join this list, and
+  -- the reason is what the list means: "granted to `authenticated`, but written only by the server". A
+  -- table in `private` is in the schema no browser role can name (C06/C14), so it has no write grant that
+  -- could be the outer layer and no write policy for C22 to forbid — putting it here would assert a
+  -- category it is not in. Their posture is claimed where it actually lives: C31's trigger inventory
+  -- finds their guards, C06 finds their schema, and `90_commerce_functions.sql` / `80_operator_authority.sql`
+  -- measure their grant matrices at the wire.
   -- Rows that are never edited and never removed by a client.
   append_only_tbls text[] := ARRAY[
     'invitation_versions','approval_feedback','access_tokens','audit_events'];
@@ -311,6 +328,21 @@ DECLARE
               'commerce_payment_events(supersedes_event_row_id)->private.commerce_payment_events=NOACTION',
               'commerce_refunds(order_id)->private.commerce_orders=NOACTION',
               'commerce_refunds(event_id)->private.commerce_payment_events=SETNULL']
+            ELSE ARRAY[]::text[] END
+    -- Stage 11's two edges are the two halves of one sentence about what an operator grant is for, and
+    -- the first is the only FK to `auth.users` in this schema that is CASCADE rather than SET NULL. Every
+    -- other edge to that table nulls its attribution because the row it sits on is evidence worth
+    -- keeping after the person is gone — an order, an audit event, a review decision. A *live credential*
+    -- pointing at a deleted account is the opposite: keeping it is the failure, not the cost, so an
+    -- erased account must not leave an operational grant behind. `granted_by_user_id` keeps the rule
+    -- because it is attribution of a decision that was made, and the granter's own erasure must not
+    -- delete the record that a grant existed. The cascade runs as the child's owner, so
+    -- `operator_grants_no_client_delete` cannot see it (the general rule is C35) — which is the same fact
+    -- stated from the guard's side instead of the constraint's. Both names measured on
+    -- `q11-logs/s11-catalog-readout-1.txt`.
+    || CASE WHEN pg_temp.st2_at_least('stage11')
+            THEN ARRAY['operator_grants(user_id)->auth.users=CASCADE',
+                       'operator_grants(granted_by_user_id)->auth.users=SETNULL']
             ELSE ARRAY[]::text[] END;
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
@@ -365,6 +397,17 @@ DECLARE
             THEN ARRAY['commerce_orders->auth.users',
                        'commerce_orders->entitlements',
                        'commerce_refunds->private.commerce_payment_events']
+            ELSE ARRAY[]::text[] END
+    -- Stage 11's one, and the entry is `granted_by_user_id`: attribution, never a query key. The only FK
+    -- check an index there would serve is a granter's account DELETE, which nulls a column across a table
+    -- that is a handful of rows. The cascade that does matter — erasing an operator — is *not* in this
+    -- list, because `user_id` is the leading column of `operator_grants_active_uniq`, so that check is an
+    -- index probe; C48 names the edge once for the unindexed half and the absence of a second entry is
+    -- the assertion that the indexed half is indexed. Measured against
+    -- `q11-logs/s11-catalog-readout-1.txt`; the label count is `cardinality()` of this array, so the
+    -- number in the sentence moves with the list instead of being re-typed.
+    || CASE WHEN pg_temp.st2_at_least('stage11')
+            THEN ARRAY['operator_grants->auth.users']
             ELSE ARRAY[]::text[] END;
   t text;
 BEGIN
@@ -510,6 +553,18 @@ BEGIN
       -- writes to those tables go through the seven bodies in `internal_api` and nowhere else. C15b is
       -- the assertion that says so in the affirmative, and the count staying put is what would make a
       -- later "just grant service_role on the commerce tables" repair noticeable instead of silent.
+      --
+      -- Stage 11 measures against this line and adds no branch to it, for a reason worth recording where
+      -- the next reader will look for it: Stage 11 *revokes* UPDATE and DELETE on `private.audit_events`
+      -- from `service_role`, and the count is still 22. It is still 22 because the four-privilege string
+      -- above is answered as ANY-of rather than ALL-of — measured on a chain that applied Stage 2 through
+      -- Stage 11, where that call on `audit_events` returns `t` while the single-privilege calls return
+      -- `SELECT t / INSERT t / UPDATE f / DELETE f` (`q11-logs/s11-catalog-readout-1.txt`, and the probe
+      -- beside it). So this was never a count of tables the key may fully write, and no partial
+      -- revocation can lower it; the label says *reach*, and reach is what it measures. The revocation is
+      -- asserted privilege by privilege in Stage 11's own battery (`80_operator_authority.sql` cells A08
+      -- and AI02), which also names what the key keeps — INSERT, and with it forgery-by-addition — rather
+      -- than leaving that residue to a number that cannot see the difference.
       = (CASE WHEN pg_temp.st2_at_least('stage9') THEN 22::bigint ELSE 21::bigint END));
   PERFORM pg_temp.st2_ok('C16 service_role holds nothing in legacy',
     NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -781,6 +836,24 @@ BEGIN
         || CASE WHEN pg_temp.st2_at_least('stage10')
                 THEN ARRAY['internal_api.commerce_host_summary',
                            'private.guard_publication_commerce_gate']
+                ELSE ARRAY[]::text[] END
+        -- Stage 11 adds one name, `private.actor_is_operator`, and it is the fourth definer in `private`
+        -- — beside the draft attach, the signup handler and the publish gate — arrived at the same way as
+        -- the third: the question "is this session an operator" has to read `private.operator_grants`,
+        -- which no API role holds a privilege on, so a `SECURITY INVOKER` predicate asked by a later
+        -- slice's `SECURITY INVOKER` body would answer `permission denied for table operator_grants`
+        -- instead of `false`. A refusal that looks like a business rule is the failure this shape
+        -- exists to avoid, and the privilege it takes is used for one indexed read of one table.
+        --
+        -- Stated as a reason rather than inferred, because nothing observable distinguishes the two
+        -- choices yet: every role a request can arrive as is refused this function outright (cells
+        -- A17–A19 of `80_operator_authority.sql` measure anon, `authenticated` and `service_role` each
+        -- failing to reach it), so the definer posture buys a *nested* caller's answer and no caller of
+        -- that kind exists until the slices that need one are written. What it costs is one name in a
+        -- closed list, which is why the list is the assertion. Measured: 26 definers at this head, the
+        -- 25 above plus this one (`q11-logs/s11-catalog-readout-1.txt`).
+        || CASE WHEN pg_temp.st2_at_least('stage11')
+                THEN ARRAY['private.actor_is_operator']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -930,6 +1003,20 @@ BEGIN
                            'grant_commerce_entitlement',
                            'record_commerce_event',
                            'revoke_commerce_entitlement']
+                ELSE ARRAY[]::text[] END
+        -- Stage 11's two, and they are the second time this census is allowed to be asymmetric about a
+        -- write — with a different reason, which is why it is spelled out again rather than folded into
+        -- the paragraph above. Stage 10 left six bodies unpaired because a wrapper would be a door a
+        -- *customer* could walk through; these two are unpaired because a wrapper would be a door an
+        -- operator could walk through, and Stage 11's boundary is that no browser session may move
+        -- operational authority at all — not that the wrong sessions are prevented from doing so.
+        -- `40_catalog.sql` C28a/C28b therefore do not move for them, `30_publication.sql` G1f/G1g grows by
+        -- exactly these two names, and `80_operator_authority.sql` A05 measures the posture they ship in
+        -- (`SECURITY INVOKER`, following the 17-body precedent measured before the migration was written)
+        -- with EXECUTE held by nobody — not the owner's delegate roles, not the server key.
+        || CASE WHEN pg_temp.st2_at_least('stage11')
+                THEN ARRAY['grant_operator_role',
+                           'revoke_operator_role']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -1242,7 +1329,11 @@ BEGIN
                    AND a.argname ~* 'user_id|owner|role|uid'
                    AND (has_function_privilege('anon', p.oid, 'EXECUTE')
                      OR has_function_privilege('authenticated', p.oid, 'EXECUTE'))));
-  PERFORM pg_temp.st2_ok('C29c-b the only identity-taking callables are the six service-only commerce bodies, and each is ungrantable to a browser role',
+  PERFORM pg_temp.st2_ok('C29c-b the only identity-taking callables are '
+    || (CASE WHEN pg_temp.st2_at_least('stage11')
+             THEN 'the eight service-only bodies (six commerce, two operator-grant)'
+             ELSE 'the six service-only commerce bodies' END)
+    || ', and each is ungrantable to a browser role',
     (SELECT array_agg(x ORDER BY x) FROM (
        SELECT n.nspname || '.' || p.proname || '.' || a.argname AS x
          FROM pg_proc p
@@ -1250,7 +1341,18 @@ BEGIN
          JOIN LATERAL unnest(p.proargnames) AS a(argname) ON true
         WHERE n.nspname IN ('api','internal_api','private','public')
           AND a.argname ~* 'user_id|owner|role|uid') s)
-    = (CASE WHEN pg_temp.st2_at_least('stage10')
+    = (CASE WHEN pg_temp.st2_at_least('stage11')
+            THEN ARRAY['internal_api.commerce_reconcile.p_actor_user_id',
+                       'internal_api.create_commerce_order.p_actor_user_id',
+                       'internal_api.expire_commerce_order.p_actor_user_id',
+                       'internal_api.grant_commerce_entitlement.p_actor_user_id',
+                       'internal_api.grant_operator_role.p_actor_user_id',
+                       'internal_api.grant_operator_role.p_user_id',
+                       'internal_api.record_commerce_event.p_actor_user_id',
+                       'internal_api.revoke_commerce_entitlement.p_actor_user_id',
+                       'internal_api.revoke_operator_role.p_actor_user_id',
+                       'internal_api.revoke_operator_role.p_user_id']
+            WHEN pg_temp.st2_at_least('stage10')
             THEN ARRAY['internal_api.commerce_reconcile.p_actor_user_id',
                        'internal_api.create_commerce_order.p_actor_user_id',
                        'internal_api.expire_commerce_order.p_actor_user_id',
@@ -1413,6 +1515,29 @@ BEGIN
                   -- disappearance that nobody qualified.
                   'private.commerce_policy.commerce_policy_change_trail=audit_commerce_policy_change',
                   'public.publications.publications_commerce_publish_gate=guard_publication_commerce_gate']
+                ELSE ARRAY[]::text[] END
+        -- Stage 11's four, and the first changes a standing claim instead of filling a pattern in.
+        -- `private.audit_events` already carried the house pair, so `audit_no_update_any_role` is a
+        -- *third* trigger on a table that has been called append-only since Stage 2 — and it earns the
+        -- third spot by closing the half the pair never refused: `reject_client_write` steps aside for a
+        -- trusted role and returns NEW, so until now the server key could rewrite an audit row and the
+        -- word "append-only" meant "append-only for browsers". `reject_any_update` refuses every role
+        -- including the owner, which makes the claim true of the archive rather than of the callers. It
+        -- is INVOKER and C32b already lists `reject_any_update` among the guards that must never hold a
+        -- privilege, because a definer deciding who may rewrite an audit row is a guard with a privilege
+        -- of its own to use. The DELETE half is deliberately untouched — a trail that can never be pruned
+        -- is a trail no retention policy can run (Stage 13, §17), and what moved there was who may do it,
+        -- not whether it can be done; that is the revocation, asserted by `80_operator_authority.sql`.
+        -- The other three are the house pattern on `private.operator_grants` — write guard, delete
+        -- guard, timestamp — listed for the same reason as every other line here: this inventory is the
+        -- alarm for an arrival nobody qualified, and equally for a disappearance. Measured against
+        -- `q11-logs/s11-catalog-readout-1.txt`.
+        || CASE WHEN pg_temp.st2_at_least('stage11')
+                THEN ARRAY[
+                  'private.audit_events.audit_no_update_any_role=reject_any_update',
+                  'private.operator_grants.operator_grants_no_client_write=reject_client_write',
+                  'private.operator_grants.operator_grants_no_client_delete=reject_client_delete',
+                  'private.operator_grants.set_updated_at=touch_updated_at']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
@@ -2137,6 +2262,15 @@ BEGIN
   -- six tables, one wrapper, seven implementations, twenty triggers, eight foreign keys, one definer
   -- trigger and one policy row — went into lists that grew in place and moved no count. Re-measure
   -- and say so whenever a check is added or removed: a floor nobody re-measures stops meaning anything.
+  --
+  -- Stage 11 re-measured at 106 (`q11-logs/s11-iter-catalog-5.txt`) — the same total as Stage 10, and the
+  -- floor above therefore needs no branch, because the ladder is cumulative. The number is recorded
+  -- rather than assumed: Stage 11 widens five of this file's inventories (one `private` table, one
+  -- definer, two `internal_api` names, two identity-taking parameter pairs, four triggers, two foreign
+  -- keys, one unindexed edge) and every one of them is a list that grows in place. What Stage 11's real
+  -- assertions are — that no role may execute the grant bodies, that the audit table refuses an UPDATE
+  -- from its own owner, that the predicate answers from the grant row and not a cookie — are the Stage 11
+  -- battery's, not this file's, exactly as the same split held for Stage 9 and Stage 10.
   IF (current_setting('st2.passed'))::int <
      (CASE WHEN pg_temp.st2_at_least('stage10') THEN 106 ELSE 103 END) THEN
     RAISE EXCEPTION 'FAIL: only % catalog assertions ran — the expected floor for this head is %',
