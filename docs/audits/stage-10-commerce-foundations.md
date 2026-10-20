@@ -882,3 +882,157 @@ choose. Arm 2's first-clash `23505` is the same class of finding: safe for an id
 gateway, and recorded as a contract cell rather than repaired silently. HTTP and browser arms for both:
 **unexecuted.**
 
+## 20. The requalification pass: all seventeen, re-measured (2026-10-20)
+
+This section answers the standing directive's items 3, 5, 6, 7 and 8 over the worktree as it was found at
+`4797a4f` (equal to `origin/stage10/commerce-entitlements` at the start of the pass), with the Docker engine
+already running and the shipped local stack underneath it. Two code commits carry the only tracked changes
+this pass made: `5f4a2a9` (the Stage 10 HTTP test rewritten to §18's repaired answer) and `80f1ba2` (two
+Stage 9 harness repairs). This section is the third commit; like §10, it does not restate the gate numbers
+of the commit that carries it — the certification set is the next capture set in `q10-logs/`, opened with
+the pushed SHA, and its numbers stay in those logs. Nothing below is inferred from a green run somewhere
+else: every tier named was executed in this pass at the tree it names.
+
+### 20.1 The tiers §16..§19 left unexecuted
+
+**Stage 9 host-browser requalification, with an ephemeral credential.** The credential was minted for the
+existing Stage 9 fixture account through the GoTrue admin API (`PUT /auth/v1/admin/users/<id>`), a 24-byte
+`base64url` password passed to the tier in `VIVAAHVARNAM_S9_HOST_PASSWORD` and never written to a log, a
+commit or this file; the tier's redactor and the evidence directory were read to confirm it. Three runs, all
+at the same tree and the same fixture (`q9-logs/live/ids.json`, untouched): `s10-stage9-browser-1.txt`
+**55/56** (T-05: the Chrome profile directory outlived a twelve-second retry while no process held it),
+`s10-stage9-browser-2.txt` **54/56** (R-A2 and R-B3: the replayed manifest call had been captured without
+`Content-Profile`, so it resolved in `public` and PostgREST answered PGRST202), and
+`s10-stage9-browser-3.txt` **56/56**, all nine groups green — PRELUDE 3/3, HOST-LIST 7/7, DELIVERY 14/14,
+RETIRED 4/4, REFUSAL 11/11, A11Y 7/7, MOBILE 2/2, NETWORK 3/3, TEARDOWN 5/5 — with
+`profileRemoved=true` and the fixture census 9/8/38 before and after. The two defects were harness defects,
+not product failures, and both repairs are in `80f1ba2`: the T-05 wait is the same bounded retry on the same
+reported path with the assertion unchanged (two minutes, because the directory deleted cleanly once the
+handle was gone), and manifest discovery now prefers the last capture that carries the profile, logging
+`4 captured, 2 carrying a profile` in run 3. The reason this mattered is the false-green trap named in §6:
+PGRST202 is a refusal about an address, not a caller, and a privacy cell that scored it as "the anonymous
+replay was refused" would have passed for the wrong reason. The existing `refusalResolves` filter already
+separated the two; the repair removed the address-shaped refusal rather than trusting the filter.
+
+**Stage 10 HTTP, first executable run and then the repaired tree.** `s10-http-head4797-1.txt` is the first
+run of this tier after §16..§19: **61/68**, with seven failures named — D-01, D-11, R-01, R-03, R-10 on the
+answer's key set (`revocation_error` had arrived with `20261020180000`), R-06 on the pre-§18 abort, and R-11
+on the sweep state the abort had left. D-16 and Z-01 passed: the redelivery arm §16 had only read is now
+measured over the wire. `5f4a2a9` rewrote R-06 to the contained-refusal contract and grew `APPLIED_KEYS`;
+`s10-http-final-targeted-1.txt` is **68/68 at the committed head `80f1ba2`** (80.9 s, exit 0), and the full
+ten-suite chain at the repaired tree is **436/436** (`s10-http-repaired-tree-1.txt`, `transport_retries=0`).
+Its closing census is 6 weddings, 6 auth users, 0 commerce audit rows, 1 publication, 1 invitation version
+and 9 outputs — the three artefacts of the preserved Stage 9 fixture and nothing this tier left.
+
+**Stage 10 browser commerce, 40/40.** `s10-browser-requal-1.txt` is the tier at `4797a4f` with run tag
+`s10ui-f56eb7c50103`: **40 passed, 0 failed**, B130's catalogue rows 0 before and 0 after, the profile
+removed, and 1763 MB free at the end. It drove ten of the thirteen host states — `no_purchase`, `quote_open`,
+`payment_pending`, `payment_attempt_failed`, `cancelled`, `quote_expired`, `entitlement_active`,
+`refunded_pending_review`, `entitlement_revoked`, `dispute_open_review` — through the shipped reader against
+the API; the three it cannot reach are named in item 13 below. It read the policy as
+`gate=permissive mode=hold_for_review` and never wrote it. Its B120..B125 sweep hashed 8,630 captured
+header values: none was the service-role key, the secret key, the maintenance URL or the webhook signing
+key, and no request left loopback. Its residue was by design (6 orders and 8 fixture hosts), and is removed
+by the teardown in §20.3, not by the tier.
+
+**The independent grant and EXECUTE probe, 23/23.** `s10-grants-attempts-stack-1.txt` is `G01..G23` over the
+live stack: every one passed, 0 failed. The statements behind them and the catalog they are read against are
+`s10-grants-attempts-1.sh` and `s10-grants-catalog-stack-1.txt`. The measured facts: `anon` and
+`authenticated` have no `USAGE` on `private`; `authenticated` has SELECT and no write on
+`public.entitlements` (G09 allowed, G05..G07 refused); `anon` is refused even that (G08); `service_role`
+holds no `USAGE` on `api` or `internal_api` (G15/G16) and no privilege of any kind on the six
+`private.commerce_*` tables (G12..G14 and the catalog's `{postgres=arwdDxtm/postgres}` ACLs), while it keeps
+SELECT on the older `private.access_tokens` (G17) and DML on the older private tables; the events sequence
+is postgres-only (G19), and `authenticated` cannot reach the singleton or the catalogue (G18/G21). In the
+catalog, all 22 `api` functions are executable by `authenticated` and not by `anon` (the four public
+resolvers are the exception, as designed), the 39 `internal_api` functions are executable mostly by
+`authenticated` only, no function in either schema carries a PUBLIC EXECUTE, no SECURITY DEFINER routine is
+publicly executable, and no money table has a column-level ACL. `internal_api`'s EXECUTE grants are
+unreachable through PostgREST because the schema is not in the exposed list — which is exactly what
+G16's schema refusal measures and what N-03's routing refusals measured in the HTTP tier.
+
+### 20.2 Every finding, one disposition
+
+| §14 | disposition | what measures it, and its boundary |
+| --- | --- | --- |
+| 1. no deletion-of-money-history test | **CLOSED at the SQL tier** | `RM03`..`RM14` in §19: the delete meets the money boundary in order, `RM08` is the permissive control, and the owner path is refused by the freeze guard. Item 9's retention question stays open. |
+| 2. no publish-gate race | **MITIGATED WITH EXPLICIT LIMITATION** | `RA01`/`RA02` beside `RA03` (§19). The limitation is the gate's last-committed read, so a flip is not retroactive; the first-clash `23505` is recorded, not repaired. No gateway-level race exists. |
+| 3. partial refund answers `amount_mismatch` | **MITIGATED WITH EXPLICIT LIMITATION** | `R15b`..`R15i` (§18): held, named, kept and escalated; a real partial refund is not modelled end to end. The modelling question is an owner decision (below). |
+| 4. idempotency poisoning | **CLOSED** | SQL `P04`..`P35` (338/290 assertions) and unit 36/36 + 43/43 (§16); now HTTP `D-11`, `D-16`, `Z-01` green in the 68/68 and 436/436 runs. The browser tier has no webhook arm and is not claimed for it. |
+| 5. under-revocation with `codes = {}` | **CLOSED at the SQL tier** | `R16b` beside `R17`..`R20` and probe `B04`/`B07b`; group W and `s10tguard` pin the trail (§17). The HTTP G-01..G-08 gate arms re-ran green; the browser tier reads the policy without writing it. |
+| 6. nested revoke aborts; newest refund overrides; tie-break | **MITIGATED WITH EXPLICIT LIMITATION** | Nested half **CLOSED** at SQL (`R22b`..`R22h`, `Z15`) and now at HTTP (`R-06` green at 80f1ba2). The SQL battery's `R-11` (newest refund overrides an older one) and the two-refund tie-break remain **STILL OPEN** — HTTP's R-11 is a different case (sweep recovery) and does not close it. |
+| 7. `price_available = false` mixed case | **STILL OPEN** | B50 measures an active, unapproved package (`price_available=true`, `display_approved=false`) and suppresses the amount correctly. The mixed case — an order row whose package is no longer active — is still unexercised; the projection's `coalesce(v_pkg.display_approved, false)` reads safe, but that is code reading, not a measurement. |
+| 8. `reject_client_delete` whitelist | **CLOSED as scoped** | G01..G08/G20 and the catalog measure the claim exactly as written: no *browser* role may delete. `service_role` has no grant on the six commerce tables (G12..G14) and keeps DML on older private tables (G17); the trusted branch is a server path and §17's trail limitation says a policy-writer can still delete its own record. |
+| 9. wedding `NO ACTION` and erasure | **STILL OPEN** | Stage 13's retention decision owns it. The teardown's guarded order proves the relational guard, not an erasure policy; nothing in this pass deletes a wedding that has a purchase through a product path. |
+| 10. `service_role` and the published wrapper | **CLOSED (measured)** | G12..G16, G19 and the catalog above; N-03 green in the 436/436 chain. The service key's commerce answers are routing refusals, not grants, and the wrapper is unreachable to it. |
+| 11. Razorpay dispute vocabulary | **STILL OPEN** | `R-04` keeps an unknown dispute kind unlinked and held; the closed list still models Cashfree's shape and Razorpay's documented events. No live receiver exists to widen it. |
+| 12. globally UNIQUE provider refs | **CLOSED as a constraint** | `internal_api.create_commerce_order` mints `vv1_` plus a fresh v4 uuid per order (`20261017120000_stage10_commerce_foundations.sql:667`), and every tier namespaces its run. The UNIQUE indexes are intentional; a real adapter must mint, not reuse. |
+| 13. three host states and the currency arm | **STILL OPEN** | The browser tier reached ten of thirteen. `refunded_entitlement_revoked` needs the revoke policy written (which no browser tier may do), `entitlement_expired` and `captured_awaiting_entitlement` need fixture time or an unminted capture. `INR` is still the only legal currency, so the symbol arm is unreachable. |
+| 14. `stage9-output-publisher.mjs:288` | **STILL OPEN** | Recorded by §14, not repaired here; it is Stage 9's file and the same dropped-`reason` shape `3071462` fixed in the commerce driver. |
+| 15. CLI 2.121.0 versus the recorded 2.120.0 | **MITIGATED WITH EXPLICIT LIMITATION** | The only record of the old version was the resolver cache `supabase/.temp/cli-latest`; it now reads `v2.121.0` and `npx --yes supabase --version` prints `2.121.0`, so cache and resolver agree. The applied state is right: 31 migration files and 31 journal rows, max `20261020180000`. No tracked file pins a CLI version, so a later `npx` can move again. |
+| 16. no live webhook receiver | **STILL OPEN** | V1 forbids live orders and the tier was not run. Every delivery claim in this file is about the synthetic instrument and the ledger behind it, never about a provider's behaviour. |
+| 17. `domain-model.md` §12 stale clauses | **STILL OPEN** | This pass did not rewrite Stages 6..8's status from a Stage 10 pass; the money half and the §8 header are as §14 recorded. |
+
+### 20.3 The 38 fixtures: ownership, and the teardown that was safe to run
+
+The census the directive quoted was 38 `@example.test` users and 38 weddings. Classification by the only
+discriminator that ties an account to this stage — the `+s10ui-<tag>` local part minted by the browser
+driver's default run tag — resolved it exactly: **32 s10ui fixtures from the four earlier Stage 10 runs**, 2
+`probe+` accounts created 2026-10-19 11:04–11:05 UTC with no tier in `q10-logs` or `scripts/` naming them,
+1 Stage 7 host fixture and 3 Stage 9 publisher fixtures. The 32 owned **zero** versions, outputs, tokens,
+publications, orders, attempts, events, refunds, entitlements or approval requests; one draft each; 71 audit
+rows, all with a wedding. The FK graph read from `pg_constraint` names the only correct order — refunds →
+events → attempts → orders → entitlements — with `invitation_versions`, `outputs`, `publications`,
+`access_tokens`, `approval_requests` and `orders` as `NO ACTION` guards before the wedding row. This pass's
+browser run added 8 more s10ui fixtures under `s10ui-f56eb7c50103`, for 40.
+
+The teardown (`q10-logs/s10-teardown-s10ui.mjs`, a one-off evidence script outside the repository) ran one
+guarded transaction: a temp `doomed` table keyed by the uuid list; explicit deletes in that order; a DO block
+that raises before the wedding delete if any version, output, publication, token, approval request or order
+survives on a doomed wedding; audit rows by wedding, plus actor-only rows for doomed actors with no other
+wedding; then the weddings. It deleted, and committed: **94 audit rows, 2 refunds, 12 events, 5 attempts, 6
+orders, 3 entitlements and 40 weddings**; the 40 accounts went through the GoTrue admin API, 40/40. After:
+**6 users, 6 weddings** — the 1 Stage 7, 3 Stage 9 and 2 probe fixtures — with **0 s10ui users left**. The
+first attempt refused before deleting anything because psql's column header had entered the uuid list
+(`invalid input syntax for type uuid: "?column?"`); the guarded transaction rolled back as designed, the
+scratch script was fixed with `-t`, and the second run is the one above. The two `probe+` accounts are left
+in place: nothing ties them to this stage, and "unattributed" is a reason to preserve, not to delete.
+
+### 20.4 Instruments this pass found defective, and what was done
+
+**Repaired (`80f1ba2`).** The Stage 9 tier's bounded profile-deletion retry and its headerless-capture
+choice, both measured RED then GREEN in the three runs above.
+
+**Recorded, not repaired.** (a) `scripts/stage10-browser-commerce.mjs`'s `readOptions` accepts only the
+camelCase spellings while `USAGE` documents kebab-case: `--run-tag`, `--cdp-port`, `--floor-mb` and
+`--api-origin` are refused with exit 2. The run therefore used the default tag, which is why every fixture
+below is `s10ui-f56eb7c50103`. (b) The same driver's closing residue paragraph says the fixture weddings
+"own draft version rows that are ON DELETE NO ACTION"; measured, each owns **0** invitation versions and one
+draft, and drafts CASCADE with the wedding. The sentence did not change the tier's behaviour (it deletes no
+accounts, and still does not), but it is false about the schema and a reader would take the wrong guard
+from it. (c) The teardown script's own first-run header-row defect is recorded here because its first run is
+evidence of the guard working, not of a cleanup that half-happened.
+
+### 20.5 What this pass still does not establish
+
+No live provider, no Tier 6 receiver, no gateway-level publish race, no gateway reading of the first-clash
+`23505`, no real partial refund end to end, no newest-refund-override or two-refund tie-break, no mixed
+`price_available=false` projection, no three of the thirteen host states, no non-`INR` currency arm, no
+browser-side redelivery (the browser tier posts no webhooks), and no proof that a later `npx supabase` stays
+at 2.121.0. The two probe accounts remain unattributed. Those are the boundaries of every claim in this
+section.
+
+### 20.6 Recommendation to the owner
+
+**Stage 10 is mergeable as commerce foundations, not as a live payment feature.** All seventeen findings are
+now classified; none blocks the ledger, and the ones that remain open are either explicitly deferred to
+another stage (§14 items 9 and 17), out of V1's no-live-payments boundary (items 11 and 16), or arms the
+owner must decide to build (items 2, 3, 6, 7, 13 and 15). The branch is pushed, `main` is untouched, no live
+order or provider was activated, and every runtime claim above was measured on the shipped local stack. The
+owner decisions this pass did not take: model a real partial refund or keep rule 4 as a hold; choose whether
+the publish gate should be retroactive and how a gateway should treat the first-clash `23505`; build the
+newest-refund-override and tie-break arms; build the mixed `price_available` arm; decide whether the three
+unreachable host states and a non-`INR` currency are in scope; decide Stage 13's erasure-versus-money-history
+policy; widen the Razorpay dispute vocabulary when a live receiver exists; and, if the Stage 10 driver is to
+be used again, fix its flags and its residue sentence.
+
