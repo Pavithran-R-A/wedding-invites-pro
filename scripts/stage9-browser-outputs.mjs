@@ -336,14 +336,25 @@ const WARNING_CONTRAST = `(() => {
  *  `rpcHeaders()`: Chrome hands back whatever spelling the sender used. */
 async function discoverManifestCall(page) {
   const log = await page.networkLog();
-  const hit = log.filter((entry) => /\/rest\/v1\/rpc\/[^?]*invitation_outputs/.test(entry.url)).at(-1);
-  if (hit === undefined) {
+  const hits = log.filter((entry) => /\/rest\/v1\/rpc\/[^?]*invitation_outputs/.test(entry.url));
+  if (hits.length === 0) {
     throw new Refusal('refused: the panel never made a manifest call this run can see, so there is no '
       + 'app-shaped address to replay. A hand-written one measures the harness, not the policy.');
   }
-  const headers = { ...(hit.headers ?? {}), ...(hit.sentHeaders ?? {}) };
-  const profileKey = Object.keys(headers).find((k) => k.toLowerCase() === 'content-profile');
-  return { url: hit.url, profile: profileKey === undefined ? null : headers[profileKey] };
+  const candidates = hits.map((hit) => {
+    const headers = { ...(hit.headers ?? {}), ...(hit.sentHeaders ?? {}) };
+    const profileKey = Object.keys(headers).find((k) => k.toLowerCase() === 'content-profile');
+    return { url: hit.url, method: hit.method, profile: profileKey === undefined ? null : headers[profileKey] };
+  });
+  // A capture without the profile header cannot reproduce the app's schema-qualified call: replayed
+  // as-is it resolves in `public` and answers PGRST202, which is a refusal about the harness's
+  // spelling (the 2026-10-20 requalification hit exactly this and scored two privacy cells red).
+  // Prefer the last hit that carries the profile; the last hit remains the fallback so a genuinely
+  // profile-less app call fails the same way it always would rather than being papered over.
+  const profiled = candidates.filter((c) => c.profile !== null);
+  const chosen = profiled.at(-1) ?? candidates.at(-1);
+  return { url: chosen.url, profile: chosen.profile, method: chosen.method,
+    captured: candidates.length, withProfile: profiled.length };
 }
 
 /** True when a refusal is about the caller rather than about an address that names nothing.
@@ -1036,6 +1047,8 @@ export async function runTier({ opts, log, channels }) {
 
     const anonHeaders = { apikey: anonKey, 'Content-Type': 'application/json', Authorization: `Bearer ${anonKey}` };
     const manifestCall = await discoverManifestCall(hostA);
+    log(`manifest call replayed: ${manifestCall.captured} captured, ${manifestCall.withProfile} carrying a `
+      + `profile; method ${manifestCall.method}, profile ${manifestCall.profile === null ? 'absent' : 'present'}`);
     const anonRpc = await anonPage.fetchFromPage(manifestCall.url, {
       method: 'POST',
       headers: { ...anonHeaders, ...(manifestCall.profile === null ? {} : { 'Content-Profile': manifestCall.profile }) },
@@ -1336,11 +1349,13 @@ export async function runTier({ opts, log, channels }) {
     // directory that deletes cleanly seconds later — proven this session, where the run's own profile
     // removed on the first try once the wait was over. So the verdict is the product of a bounded retry
     // on exactly the path the driver reported (never a glob, never another directory) plus a read-back of
-    // whether the directory still exists — not whether one unlink call happened to land.
+    // whether the directory still exists — not whether one unlink call happened to land. The bound is two
+    // minutes because the 2026-10-20 requalification outlived the original twelve-second window and the
+    // same directory deleted without error once the handle was gone; the check still fails if it survives.
     const target = typeof closed.profilePath === 'string' ? closed.profilePath : null;
     let reason = closed.reason ?? null;
-    for (let i = 0; target !== null && existsSync(target) && i < 8; i += 1) {
-      await sleep(1_500);
+    for (let i = 0; target !== null && existsSync(target) && i < 40; i += 1) {
+      await sleep(3_000);
       try {
         rmSync(target, { recursive: true, force: true });
       } catch (error) {
