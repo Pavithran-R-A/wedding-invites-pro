@@ -330,6 +330,31 @@ LANGUAGE sql STABLE AS $fn$
   SELECT count(*) FROM public.publications
    WHERE wedding_id = p_wed::uuid AND status = 'active' $fn$;
 
+-- The head this battery is being measured at. Stage 10 wrote no such helper because Stage 10's pair had
+-- never run behind its own head; `supabase/tests/stage11/run.sh regress` is the first sweep that re-runs
+-- it at a later one, and it refused on the first cell whose expectation is a closed privilege inventory
+-- (`q11-logs/s11-regress-1.txt`). Cumulative and ordinal for the reason `40_catalog.sql` gives: a census
+-- keyed on `= 'stage11'` would hand the Stage 12 chain Stage 10's numbers, and a malformed head raises
+-- rather than quietly choosing a branch. The default when the GUC is unset is this battery's own head, so
+-- `stage10/run.sh` measures exactly what it always measured.
+CREATE FUNCTION pg_temp.s10f_head() RETURNS text
+LANGUAGE sql STABLE AS $fn$
+  SELECT coalesce(nullif(current_setting('app.stage_head', true), ''), 'stage10') $fn$;
+
+CREATE FUNCTION pg_temp.s10f_at_least(want text) RETURNS boolean
+LANGUAGE plpgsql STABLE AS $fn$
+DECLARE h int; w int;
+BEGIN
+  IF pg_temp.s10f_head() !~ '^stage[0-9]+$' OR want !~ '^stage[0-9]+$' THEN
+    RAISE EXCEPTION 's10f_at_least: a stage head must be spelled stage<n> — got head=% want=%',
+      pg_temp.s10f_head(), want;
+  END IF;
+  h := regexp_replace(pg_temp.s10f_head(), '^stage', '')::int;
+  w := regexp_replace(want, '^stage', '')::int;
+  RETURN h >= w;
+END
+$fn$;
+
 -- --------------------------------------------------------------------------- the probe matrix
 CREATE TEMP TABLE probes (
   grp         text,
@@ -1523,7 +1548,10 @@ BEGIN
        AND c.relkind = 'r'
        AND (n.nspname = 'private' OR c.relname IN ('entitlements','audit_events','access_tokens'))
        AND has_table_privilege(g.role, c.oid, 'DELETE')), 0::bigint);
-  PERFORM pg_temp.s10f_array('N04b and the only DELETE grants in that whole scope are the three the trusted role holds',
+  PERFORM pg_temp.s10f_array('N04b and the only DELETE grants in that whole scope are the '
+    || CASE WHEN pg_temp.s10f_at_least('stage11')
+            THEN 'two the trusted role still holds — Stage 11 revoked this one, on purpose'
+            ELSE 'three the trusted role holds' END,
     ARRAY(SELECT n.nspname || '.' || c.relname || '|' || g.role FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN unnest(ARRAY['anon','authenticated','service_role']) g(role) ON true
@@ -1532,8 +1560,10 @@ BEGIN
        AND (n.nspname = 'private' OR c.relname IN ('entitlements','audit_events','access_tokens'))
        AND has_table_privilege(g.role, c.oid, 'DELETE')
      ORDER BY 1),
-    ARRAY['private.access_tokens|service_role', 'private.audit_events|service_role',
-          'public.entitlements|service_role']);
+    CASE WHEN pg_temp.s10f_at_least('stage11')
+         THEN ARRAY['private.access_tokens|service_role', 'public.entitlements|service_role']
+         ELSE ARRAY['private.access_tokens|service_role', 'private.audit_events|service_role',
+                    'public.entitlements|service_role'] END);
 
   -- The surface §12 says does not exist: a door a provider could post to.
   PERFORM pg_temp.s10f_eq('N05 no function on either exposed schema is named for a webhook or a callback',

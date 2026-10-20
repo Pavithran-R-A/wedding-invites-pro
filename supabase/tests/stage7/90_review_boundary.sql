@@ -1094,10 +1094,14 @@ BEGIN
     'thirteen mirrored from `api` plus the eleven cultural-authority names §7 keeps on this side; '
     'thirty from Stage 8, whose six new bodies are all mirrors, so the eleven stay eleven; thirty-two '
     'from Stage 9, whose two are mirrors too; thirty-nine from Stage 10, whose seven are one mirror '
-    'and six names no browser may call at all — the money verbs. G3f below is the line that proves '
-    'the uncallable half grew from eleven to seventeen rather than being quietly granted',
+    'and six names no browser may call at all — the money verbs; forty-one from Stage 11, whose two '
+    'are neither mirrors nor money verbs but the operator-authority bodies — `grant_operator_role` '
+    'and `revoke_operator_role` — that §13 keeps reachable only from the trusted owner role, which '
+    'is why this count moved while G3''s did not. G3f below is the line that proves the uncallable '
+    'half grew from eleven to nineteen rather than being quietly granted',
     cardinality(internal_names)::bigint,
-    CASE WHEN pg_temp.s7b_at_least('stage10') THEN 39::bigint
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 41::bigint
+         WHEN pg_temp.s7b_at_least('stage10') THEN 39::bigint
          WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
          WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
 
@@ -1176,7 +1180,17 @@ BEGIN
     api_names);
 
   PERFORM pg_temp.s7b_eq('G3f and the complement is '
-    || CASE WHEN pg_temp.s7b_at_least('stage10')
+    || CASE WHEN pg_temp.s7b_at_least('stage11')
+              THEN 'nineteen bodies a host cannot call at all: the eleven cultural-authority names '
+                   || '§7 keeps on this side, plus the six money verbs Stage 10 put behind the server '
+                   || '— open an order, record a payment event, grant a right, revoke a right, expire '
+                   || 'an order, reconcile — plus the two operator-authority bodies Stage 11 added, '
+                   || 'grant and revoke. G3e proves the other twenty-two of the forty-one are exactly '
+                   || 'G1''s names, so growth in this file can only ever mean a body nobody opened to '
+                   || 'a browser. Listing them is the point either way: a body someone granted to '
+                   || '`authenticated` would leave this list by moving to G3e''s, and one that '
+                   || 'should have been a mirror but was not would show up here'
+            WHEN pg_temp.s7b_at_least('stage10')
               THEN 'seventeen bodies a host cannot call at all: the eleven cultural-authority names '
                    || '§7 keeps on this side, plus the six money verbs Stage 10 put behind the server '
                    || '— open an order, record a payment event, grant a right, revoke a right, expire '
@@ -1189,7 +1203,17 @@ BEGIN
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'internal_api'
         AND NOT has_function_privilege('authenticated', p.oid, 'execute'))),
-    CASE WHEN pg_temp.s7b_at_least('stage10')
+    CASE WHEN pg_temp.s7b_at_least('stage11')
+         THEN pg_temp.s7b_sorted(ARRAY['approve_tradition_pack_release', 'commerce_reconcile',
+           'create_commerce_order', 'create_tradition_pack', 'create_tradition_pack_release',
+           'deprecate_tradition_pack_release', 'expire_commerce_order',
+           'get_tradition_pack_review_packet', 'grant_commerce_entitlement', 'grant_operator_role',
+           'inspect_tradition_pack_release', 'record_commerce_event',
+           'revoke_commerce_entitlement', 'revoke_operator_role',
+           'submit_tradition_pack_review', 'tradition_pack_catalog',
+           'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
+           'validate_tradition_pack_release'])
+         WHEN pg_temp.s7b_at_least('stage10')
          THEN pg_temp.s7b_sorted(ARRAY['approve_tradition_pack_release', 'commerce_reconcile',
            'create_commerce_order', 'create_tradition_pack', 'create_tradition_pack_release',
            'deprecate_tradition_pack_release', 'expire_commerce_order',
