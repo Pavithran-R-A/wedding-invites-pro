@@ -1017,6 +1017,41 @@ BEGIN
     (SELECT count(*) FROM private.commerce_refunds WHERE order_id = o6), 0::bigint);
   PERFORM pg_temp.s10l_eq('R15 the state outside the ledger is unchanged', pg_temp.s10l_state(), st);
 
+  -- §14's item 3, the other half: a refund for less than the frozen quote, driven through the battery rather
+  -- than argued in a scratch probe. This is the shape §14 named under-revocation — half the money back while
+  -- the right stays live — and the disposition this file closes it with is "held, escalated, and not
+  -- adjudicated by the ledger", which is only evidence if the file that ships the claim can show the row.
+  -- Placed before the deliberate policy flip so the entitlement in question is the one the capture granted,
+  -- under the shipped `hold_for_review` posture.
+  st := (SELECT count(*)::text FROM private.audit_events
+          WHERE action = 'refund_succeeded' AND subject_key = o1);
+  v := pg_temp.s10l_deliver('r-refund-half', 'refund_succeeded', r1, 249950, 'po_a1', 'rf_half', now());
+  PERFORM pg_temp.s10l_eq('R15b a refund for half the frozen quote is held for reconciliation, not applied',
+    v ->> 'processing_status', 'held_for_reconciliation');
+  PERFORM pg_temp.s10l_eq('R15c named by the same rule that holds a wrong-amount capture, because an amount is '
+    || 'an amount whatever kind names it', v ->> 'hold_reason', 'amount_mismatch');
+  PERFORM pg_temp.s10l_eq('R15d and no refund row was invented for a claim this build will not adjudicate',
+    (SELECT count(*) FROM private.commerce_refunds WHERE provider_refund_ref = 'rf_half'), 0::bigint);
+  PERFORM pg_temp.s10l_eq('R15e while the ledger row keeps the amount the provider claimed, so a reviewer can '
+    || 'see the half rather than only the refusal',
+    (SELECT amount_minor FROM private.commerce_payment_events WHERE event_id = 'r-refund-half'),
+    249950::bigint);
+  PERFORM pg_temp.s10l_eq('R15f and the entitlement the full money bought stays active: a partial claim '
+    || 'cannot lock a family out',
+    (SELECT status FROM public.entitlements WHERE id = ent1), 'active');
+  PERFORM pg_temp.s10l_eq('R15g and the held delivery writes no audit row of its own, which is §4.2''s rule '
+    || 'that a refusal decides nothing about the money',
+    (SELECT count(*)::text FROM private.audit_events
+      WHERE action = 'refund_succeeded' AND subject_key = o1), st);
+  v := pg_temp.s10l_call('recon-3', 'SELECT internal_api.commerce_reconcile('
+    || quote_literal(o1::text) || '::uuid, ' || quote_literal(pg_temp.s10l_actor()::text) || '::uuid)');
+  PERFORM pg_temp.s10l_eq('R15h so the partial refund reaches an operator: the reconciler reports it as drift, '
+    || 'because a refusal is not a disagreement that went away',
+    (SELECT count(*) FROM jsonb_array_elements(v -> 'findings') f
+      WHERE f ->> 'code' = 'amount_drift'), 1::bigint);
+  PERFORM pg_temp.s10l_ok('R15i and the finding names the order''s own frozen price as the figure that did not move',
+    (SELECT bool_or(f ->> 'detail' LIKE '%499900 INR%') FROM jsonb_array_elements(v -> 'findings') f));
+
   -- The owner's decision flipped on purpose, inside a test that will flip it back.
   UPDATE private.commerce_policy SET refund_revocation_mode = 'revoke' WHERE id = 1;
   PERFORM pg_temp.s10l_eq('R16 the policy row is writable by the trusted role and refuses a browser',
@@ -1045,6 +1080,42 @@ BEGIN
   PERFORM pg_temp.s10l_eq('R22 one audit row of action revoked, against the entitlement not the order',
     (SELECT count(*) FROM private.audit_events WHERE action = 'revoked'
        AND subject_type = 'entitlement'), 1::bigint);
+
+  -- §14's item 3, measured rather than argued: the money moved back a second time, and the ledger lost the
+  -- row that proved it. The revocation step raises because this order's entitlement is already revoked, and
+  -- because the raise escapes the delivery, it aborts the subtransaction that had already written the row.
+  -- These six cells describe the shape the repair must produce: the delivery answered, the evidence kept,
+  -- the refusal named, and nothing revoked twice.
+  v := pg_temp.s10l_deliver('r-refund-4b', 'refund_succeeded', r4, 499900, 'po_bare', 'rf_bare2', now());
+  PERFORM pg_temp.s10l_ok('R22b a second refund under revoke is answered, not raised out of the delivery',
+    (v ->> '_error') IS NULL AND v ->> 'disposition' = 'applied');
+  PERFORM pg_temp.s10l_eq('R22c and the provider''s second refund keeps its own ledger row',
+    (SELECT count(*) FROM private.commerce_payment_events WHERE event_id = 'r-refund-4b'), 1::bigint);
+  PERFORM pg_temp.s10l_eq('R22d that row is applied and names the decision the policy made',
+    (SELECT processing_status || '/' || coalesce(applied_effect, '(none)')
+       FROM private.commerce_payment_events WHERE event_id = 'r-refund-4b'), 'applied/entitlement_revoked');
+  PERFORM pg_temp.s10l_eq('R22e money back is recorded twice because the provider moved it twice',
+    (SELECT string_agg(kind || '/' || status || '/' || coalesce(provider_refund_ref, '(none)'), ','
+                         ORDER BY provider_refund_ref)
+       FROM private.commerce_refunds WHERE order_id = o4),
+    'refund/succeeded/rf_bare,refund/succeeded/rf_bare2');
+  PERFORM pg_temp.s10l_eq('R22f the refusal the step made is on the record, in the step''s own sentence',
+    (SELECT count(*) FROM private.audit_events ae
+      WHERE ae.action = 'revocation_refused'
+        AND ae.payload ->> 'error' LIKE '%has no live entitlement to revoke%'
+        AND (ae.payload ->> 'event_row_id')::bigint
+            = (SELECT id FROM private.commerce_payment_events WHERE event_id = 'r-refund-4b')), 1::bigint);
+  PERFORM pg_temp.s10l_eq('R22g and the clean first revocation is not retroactively tagged with a refusal',
+    (SELECT count(*) FROM private.audit_events
+      WHERE action = 'revocation_refused'
+        AND (payload ->> 'event_row_id')::bigint
+            = (SELECT id FROM private.commerce_payment_events WHERE event_id = 'r-refund-4')), 0::bigint);
+  PERFORM pg_temp.s10l_eq('R22h nothing revoked twice: one entitlement, revoked, one revoked action in the audit',
+    ARRAY[(SELECT status FROM public.entitlements
+             WHERE wedding_id = s.wed_c AND package_code = 'QCLASSIC'),
+          (SELECT count(*)::text FROM private.audit_events WHERE action = 'revoked'
+             AND subject_type = 'entitlement')],
+    ARRAY['revoked','1']);
 
   -- The killer arm of §9: a chargeback under `revoke` mode must still not revoke.
   v := pg_temp.s10l_deliver('r-chb-revoke', 'chargeback_opened', r1, 499900, 'po_a1', 'cb_a2', now());
@@ -2001,10 +2072,16 @@ BEGIN
     ARRAY['confirmed=6','failed=1','initiated=1']);
   -- `ORDER BY <ordinal> COLLATE "C"` is not an ordinal at all: the collation clause types the constant, and
   -- Postgres then sorts by the integer 1 and refuses. Each census cell names its own expression.
+  -- Group R's nested refund moved this line from `applied=23` to `applied=24`, and the row it names is the
+  -- one `20261020180000_stage10_nested_revocation.sql` stopped unwinding. The pin was re-taken from the run
+  -- that failed on it (`q10-logs/s10r-nested-run-2.txt`: `got [applied=24 …] want [applied=23 …]`).
+  -- It moves again for the partial refund: R15b's half-quote claim is held for a human, so it is a ledger row
+  -- that no earlier delivery made. Re-taken from `q10-logs/s10r-nested-run-7.txt` (`held=14 want 13`), which
+  -- is also the run that shows every group-R cell passing against the repair.
   PERFORM pg_temp.s10l_array('Z03 the ledger, by processing status: every delivery this file sent, applied or not',
     ARRAY(SELECT processing_status || '=' || count(*)::text FROM private.commerce_payment_events
            GROUP BY processing_status ORDER BY processing_status COLLATE "C"),
-    ARRAY['applied=23','duplicate=2','held_for_reconciliation=13','rejected_signature=4','stale=2']);
+    ARRAY['applied=24','duplicate=2','held_for_reconciliation=14','rejected_signature=4','stale=2']);
   -- The census this file's own repair moved. Before `20261020120000_stage10_event_redelivery.sql` one
   -- provider event identity was one row, so "no row was written twice" and "one row per identity" were the
   -- same sentence and this cell compared `count(*)` to `count(DISTINCT provider||'|'||event_id)`. They are
@@ -2026,10 +2103,12 @@ BEGIN
        AND (p.id IS NULL OR c.provider IS DISTINCT FROM p.provider
             OR c.event_id IS DISTINCT FROM p.event_id OR c.supersedes_event_row_id >= c.id)),
     0::bigint);
+  -- One `refund/succeeded` more than the pre-repair count, for the same reason as Z03: the nested refund in
+  -- group R wrote this row as well as its ledger row, and both used to be unwound together.
   PERFORM pg_temp.s10l_array('Z05 the refund and dispute records, by kind and status',
     ARRAY(SELECT kind || '/' || status || '=' || count(*)::text FROM private.commerce_refunds
            GROUP BY kind, status ORDER BY (kind || '/' || status) COLLATE "C"),
-    ARRAY['chargeback/recorded=2','refund/failed=1','refund/succeeded=4']);
+    ARRAY['chargeback/recorded=2','refund/failed=1','refund/succeeded=5']);
   PERFORM pg_temp.s10l_array('Z06 the entitlements: granted by capture, one revoked by policy, three active at the end',
     ARRAY(SELECT status || '=' || count(*)::text FROM public.entitlements
            GROUP BY status ORDER BY status COLLATE "C"),
@@ -2055,13 +2134,19 @@ BEGIN
     (SELECT count(*) FROM public.weddings), 5::bigint);
   PERFORM pg_temp.s10l_eq('Z14 the accounts are the three this file made',
     (SELECT count(*) FROM auth.users), 3::bigint);
+  -- `revocation_refused=1` is the verb `20261020180000_stage10_nested_revocation.sql` added, and it is the
+  -- only count in this array that should exist at all: R22b to R22h wrote one nested refund, so the ledger
+  -- row, its audit row and the step's refusal are one each. `refund_succeeded` goes with it, because the
+  -- delivery that used to unwind itself is now on the record. `swept` is 17 rather than 16 because R15f
+  -- reconciles the order holding the half-quote hold — the partial-refund arm reads the reconciler's
+  -- finding, and reading it is a sweep. Re-taken from `q10-logs/s10r-nested-run-8.txt`.
   PERFORM pg_temp.s10l_array('Z15 the audit actions this file produced, named and counted, so a verb that stopped writing its record is caught',
     ARRAY(SELECT action || '=' || count(*)::text FROM private.audit_events
            GROUP BY action ORDER BY action COLLATE "C"),
     ARRAY['attempt_failed=1','attempt_initiated=4','cancelled_by_provider=2','chargeback_opened=2',
           'expired=1','failure_recorded=1','granted_by_commerce_capture=7','order_captured=6',
-          'policy_changed=7','quote_created=10','refund_failed=1','refund_succeeded=4','revoked=4',
-          'swept=16']);
+          'policy_changed=7','quote_created=10','refund_failed=1','refund_succeeded=5',
+          'revocation_refused=1','revoked=4','swept=17']);
   PERFORM pg_temp.s10l_eq('Z16 every money verb this file called recorded its actor as an account that exists',
     (SELECT count(*) FROM private.audit_events ae
       JOIN auth.users u ON u.id = ae.actor_user_id),
@@ -2099,9 +2184,13 @@ BEGIN
   -- P00b and the flap's twelve cells take it to 338 (`q10-logs/s10r-flap-green-1.txt`), and group W's
   -- twenty-five plus F16 take it to 364 (`q10-logs/s10r-trail-green-2.txt`); R16b — the cell that names
   -- the empty package list on the revoke path, §14's item 5 — is the 365th (`q10-logs/s10r-r16b-green-1.txt`,
-  -- ending `PASSED (365)`), so the floor tracks the last run that passed. It is set from a run rather than
-  -- from a guess so that a suite which silently skips a group is caught rather than read as a smaller pass.
-  IF n < 364 THEN
+  -- ending `PASSED (365)`); group R's seven cells for the nested refund — `R22b` to `R22h`, the arms §14's
+  -- item 3 describes — take the read to 371 (`q10-logs/s10r-nested-run-5.txt`, ending `PASSED (372)`); and
+  -- the eight cells for the half-quote refund — `R15b` to `R15i`, the other half of the same item — take it
+  -- to 379 (`q10-logs/s10r-nested-run-9.txt`, ending `PASSED (380)`). The floor tracks the last run that
+  -- passed. It is set from a run rather than from a guess so that a suite which silently skips a group is
+  -- caught rather than read as a smaller pass.
+  IF n < 379 THEN
     RAISE EXCEPTION 'FAIL L01 the ledger battery ran % assertions, which is fewer than the floor', n;
   END IF;
   RAISE NOTICE 'PASS L01 the ledger battery ran at least its floor of assertions (%)', n;
