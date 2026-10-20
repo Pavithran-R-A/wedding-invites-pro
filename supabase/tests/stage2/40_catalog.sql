@@ -1373,14 +1373,17 @@ BEGIN
                   'public.invitation_outputs.invitation_outputs_no_client_delete=reject_client_delete',
                   'public.invitation_outputs.set_updated_at=touch_updated_at']
                 ELSE ARRAY[]::text[] END
-        -- Stage 10's twenty, in the order that explains them. Nineteen are on the six new server tables
-        -- and follow the house pattern exactly: every commerce table that can be written by the trusted
-        -- path carries `reject_client_write` + `reject_client_delete` + `touch_updated_at` — except
+        -- Stage 10's twenty-one, in the order that explains them. Twenty are on the six new server tables:
+        -- nineteen follow the house pattern exactly and every commerce table that can be written by the
+        -- trusted path carries `reject_client_write` + `reject_client_delete` + `touch_updated_at` — except
         -- `commerce_payment_events`, whose third trigger is `reject_any_update` instead of the delete
         -- guard's partner, because an append-only ledger must refuse an UPDATE from *any* role, owner
         -- included, rather than only from a browser. `commerce_orders` adds one more: the freeze guard,
         -- which is what makes "a quote's price and expiry cannot be edited after it is issued" a fact of
-        -- the schema rather than a promise in a function. The twentieth is on `public.publications` and
+        -- the schema rather than a promise in a function. The twentieth is on `private.commerce_policy`
+        -- too, and is the only one of the twenty that writes instead of refusing: the record a policy
+        -- change leaves behind, which is what C31's whole point — noticing an arrival nobody qualified —
+        -- was written for. The twenty-first is on `public.publications` and
         -- is the only definer in this whole inventory that Stage 10 adds, because it is the only one that
         -- has to read a table the caller cannot name (see C32).
         || CASE WHEN pg_temp.st2_at_least('stage10')
@@ -1404,6 +1407,11 @@ BEGIN
                   'private.commerce_policy.commerce_policy_no_client_write=reject_client_write',
                   'private.commerce_policy.commerce_policy_no_client_delete=reject_client_delete',
                   'private.commerce_policy.set_updated_at=touch_updated_at',
+                  -- The twenty-first, and the only one of the six commerce triggers that is not a refusal:
+                  -- it writes the record a policy change leaves behind (20261020160000). Listed here for
+                  -- the same reason as every other line in this array — an alarm for an arrival or a
+                  -- disappearance that nobody qualified.
+                  'private.commerce_policy.commerce_policy_change_trail=audit_commerce_policy_change',
                   'public.publications.publications_commerce_publish_gate=guard_publication_commerce_gate']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the

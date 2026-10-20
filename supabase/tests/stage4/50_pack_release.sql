@@ -4142,8 +4142,13 @@ BEGIN
   -- booleans are what says whether any of that is reachable: an account still cannot name the
   -- schema the money model lives in, which is the load the Stage 10 migration's own table comment
   -- puts on this line when it claims no browser role can read or write an order.
+  --
+  -- `20261020160000_stage10_policy_change_trail.sql` is the fourth `private` body at this head and the
+  -- only one of the four that writes rather than refuses, so 36 → 37 and the total 97 → 98. It is not
+  -- reachable by name from any account either: `SECURITY INVOKER`, revoked from `PUBLIC`, `anon`,
+  -- `authenticated` and `service_role`, and fired only by the trigger §2's C31 now lists.
   PERFORM pg_temp.s4_jq('I4 the whole privileged inventory is '
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN '97'
+    || CASE WHEN pg_temp.s4_at_least('stage10') THEN '98'
             WHEN pg_temp.s4_at_least('stage9') THEN '86'
             WHEN pg_temp.s4_at_least('stage8') THEN '79'
              WHEN pg_temp.s4_at_least('stage7') THEN '67'
@@ -4160,7 +4165,7 @@ BEGIN
               'usage_auth', (SELECT has_schema_privilege('authenticated', 'private', 'USAGE')::text),
               'usage_maint', (SELECT has_schema_privilege('service_role', 'private', 'USAGE')::text))),
       CASE WHEN pg_temp.s4_at_least('stage10')
-             THEN jsonb_build_object('api', '22', 'internal_api', '39', 'private', '36',
+             THEN jsonb_build_object('api', '22', 'internal_api', '39', 'private', '37',
                                      'public', '0', 'usage_anon', 'false',
                                      'usage_auth', 'false', 'usage_maint', 'true')
              WHEN pg_temp.s4_at_least('stage9')
@@ -4322,7 +4327,7 @@ BEGIN
   -- so a zero in the first half is known to be a clean schema rather than a pattern that
   -- matches nothing.
   PERFORM pg_temp.s4_jq('I8 no function in api, internal_api or private is test-shaped: the scan finds none of this stage''s fixture markers in any of the '
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN '97'
+    || CASE WHEN pg_temp.s4_at_least('stage10') THEN '98'
              WHEN pg_temp.s4_at_least('stage9') THEN '86'
              WHEN pg_temp.s4_at_least('stage8') THEN '79'
              WHEN pg_temp.s4_at_least('stage7') THEN '67'
@@ -4341,7 +4346,7 @@ BEGIN
                                     OR p.prosrc ILIKE '%fixture%'
                                      OR p.proname ILIKE '%test%')))),
     jsonb_build_object('real_scanned',
-      CASE WHEN pg_temp.s4_at_least('stage10') THEN '97'
+      CASE WHEN pg_temp.s4_at_least('stage10') THEN '98'
              WHEN pg_temp.s4_at_least('stage9') THEN '86'
              WHEN pg_temp.s4_at_least('stage8') THEN '79'
              WHEN pg_temp.s4_at_least('stage7') THEN '67'
@@ -4454,7 +4459,7 @@ BEGIN
   SELECT count(*) INTO v_scanned FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname IN ('api', 'internal_api', 'private');
   PERFORM pg_temp.s4_eq('I10b and no residue of the probe is left anywhere in the inventory', v_scanned,
-    CASE WHEN pg_temp.s4_at_least('stage10') THEN 97::bigint
+    CASE WHEN pg_temp.s4_at_least('stage10') THEN 98::bigint
          WHEN pg_temp.s4_at_least('stage9') THEN 86::bigint
          WHEN pg_temp.s4_at_least('stage8') THEN 79::bigint
          WHEN pg_temp.s4_at_least('stage7') THEN 67::bigint

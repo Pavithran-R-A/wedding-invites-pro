@@ -751,7 +751,8 @@ SELECT t.name, t.expect FROM (VALUES
           'commerce_events_no_client_delete=reject_client_delete',
           'commerce_events_no_client_write=reject_client_write']),
   ('commerce_policy',
-    ARRAY['commerce_policy_no_client_delete=reject_client_delete',
+    ARRAY['commerce_policy_change_trail=audit_commerce_policy_change',
+          'commerce_policy_no_client_delete=reject_client_delete',
           'commerce_policy_no_client_write=reject_client_write',
           'set_updated_at=touch_updated_at']),
   ('commerce_refunds',
@@ -1434,6 +1435,19 @@ BEGIN
   v := pg_temp.s10f_try_write('postgres', NULL, 'DELETE FROM private.commerce_policy WHERE id = 1');
   PERFORM pg_temp.s10f_eq('G17 the owner can remove the policy row (which is why G22 has to prove the restore)',
     v, 'ACCEPTED');
+  -- The two cells below are why this stage's trail fires on DELETE and INSERT as well as UPDATE. G17 is
+  -- a real, accepted removal of the row that carries all three undecided answers, and G18/G19 then show
+  -- the gate reading the *absence* of that row as permissive — so a deletion alone is a decision to stop
+  -- gating, and a restore alone is a decision to put the shipped defaults back. A trail that covered only
+  -- UPDATE would record neither, and the residue would look like a database that had never been touched.
+  -- Read from the newest row, which these two arms can trust because nothing else writes between them.
+  PERFORM pg_temp.s10f_eq('G17b and the deletion is on record, naming all four values it removed',
+    (SELECT action || '/' || coalesce(jsonb_array_length(payload -> 'changed')::text, '(none)')
+       FROM private.audit_events ORDER BY id DESC LIMIT 1), 'policy_deleted/4');
+  PERFORM pg_temp.s10f_eq('G17c and the record claims no wedding and no account, because removing the singleton is not something a household did',
+    (SELECT coalesce(wedding_id::text, '(null)') || '/' || coalesce(actor_user_id::text, '(null)') || '/'
+            || actor_role
+       FROM private.audit_events ORDER BY id DESC LIMIT 1), '(null)/(null)/postgres');
   v := pg_temp.s10f_pub('postgres', NULL, g7::text, v7::text, 'active');
   PERFORM pg_temp.s10f_eq('G18 a missing policy row reads as permissive, the deliberate fail-open §8 records',
     v, 'ACCEPTED');
@@ -1443,6 +1457,12 @@ BEGIN
   INSERT INTO private.commerce_policy (id) VALUES (1);
   PERFORM pg_temp.s10f_eq('G20 the policy row is restored, one row again',
     (SELECT count(*) FROM private.commerce_policy), 1::bigint);
+  PERFORM pg_temp.s10f_eq('G20b and putting it back is on record with the values it came back with, so the pair of rows reads as a round trip rather than silence',
+    (SELECT action || '/' || (SELECT count(*) FROM jsonb_object_keys(payload -> 'before') k)::text || '/'
+            || coalesce(payload -> 'after' ->> 'publish_gate', '(none)') || '/'
+            || coalesce(jsonb_array_length(payload -> 'changed')::text, '(none)')
+       FROM private.audit_events ORDER BY id DESC LIMIT 1),
+    'policy_created/0/permissive/4');
   PERFORM pg_temp.s10f_array('G21 restored to the shipped defaults in every column, not merely present',
     ARRAY(SELECT publish_gate || '|'
                 || CASE WHEN publish_required_package_codes = '{}'::text[] THEN '(empty array)'

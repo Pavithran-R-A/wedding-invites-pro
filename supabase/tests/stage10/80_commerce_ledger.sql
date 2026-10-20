@@ -339,6 +339,14 @@ BEGIN
     coalesce(v ->> '_error', '') LIKE '%does not own wedding%a quote is made for the wedding''s owner and no one else%');
   PERFORM pg_temp.s10l_eq('F15 neither arm created a row',
     (SELECT count(*) FROM private.commerce_orders), 0::bigint);
+
+  -- Taken here, at the top of the file, because it is the one moment this run can see a policy with no
+  -- history: the singleton arrived during the migrations, and 20261020160000_stage10_policy_change_trail.sql
+  -- is installed after it, so the row's own creation is the only change to the money posture that is not
+  -- recorded. Pinning it as zero is what makes the claim "every change after the install leaves a record"
+  -- mean the install is where the trail starts, not that it is complete from the beginning of the table.
+  PERFORM pg_temp.s10l_eq('F16 the policy singleton is on record for nothing yet, so every trail row below is a change this run made',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), 0::bigint);
 END $preflight$;
 
 -- The price rows, planted by the owner role because no product path can write a price: §2 creates the
@@ -1013,6 +1021,9 @@ BEGIN
   UPDATE private.commerce_policy SET refund_revocation_mode = 'revoke' WHERE id = 1;
   PERFORM pg_temp.s10l_eq('R16 the policy row is writable by the trusted role and refuses a browser',
     (SELECT refund_revocation_mode FROM private.commerce_policy WHERE id = 1), 'revoke');
+  PERFORM pg_temp.s10l_eq('R16b and the revocation below runs with publish_required_package_codes empty, which is the exact shape §14''s item 5 called untested: revoke mode, no package named',
+    coalesce(array_length(
+      (SELECT publish_required_package_codes FROM private.commerce_policy WHERE id = 1), 1), 0)::text, '0');
 
   v := pg_temp.s10l_deliver('r-refund-4', 'refund_succeeded', r4, 499900, 'po_bare', 'rf_bare', now());
   PERFORM pg_temp.s10l_eq('R17 under revoke, the same delivery names the revocation it is about to make',
@@ -1800,6 +1811,157 @@ BEGIN
     '2/1');
 END $flap$;
 
+-- --------------------------------------------------------------------------- W. the policy change trail
+-- §14's finding on this group's subject was measured, not argued: on a throwaway chain that had run
+-- nothing else, a trusted UPDATE that turned live capture ON, moved the refund mode to `revoke` and
+-- named a package produced zero rows in `private.audit_events` (`q10-logs/s10r-policy-probe-5.txt`,
+-- arms A6c and A6d), the catalog holds no history relation for the singleton (A6f), and not one of the
+-- four function bodies that read or write the policy writes an audit row about a policy change (A7).
+-- So the three answers this stage sells — publishing not gated on money, live capture off, refunds
+-- held for a human — could each be flipped by the owner's own role and leave the database looking
+-- exactly as it did before the decision was taken. 20261020160000_stage10_policy_change_trail.sql
+-- closes that, and this group is the evidence rather than a description of the migration.
+--
+-- Every arm here is delta-counted against `v_base`, which is the number of records the earlier groups
+-- of this same run left behind, so a change to group R cannot silently move a W expectation. W00 pins
+-- `v_base` itself as a measurement (see the provenance note on that cell), which is what keeps the
+-- deltas honest instead of floating.
+--
+-- `publish_gate` is never touched by this group. Flipping it to `entitlement_required` would be
+-- activating paid publishing inside a test, which the standing rule for this stage forbids; the gate's
+-- own behaviour is qualified by battery 2's group G, which moves it and restores it inside a chain that
+-- is thrown away. What W15 proves instead is that a policy record can be written without the gate
+-- appearing in it, and that the gate still reads `permissive` afterwards.
+DO $trail$
+DECLARE s s10r%ROWTYPE; v_base bigint; v_p jsonb; v_action text; v_subject text;
+        v_wedding uuid; v_key uuid; v_role text; v_user uuid; n bigint;
+BEGIN
+  SELECT * INTO s FROM s10r;
+
+  v_base := (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy');
+  PERFORM pg_temp.s10l_eq('W00 the two pairs of refund-mode flips in groups R and K each left exactly one record, read off the run that pinned these numbers',
+    v_base::text, '4');
+
+  -- The distinction the whole trail exists for: a write is not a change.
+  UPDATE private.commerce_policy SET refund_revocation_mode = refund_revocation_mode WHERE id = 1;
+  PERFORM pg_temp.s10l_eq('W01 an UPDATE that moves no decision column leaves no record, so the trail counts decisions rather than writes',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), v_base);
+
+  -- W02..W08: one knob, one record, both halves, and no invented attribution.
+  PERFORM pg_temp.s10l_eq('W02 the premise group W flips from is the shipped one',
+    (SELECT refund_revocation_mode FROM private.commerce_policy WHERE id = 1), 'hold_for_review');
+  UPDATE private.commerce_policy SET refund_revocation_mode = 'revoke' WHERE id = 1;
+  PERFORM pg_temp.s10l_eq('W03 and one knob moving adds exactly one record',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), v_base + 1);
+
+  -- The newest record the trail wrote, whole, so two cells that want different halves of the same row
+  -- cannot quietly read different rows.
+  SELECT payload, action, subject_type, wedding_id, subject_key, actor_role, actor_user_id
+    INTO v_p, v_action, v_subject, v_wedding, v_key, v_role, v_user
+    FROM private.audit_events WHERE subject_type = 'commerce_policy'
+   ORDER BY id DESC LIMIT 1;
+
+  PERFORM pg_temp.s10l_eq('W04 the record names itself and its subject, which is how a reader finds it without a row to join to',
+    v_action || '/' || v_subject, 'policy_changed/commerce_policy');
+  PERFORM pg_temp.s10l_keys('W05 and its payload is exactly the four halves a reader needs',
+    v_p, ARRAY['after','before','changed','policy_id']);
+  PERFORM pg_temp.s10l_eq('W06 changed names the one column that moved, and no other',
+    jsonb_array_length(v_p -> 'changed')::text || '/' ||
+      (v_p -> 'changed' ? 'refund_revocation_mode')::text, '1/true');
+  PERFORM pg_temp.s10l_eq('W07 with the before half and the after half both carried, because a trail that only says "it changed" is not evidence',
+    (v_p -> 'before' ->> 'refund_revocation_mode') || '/' ||
+      (v_p -> 'after' ->> 'refund_revocation_mode'), 'hold_for_review/revoke');
+  PERFORM pg_temp.s10l_keys('W08 and the two halves cover exactly the changed columns, no more',
+    v_p -> 'before', ARRAY['refund_revocation_mode']);
+  PERFORM pg_temp.s10l_eq('W08b ditto the after half', v_p -> 'after',
+    jsonb_build_object('refund_revocation_mode', 'revoke'));
+
+  -- Attribution: the singleton belongs to no household, and the trail must not pretend otherwise.
+  PERFORM pg_temp.s10l_eq('W09 the record claims no wedding and no account, which is what makes Z16''s actor test still mean something',
+    coalesce(v_wedding::text, '(null)') || '/' || coalesce(v_key::text, '(null)')
+      || '/' || coalesce(v_user::text, '(null)'), '(null)/(null)/(null)');
+  PERFORM pg_temp.s10l_eq('W10 and it records the database role that issued the statement, taken from the column default rather than a parameter a caller could name',
+    v_role, 'postgres');
+
+  -- Three knobs in one statement: one record, three names. `publish_gate` stays out of it on purpose.
+  UPDATE private.commerce_policy
+     SET live_capture_enabled = true,
+         publish_required_package_codes = ARRAY['QCLASSIC'],
+         refund_revocation_mode = 'hold_for_review'
+   WHERE id = 1;
+  PERFORM pg_temp.s10l_eq('W11 three knobs moved by one statement are one record, not three, so the trail reads as one decision',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), v_base + 2);
+
+  SELECT payload, action, subject_type, wedding_id, subject_key, actor_role, actor_user_id
+    INTO v_p, v_action, v_subject, v_wedding, v_key, v_role, v_user
+    FROM private.audit_events WHERE subject_type = 'commerce_policy' ORDER BY id DESC LIMIT 1;
+  PERFORM pg_temp.s10l_eq('W12 and it names all three, sorted',
+    (v_p -> 'changed' ->> 0) || '/' || (v_p -> 'changed' ->> 1) || '/'
+      || (v_p -> 'changed' ->> 2) || '/' || jsonb_array_length(v_p -> 'changed')::text,
+    'live_capture_enabled/publish_required_package_codes/refund_revocation_mode/3');
+  PERFORM pg_temp.s10l_eq('W13 the live-capture half is recorded as the flip it was, true over false',
+    (v_p -> 'before' ->> 'live_capture_enabled') || '/'
+      || (v_p -> 'after' ->> 'live_capture_enabled'), 'false/true');
+  PERFORM pg_temp.s10l_eq('W14 and the package list keeps its contents, not merely its length, so a reader can see which code was named',
+    jsonb_array_length(v_p -> 'before' -> 'publish_required_package_codes')::text || '/'
+      || (v_p -> 'after' -> 'publish_required_package_codes' ->> 0) || '/'
+      || jsonb_array_length(v_p -> 'after' -> 'publish_required_package_codes')::text,
+    '0/QCLASSIC/1');
+  PERFORM pg_temp.s10l_eq('W15 and the gate that would activate paid publishing is in no half of this record, which is the standing rule for this stage',
+    (v_p -> 'changed' ? 'publish_gate')::text || '/'
+      || (SELECT publish_gate FROM private.commerce_policy WHERE id = 1), 'false/permissive');
+
+  -- The restore. One of the three columns is already in its shipped state, so the record must say two.
+  UPDATE private.commerce_policy
+     SET live_capture_enabled = false,
+         publish_required_package_codes = ARRAY[]::text[]
+   WHERE id = 1;
+  PERFORM pg_temp.s10l_eq('W16 restoring two of the three records two, because a decision to put a value back is a decision',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), v_base + 3);
+
+  SELECT payload INTO v_p
+    FROM private.audit_events WHERE subject_type = 'commerce_policy' ORDER BY id DESC LIMIT 1;
+  PERFORM pg_temp.s10l_eq('W17 and the emptying of the list is recorded as an array going empty, not as a NULL that would read as missing data',
+    jsonb_array_length(v_p -> 'before' -> 'publish_required_package_codes')::text || '/'
+      || jsonb_array_length(v_p -> 'after' -> 'publish_required_package_codes')::text
+      || '/' || (v_p -> 'after' ? 'publish_required_package_codes')::text, '1/0/true');
+  PERFORM pg_temp.s10l_array('W18 with the singleton itself back on every shipped default',
+    ARRAY(SELECT publish_gate || '/' || coalesce(array_length(publish_required_package_codes,1),0)::text
+                || '/' || live_capture_enabled::text || '/' || refund_revocation_mode
+            FROM private.commerce_policy WHERE id = 1),
+    ARRAY['permissive/0/false/hold_for_review']);
+  PERFORM pg_temp.s10l_eq('W19 and turning live capture on for two statements applied no live delivery, which is what makes that flip a value rather than an action',
+    (SELECT count(*) FROM private.commerce_payment_events
+      WHERE environment = 'live' AND processing_status = 'applied'), 0::bigint);
+
+  -- The two shapes where the record must NOT survive: a change undone by the statement after it, and a
+  -- deletion undone the same way. Both are the half a trigger test usually forgets — a trigger that
+  -- writes straight to the table rather than into the caller's transaction would pass every cell above
+  -- and still leave a record of a decision nobody ended up making.
+  n := (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy');
+  BEGIN
+    UPDATE private.commerce_policy SET refund_revocation_mode = 'revoke' WHERE id = 1;
+    RAISE EXCEPTION 'W20 undo the flip';
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+  PERFORM pg_temp.s10l_eq('W20 a policy change undone by the transaction that made it leaves no record, so the trail cannot accuse an operator of a decision they rolled back',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), n);
+  PERFORM pg_temp.s10l_eq('W21 and the value really did go back, which is the other half of the same savepoint',
+    (SELECT refund_revocation_mode FROM private.commerce_policy WHERE id = 1), 'hold_for_review');
+
+  BEGIN
+    DELETE FROM private.commerce_policy WHERE id = 1;
+    RAISE EXCEPTION 'W22 undo the deletion';
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+  PERFORM pg_temp.s10l_eq('W22 a rolled-back DELETE of the singleton leaves no record either',
+    (SELECT count(*) FROM private.audit_events WHERE subject_type = 'commerce_policy'), n);
+  PERFORM pg_temp.s10l_eq('W23 and the row this file keeps reading is still exactly one',
+    (SELECT count(*) FROM private.commerce_policy), 1::bigint);
+END $trail$;
+
 -- --------------------------------------------------------------------------- Z. the census this file leaves
 -- Every expectation below is the value a run produced, not a value this file predicted; the four that are
 -- read back as CENSUS notices in `$print$` at the bottom are printed again after the assertion, so a
@@ -1810,6 +1972,12 @@ END $flap$;
 -- in which only the six harness comparison functions raise a WARNING instead of an exception, so the whole
 -- census could be measured in one pass instead of one cell per chain rebuild. The committed file still
 -- raises, and the pass that certifies these numbers is an ordinary `run.sh commerce` run, below.
+--
+-- The trail group (W00..W23) moved exactly one: Z15 gained `policy_changed=7`, which is the four flips
+-- groups R and K already made plus the three group W makes, and no other verb. That the count is 7 and not
+-- 9 is the census half of W20/W22 — a `policy_created` and a second `policy_changed` were written inside
+-- those two blocks and rolled back with them, so the residue names a verb this file did not end up
+-- performing. Read off `q10-logs/s10r-trail-green-2.txt`, the run that asserted the whole census.
 DO $census$
 DECLARE s s10r%ROWTYPE;
 BEGIN
@@ -1892,7 +2060,8 @@ BEGIN
            GROUP BY action ORDER BY action COLLATE "C"),
     ARRAY['attempt_failed=1','attempt_initiated=4','cancelled_by_provider=2','chargeback_opened=2',
           'expired=1','failure_recorded=1','granted_by_commerce_capture=7','order_captured=6',
-          'quote_created=10','refund_failed=1','refund_succeeded=4','revoked=4','swept=16']);
+          'policy_changed=7','quote_created=10','refund_failed=1','refund_succeeded=4','revoked=4',
+          'swept=16']);
   PERFORM pg_temp.s10l_eq('Z16 every money verb this file called recorded its actor as an account that exists',
     (SELECT count(*) FROM private.audit_events ae
       JOIN auth.users u ON u.id = ae.actor_user_id),
@@ -1927,10 +2096,12 @@ BEGIN
   -- 291st is this cell, which adds itself after the read). Group P and the Z04 split moved the read to 316
   -- (`q10-logs/s10r-P-green-4.txt`, ending `PASSED (317)`), and the reconciler's two sweeps of order 7 plus
   -- the cells that read them move it again (`q10-logs/s10r-recon-green-1.txt`, ending `PASSED (325)`);
-  -- P00b and the flap's twelve cells take it to 338 (`q10-logs/s10r-flap-green-1.txt`), so the floor tracks
-  -- the last run that passed. It is set from a run rather than from a guess so that a suite
-  -- which silently skips a group is caught rather than read as a smaller pass.
-  IF n < 337 THEN
+  -- P00b and the flap's twelve cells take it to 338 (`q10-logs/s10r-flap-green-1.txt`), and group W's
+  -- twenty-five plus F16 take it to 364 (`q10-logs/s10r-trail-green-2.txt`); R16b — the cell that names
+  -- the empty package list on the revoke path, §14's item 5 — is the 365th (`q10-logs/s10r-r16b-green-1.txt`,
+  -- ending `PASSED (365)`), so the floor tracks the last run that passed. It is set from a run rather than
+  -- from a guess so that a suite which silently skips a group is caught rather than read as a smaller pass.
+  IF n < 364 THEN
     RAISE EXCEPTION 'FAIL L01 the ledger battery ran % assertions, which is fewer than the floor', n;
   END IF;
   RAISE NOTICE 'PASS L01 the ledger battery ran at least its floor of assertions (%)', n;

@@ -497,3 +497,136 @@ still live.
 **Disposition.** §14's item 4: **CLOSED at the SQL and unit tiers, with the HTTP and browser arms explicitly
 unexecuted.** No other item in §14 is touched by this section, and none of §15's owner decisions is answered
 by it.
+
+## 17. The policy singleton: defaults proven, and a change that leaves a record (2026-10-20)
+
+§14 named three separate things about `private.commerce_policy` — the safe defaults, the empty package-code
+list, and "unexpected policy changes" — and this section answers each with the arm that measures it, because
+they are not the same question and were not answered by the same change.
+
+**Measured first, on a chain that had run nothing else** (`q10-logs/s10r-policy-probe-5.txt`, a throwaway
+Postgres on 127.0.0.1:55441 built by `../s10r-measure/build_probe_chain.sh` and driven by
+`../s10r-measure/policy_probe.sql`; every arm inside a transaction that rolled back, and the probe's own
+closing arm `Z1` reads the database back to one policy row, zero orders, zero events, zero entitlements).
+Fourteen arms, three of which decided the repair:
+
+- `A4` — one row, `permissive`, `{}`, `f`, `hold_for_review`. `A3` — the singleton is enforced by a
+  `CHECK ((id = 1))` as well as its primary key, and both enum columns carry closed `text[]`/`text` checks.
+- `A5`/`A5b` — `anon` and `authenticated` have no schema-level `USAGE` on `private` and are refused with
+  `42501 permission denied for schema private`; **`service_role` reaches the schema but is refused at the
+  table** (`permission denied for table commerce_policy`, for both UPDATE and DELETE). That distinction is
+  the finding, not a phrasing: the service key is not merely ungranted on a function, it cannot write the
+  posture at all. Only `postgres` can.
+- `A6a..A6e` — a `postgres` UPDATE that set `live_capture_enabled = true`, moved `refund_revocation_mode` to
+  `revoke` and named `QCLASSIC` in `publish_required_package_codes` produced **zero** rows in
+  `private.audit_events`, before and after, counted both ways (`A6c` all audit rows, `A6d` rows whose
+  `subject_type` could describe a policy). `A6e` is the whole evidence that the decision happened: the
+  row's own current values, and `updated_at` past `created_at`.
+- `A6f` — no history relation exists: the only objects named for the policy are `commerce_policy` and
+  `commerce_policy_pkey`. `A7` — of the four bodies that read or write the table
+  (`commerce_host_summary`, `commerce_reconcile`, `record_commerce_event`, `guard_publication_commerce_gate`),
+  the two that write `audit_events` at all never write a row about a policy change.
+
+So the three answers this stage sells — publishing is not gated on money, live capture is off, a refund waits
+for a human — could each be flipped by the one role that can write the row, and the database would read
+afterwards exactly as it reads before. It moves no rupee and leaks nothing, but it destroys the only evidence
+a later reviewer has, and it is the one table below the append-only ledger that had no trail of its own.
+
+**The repair is a trigger, not a body.** `20261020160000_stage10_policy_change_trail.sql` adds
+`private.audit_commerce_policy_change()` and an `AFTER INSERT OR UPDATE OR DELETE` trigger on the singleton.
+A wrapper could not be the audit point, because there is no product operation that changes the policy — the
+standing decision is that the owner has not made these decisions, so the only way the row moves is a trusted
+role issuing a statement — and the row is therefore the only place that sees every way of moving it. `AFTER`,
+so a write refused by `commerce_policy_no_client_write` above it cannot be recorded as a decision somebody
+took. `SECURITY INVOKER`, `search_path = ''`, revoked from `PUBLIC`/`anon`/`authenticated`/`service_role`: it
+records with the caller's own rights and adds none. It fires on the four decision columns named as a
+spelled-out constant array, so a fifth column can neither silently join the trail nor silently stay out of
+it; it writes nothing when none of them moved, which is the difference between a trail of decisions and a
+log of writes (`updated_at` moves on a no-op under `set_updated_at`). `INSERT` and `DELETE` are covered
+because battery 2's group G deletes the singleton and puts it back, and both are decisions.
+
+**Reproduced RED before it was written.** `q10-logs/s10r-trail-red-1.txt` is the trail group against the
+pre-repair schema and aborts at its first cell: `ERROR: FAIL W00 … got [0] want [4]` — the four decision
+flips groups R and K had already made had left no record at all. `q10-logs/s10r-trail-red-2.txt` is the same
+repair seen from the catalogue: Stage 2's `C31` trigger inventory fails with the `want` list carrying
+`private.commerce_policy.commerce_policy_change_trail=audit_commerce_policy_change` and the `got` list not,
+which is the tripwire behaving as designed rather than a fourth defect.
+
+**What measures it now.** Battery 1's group W (`80_commerce_ledger.sql:1835-1963`, twenty-five cells) drives
+one knob, three knobs, a restore, a no-op write, a rolled-back change and a rolled-back deletion, and asserts
+the shape each leaves: action and subject (`W04`), exactly four payload halves (`W05`), the changed list
+sorted and complete (`W06`, `W12`), both before and after carried and covering only the columns that moved
+(`W07`, `W08`, `W08b`, `W14`, `W17`), no wedding, no subject key and no account invented (`W09`), the role
+taken from the column default rather than a parameter (`W10`), and nothing at all for a write that moved
+nothing or a decision its own transaction undid (`W01`, `W20`..`W23`). **Paid publishing is not activated
+anywhere in it**: `W15` asserts that `publish_gate` is absent from the record and still `permissive` after
+the whole group, and `W19` that the two statements which did raise `live_capture_enabled` applied no live
+delivery. The gate itself is only ever moved by battery 2's group G, inside a chain that is thrown away, and
+that is disclosed rather than smoothed over.
+
+The safe defaults are now pinned at four altitudes, so a change cannot pass by moving only one of them:
+`F01..F05` at the very top of battery 1 (one row, `permissive`, no required package, live capture `false`,
+`hold_for_review`, and the price catalogue empty of every row not merely the active ones), `W02`/`W18` and
+`Z10` on the way out of this file's own flips, `Z11`/`Z12` that no live environment was ever applied, and the
+runner's own banner line `POLICY=permissive GATE_PACKAGES=0 LIVE_CAPTURE=false REFUND_MODE=hold_for_review`
+printed from the chain after every battery. `F16` (`80_commerce_ledger.sql:348`) pins the policy-shaped audit
+count at zero before the run plants anything, which is what makes each later trail row attributable to this
+run. Battery 2 adds the wiring and the two shapes the trigger would otherwise miss: `s10tguard` now names all
+four triggers on the table, and `G17b`/`G17c`/`G20b`
+(`90_commerce_functions.sql:1444,1460`) require the deletion to be on record naming the four values it
+removed, with no attribution invented, and the restore to be on record with the values it came back with —
+so a round trip reads as a round trip instead of as silence.
+
+**§14's item 5 is answered by a cell, not by an argument.** The concern was that `revoke` mode reaching an
+empty `publish_required_package_codes` might under-revoke. `R16b` (`80_commerce_ledger.sql:1024`) now states
+the precondition of the revocation it sits above — the list is empty, length 0, at the moment group R flips
+the mode to `revoke` — and `R17`..`R20` then show that same revocation finding and revoking the order's own
+entitlement with a timestamp and a stated reason. The probe measured the neighbouring shape directly:
+`B03`/`B04` revoke the refunded order's `QCLASSIC` entitlement and leave the same wedding's `QPREMIUM`
+active, `B04b` shows exactly one of the three carrying a `revoked_at`, and `B07b` shows the revocation payload
+naming the order and the package. So the revocation path is scoped to the order's own entitlement and does
+not consult the publish list at all; the empty list is a publish-gate fact (`G-02`, and the refusal the
+migration's own message names `(none named)`). What item 5 did **not** say and this section does not claim
+to close is the V1 question underneath it: two captured orders on one wedding, each with its own active
+entitlement, is reachable and measured (`B05`: both `captured`, both with an entitlement), and whether that
+conflicts with "one-time payment per wedding" is §15's decision, not a defect.
+
+**Four inventories moved, and each was re-pinned from a failing run rather than predicted.** Z15 gained
+`policy_changed=7` (`s10r-trail-green-1.txt` is the run that aborted on it); Stage 4's `I4` went from 97
+functions to 98 with `private` at 37 (`s10r-trail-all-1.txt`), `I8`'s fixture-marker scan from 97 to 98
+(`s10r-trail-all-2.txt`), and `I10b`'s residue count to `98::bigint` (`s10r-trail-all-3.txt`). Stage 2's C31
+went to 106 triggers with this line in it. Adding `R16b` moved battery 1 alone — 364 to 365, in
+`q10-logs/s10r-r16b-green-1.txt` — because it reads and writes nothing, which is also why the audit-event
+floor in battery 2, pinned as a difference rather than an absolute, did not move. `s10r-trail-green-2.txt`
+holds the 364/293 run before that cell, and `s10r-trail-all-4.txt` is the whole `run.sh all` at 364. After
+this cell, `q10-logs/s10r-trail-all-5.txt` is the fresh whole-runner pass: exit 0, thirty-two suite lines
+green across the six chains, ledger 365, functions 293, and every historical total unchanged from `all-4` —
+Stage 9's 134/94, Stage 8's 182/185, Stage 7's 255/116, Stage 2's 464/106/50/77, Stage 3's 284, Stage 4's
+428/57, Stage 5's 122/50/124 and Stage 6's 91/80. `dbtypes:check` (30 migrations, 20 public and 16 non-client
+tables) and `product:check` (260 files, 0 violations) exit 0 at this tree too: the trail adds no exposed
+name, so the declared-surface census is unchanged at 22 `api` and 39 `internal_api` names.
+
+**Three limitations, stated.** The trail begins when this migration runs: the shipped row is inserted by
+`20261017120000_stage10_commerce_foundations.sql:457`, which installs before it, so the row's own creation is
+the one posture change not on record. A role that can change the policy can still delete the record of
+having changed it — `reject_client_delete`'s trusted branch admits `postgres` and members of
+`service_role`/`supabase_admin` — which is §14's item 8 and is narrowed here, not closed; closing it needs a
+second identity or storage this stage does not have. And the fail-closed direction of `SECURITY INVOKER` (a
+role that cannot write `audit_events` cannot complete a policy change either) is a property of the shape, not
+a measured arm: on this cluster the only policy-writable role owns both tables, so no reachable role sits in
+the position it would catch.
+
+**What did NOT run.** The HTTP tier and the browser tier are unexecuted for the whole of this segment — the
+Docker engine is down and starting it is the human partner's action — so nothing here is evidence about a
+policy change made through PostgREST or through the product. Two arms would matter: the service-role key
+attempting the same write `A5b` measured over a raw connection, and a publish through the API while the
+policy is being flipped. The Node unit sweep was not re-run for this repair and has no reason to be — no
+JavaScript reads the policy — but it is not part of what this section certifies.
+
+**Disposition.** §14's item 5: **CLOSED at the SQL tier** by `R16b` beside `R17`..`R20` and the probe's
+`B04`/`B07b`. Directive item 2's "unexpected policy changes": **CLOSED at the SQL and catalogue tiers** by
+the trail migration, group W, `s10tguard`, `G17b`/`G20b` and `C31`, with the three limitations above. Its
+"safe defaults": **PROVEN, and now pinned at four altitudes**, with no live payment ever activated by any
+tier here. Its under-revocation half is correct-by-design and measured (`B04`), while the three-entitlements-
+on-one-wedding question beneath it stays an **OWNER DECISION in §15**, unchanged. HTTP and browser arms:
+**unexecuted.**
