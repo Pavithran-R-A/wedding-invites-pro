@@ -97,7 +97,11 @@ CREATE TABLE private.support_cases (
   wedding_id uuid REFERENCES public.weddings(id) ON DELETE NO ACTION,
   -- Whose ticket this is, taken from `auth.uid()` and never from an argument. SET NULL by §12: the case
   -- outlives the account as evidence, and a queue that names nobody is still a queue that says what
-  -- happened.
+  -- happened. That sentence was a claim until this file's guard was given the room to make it true — the
+  -- nulling is an UPDATE and the guard below refuses UPDATEs that move this column, so the branch that
+  -- protects ownership now steps aside for the one UPDATE the database issues for its own key. Measured on
+  -- both sides: `q11-logs/s11-probe-fk-null-1.txt` (refusal, before) and the RI cells of group T in
+  -- `85_support_lifecycle.sql` (surviving row, after).
   requester_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   -- Who actually filed it. Same posture, different question — `requester_user_id` is the ownership the
   -- read surface filters on, this is the provenance an incident review reads. Both can legitimately go
@@ -209,12 +213,31 @@ BEGIN
     RAISE EXCEPTION 'a support case cannot be re-parented onto another wedding: the wedding named on the '
       'ticket is the scope of every act it authorises' USING ERRCODE = '42501';
   END IF;
-  IF NEW.requester_user_id IS DISTINCT FROM OLD.requester_user_id THEN
+  -- §12 declares both of these links `ON DELETE SET NULL`, and Postgres carries out an `ON DELETE SET NULL`
+  -- by issuing an UPDATE on this row — so a guard that refuses every change to them refuses the database's
+  -- own cleanup, and the "the case outlives the account as evidence" sentence below would be a claim about a
+  -- thing that cannot happen. That is measured, not reasoned: `q11-logs/s11-probe-fk-null-1.txt` cell M1
+  -- deleted an account that had filed a ticket and heard "a support case cannot change hands" out of this
+  -- branch, while cell M5 deleted an account named only in the *un*protected `assigned_operator_user_id` and
+  -- the nulling landed. So the exception is per column and exactly as wide as the mechanism: the link must be
+  -- going to NULL, and the statement must be arriving from inside another trigger, which is the shape of the
+  -- database's own referential action. The second half is the one that had to be measured — asking instead
+  -- whether the account still exists gets the wrong answer, because the cleanup runs inside the deleting
+  -- command and a command cannot see its own in-flight deletion
+  -- (`q11-logs/s11-probe-ri-cells2-1.txt`, every block). Everything else a caller can attempt — a different
+  -- uuid, a null issued from a statement of its own, the opening instant or its key moved — is a hand
+  -- steering a ticket, and is refused with the sentence this branch has always used.
+  IF NEW.requester_user_id IS DISTINCT FROM OLD.requester_user_id
+     AND (NEW.requester_user_id IS NOT NULL OR pg_trigger_depth() < 2) THEN
     RAISE EXCEPTION 'a support case cannot change hands: whose ticket it is decides whose read surface it '
       'appears on' USING ERRCODE = '42501';
   END IF;
   IF NEW.opened_by_user_id IS DISTINCT FROM OLD.opened_by_user_id
-     OR NEW.opened_at IS DISTINCT FROM OLD.opened_at
+     AND (NEW.opened_by_user_id IS NOT NULL OR pg_trigger_depth() < 2) THEN
+    RAISE EXCEPTION 'who opened this case and when are the first two facts in its history'
+      USING ERRCODE = '42501';
+  END IF;
+  IF NEW.opened_at IS DISTINCT FROM OLD.opened_at
      OR NEW.open_idempotency_key IS DISTINCT FROM OLD.open_idempotency_key THEN
     RAISE EXCEPTION 'who opened this case and when are the first two facts in its history'
       USING ERRCODE = '42501';
@@ -324,6 +347,9 @@ CREATE TABLE private.support_case_events (
   -- unreachable until the body that writes it exists — stated rather than left for a reader to notice.
   kind text NOT NULL
     CHECK (kind IN ('message_host', 'message_operator', 'assignment', 'status', 'operation_link')),
+  -- Who wrote this row, taken from `auth.uid()` by the door that appends it. SET NULL rather than CASCADE
+  -- for the same reason the case table takes it: the thread is the evidence and the account is not. The
+  -- guard that lets that nulling through is installed below, next to the insert rule it pairs with.
   actor_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   actor_kind text NOT NULL CHECK (actor_kind IN ('host', 'operator', 'system')),
   from_status text CHECK (from_status IS NULL OR from_status IN ('open', 'triaged',
@@ -345,9 +371,12 @@ CREATE TABLE private.support_case_events (
   -- that must not. Without this, a note row could claim to have moved the case for a reader that trusts
   -- the arm it reads.
   CONSTRAINT support_case_events_status_kind_check
-    CHECK ((to_status IS NOT NULL) = (kind = 'status')),
-  CONSTRAINT support_case_events_actor_names_an_account_check
-    CHECK (actor_kind = 'system' OR actor_user_id IS NOT NULL)
+    CHECK ((to_status IS NOT NULL) = (kind = 'status'))
+  -- "A human row must name an account" is enforced below as a BEFORE INSERT guard rather than as a table
+  -- CHECK, for the reason slice 1 states at length: deleting the named account is carried out on this table
+  -- as an UPDATE that nulls `actor_user_id` (the column's declared `ON DELETE SET NULL` has no other
+  -- implementation), and a CHECK fires on that UPDATE too — kept as a CHECK, this rule would not merely
+  -- forbid a forged row, it would make every host who ever opened a ticket undeletable.
 );
 
 -- Idempotency: one call one primary row. See decision 4 — the key rides the row that represents the
@@ -382,11 +411,70 @@ REVOKE ALL ON FUNCTION private.mint_support_case_seq() FROM PUBLIC, anon, authen
 CREATE TRIGGER support_case_events_mint_seq BEFORE INSERT ON private.support_case_events
   FOR EACH ROW EXECUTE FUNCTION private.mint_support_case_seq();
 
--- An insert-only table has no legitimate UPDATE at all — not for a client role and not for its own
--- owner — so it carries the absolute refusal the ledger and the trail carry, rather than the
--- client-scoped one §12 lists as the backstop. §12's pair stays in place for the DELETE half.
+-- An insert-only table has no legitimate UPDATE at all — not for a client role and not for its own owner —
+-- except the one the database makes for itself when the account this row names is deleted, which is an
+-- UPDATE of `actor_user_id` to NULL and is the only way §12's "the thread survives the account" can happen.
+-- So this table takes a body of its own rather than `private.reject_any_update()`: every other column is
+-- compared as a whole, and the single permitted move is the referential one, recognised by arriving from
+-- inside another trigger. §12's client pair stays in place underneath it for the DELETE half.
+CREATE FUNCTION private.reject_case_event_update_except_referential_null() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $$
+DECLARE
+  v_old jsonb := to_jsonb(OLD);
+  v_new jsonb := to_jsonb(NEW);
+BEGIN
+  IF (v_new - 'actor_user_id') IS DISTINCT FROM (v_old - 'actor_user_id') THEN
+    RAISE EXCEPTION '%.% rows are append-only: a correction is a new row and an audit event, never a rewrite',
+      TG_TABLE_SCHEMA, TG_TABLE_NAME USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NEW.actor_user_id IS DISTINCT FROM OLD.actor_user_id
+     AND (NEW.actor_user_id IS NOT NULL OR pg_trigger_depth() < 2) THEN
+    RAISE EXCEPTION '%.% rows are append-only: a correction is a new row and an audit event, never a rewrite',
+      TG_TABLE_SCHEMA, TG_TABLE_NAME USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION private.reject_case_event_update_except_referential_null()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION private.reject_case_event_update_except_referential_null() IS
+  'BEFORE UPDATE guard on the support thread: refuses every rewrite by every role, including the owner, '
+  'except the nulling of `actor_user_id` that arrives from inside another trigger — the database carrying '
+  'out that account''s ON DELETE SET NULL. SECURITY INVOKER, and ungrantable to every client role.';
+
 CREATE TRIGGER support_case_events_no_update_any_role BEFORE UPDATE ON private.support_case_events
-  FOR EACH ROW EXECUTE FUNCTION private.reject_any_update();
+  FOR EACH ROW EXECUTE FUNCTION private.reject_case_event_update_except_referential_null();
+
+-- The anti-forgery rule for the thread, at the instant the row is written: a `host` or `operator` row that
+-- names no account is refused with the 23514 a table CHECK would have used. It is an INSERT guard so that
+-- the nulling above is not refused by a rule about writing, and the door bodies that derive the actor from
+-- `auth.uid()` are the only writers either way.
+CREATE FUNCTION private.reject_case_event_without_actor() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.actor_kind <> 'system' AND NEW.actor_user_id IS NULL THEN
+    RAISE EXCEPTION 'a % row in a support thread must name the account that wrote it', NEW.actor_kind
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION private.reject_case_event_without_actor()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION private.reject_case_event_without_actor() IS
+  'BEFORE INSERT guard on the support thread: a human-kind row must name an account. Refuses with 23514, the '
+  'state the table CHECK it replaced used, and is deliberately not a CHECK because the referential nulling '
+  'of a deleted account is an UPDATE this table must survive. See '
+  'reject_case_event_update_except_referential_null.';
+
+CREATE TRIGGER support_case_events_actor_names_a_human BEFORE INSERT ON private.support_case_events
+  FOR EACH ROW EXECUTE FUNCTION private.reject_case_event_without_actor();
 
 CREATE TRIGGER support_case_events_no_client_write BEFORE INSERT OR UPDATE ON private.support_case_events
   FOR EACH ROW EXECUTE FUNCTION private.reject_client_write();

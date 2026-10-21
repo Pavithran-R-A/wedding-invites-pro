@@ -41,16 +41,17 @@
 # `app.stage_head=stage11` travels to the head-aware assertions for the reason every runner since Stage 5
 # gives: an expectation that only holds at one head has to be duplicated, and one that names the head it is
 # measuring is a stronger claim. What this head moves is inventories, not behaviour: `private` gains three
-# tables and four functions, `internal_api` gains twelve bodies, `api` gains ten wrappers, and
+# tables and eight functions, `internal_api` gains twelve bodies, `api` gains ten wrappers, and
 # `service_role` *loses* UPDATE and DELETE on `private.audit_events`. The Stage 10 publish gate ships
 # permissive and stays permissive, so every historical publication suite must still pass unmodified — if
 # one of them refuses, that is a Stage 11 defect and not a stale expectation.
 #
 # The numbers this head should print, stated as a derivation rather than a guess so that a chain probe
 # printing something else is a finding: Stage 10 shipped 22 `api` names, 39 `internal_api` names and 37
-# `private` names. Slice 1 adds no wrapper, two `internal_api` bodies and one `private` function; slice 2
-# adds ten `api` wrappers, ten `internal_api` bodies and three `private` trigger functions, making
-# 32 / 51 / 41 — and battery 1's A06a–A06c measure exactly that sum from `pg_proc`. `PUBLIC_TABLES` and
+# `private` names. Slice 1 adds no wrapper, two `internal_api` bodies and three `private` functions; slice 2
+# adds ten `api` wrappers, ten `internal_api` bodies and five `private` functions; the closed-is-terminal
+# repair adds no name and replaces two bodies in place, making 32 / 51 / 45 — and battery 1's A06a–A06c
+# measure exactly that sum from `pg_proc`. `PUBLIC_TABLES` and
 # `STORAGE_BUCKETS` must not move: a head that changes the customer-facing inventory while claiming to add
 # only a server-side credential store has put its tables where an API role can see them. Slice 2 adds no
 # bucket and no `public` table; its two new tables are in `private` for the same reason the grant table is,

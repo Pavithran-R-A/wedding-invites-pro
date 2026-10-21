@@ -1649,44 +1649,49 @@ BEGIN
                   'private.commerce_policy.commerce_policy_change_trail=audit_commerce_policy_change',
                   'public.publications.publications_commerce_publish_gate=guard_publication_commerce_gate']
                 ELSE ARRAY[]::text[] END
-        -- Stage 11's four, and the first changes a standing claim instead of filling a pattern in.
+        -- Stage 11's five, and the first changes a standing claim instead of filling a pattern in.
         -- `private.audit_events` already carried the house pair, so `audit_no_update_any_role` is a
         -- *third* trigger on a table that has been called append-only since Stage 2 — and it earns the
         -- third spot by closing the half the pair never refused: `reject_client_write` steps aside for a
         -- trusted role and returns NEW, so until now the server key could rewrite an audit row and the
-        -- word "append-only" meant "append-only for browsers". `reject_any_update` refuses every role
-        -- including the owner, which makes the claim true of the archive rather than of the callers. It
-        -- is INVOKER and C32b already lists `reject_any_update` among the guards that must never hold a
-        -- privilege, because a definer deciding who may rewrite an audit row is a guard with a privilege
-        -- of its own to use. The DELETE half is deliberately untouched — a trail that can never be pruned
-        -- is a trail no retention policy can run (Stage 13, §17), and what moved there was who may do it,
-        -- not whether it can be done; that is the revocation, asserted by `80_operator_authority.sql`.
-        -- The other three are the house pattern on `private.operator_grants` — write guard, delete
-        -- guard, timestamp — listed for the same reason as every other line here: this inventory is the
-        -- alarm for an arrival nobody qualified, and equally for a disappearance. Measured against
-        -- `q11-logs/s11-catalog-readout-1.txt`.
+        -- word "append-only" meant "append-only for browsers". Its body is the specialised
+        -- `reject_audit_update_except_referential_null` rather than the blunt `reject_any_update`, because
+        -- the blunt form refused the database's own `ON DELETE SET NULL` on `actor_user_id` and would have
+        -- made every account that ever acted undeletable; the hole is a link moving to NULL from inside
+        -- another trigger, which is a depth the caller cannot reach. The fourth is the anti-forgery rule
+        -- that used to be a table CHECK: an `actor_kind` that is not `system` with no account named. It is
+        -- a BEFORE INSERT trigger because a CHECK also fires on that referential UPDATE, so as a CHECK it
+        -- would have refused the very surviving row §12 requires. It keeps the CHECK's SQLSTATE (23514) so
+        -- the error vocabulary did not move with the rule. The fifth is the house pattern on
+        -- `private.operator_grants` — and these inventories are listed for the same reason as every other
+        -- line here: this is the alarm for an arrival nobody qualified, and equally for a disappearance.
+        -- Measured against `q11-logs/s11-s2-rebuild-1.txt` and the read-back in
+        -- `q11-logs/s11-s2-triggers-1.txt`.
         --
-        -- Slice 2's nine are in `q11-logs/s11-s2-census-2.txt`, and the one to read first is
-        -- `support_case_events.support_case_events_no_update_any_role`: the events ledger takes the same
-        -- posture `audit_events` was given above, because a case's history is the artefact an operator
-        -- is later judged against and "append-only unless you hold the key" would be the same half-claim
-        -- in a new table. The other three on that side are the house pair and the seq minter; on the case
-        -- row itself the house pair, the timestamp, the ref minter that replaces a presented
+        -- Slice 2's ten are in `q11-logs/s11-s2-census-2.txt`, and the two to read first are on
+        -- `support_case_events`: `support_case_events_no_update_any_role` gives the events ledger the same
+        -- posture `audit_events` was given above — a case's history is the artefact an operator is later
+        -- judged against, and "append-only unless you hold the key" would be the same half-claim in a new
+        -- table — and `support_case_events_actor_names_a_human` moved for the same reason the audit rule
+        -- did. The remaining three on that side are the house pair and the seq minter; on the case row
+        -- itself the house pair, the timestamp, the ref minter that replaces a presented
         -- `case_ref` with one the caller cannot choose, and `guard_support_case_update` — the guard that
         -- decides which columns a status transition may touch, so that a case's `opened_by_user_id` and
-        -- `wedding_id` cannot be steered by an UPDATE that is otherwise legal. All nine are INVOKER,
+        -- `wedding_id` cannot be steered by an UPDATE that is otherwise legal. All ten are INVOKER,
         -- which is what C32 keeps: the definer triggers on canonical tables are still exactly the two
         -- named there, and the support queue added none.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY[
-                  'private.audit_events.audit_no_update_any_role=reject_any_update',
+                  'private.audit_events.audit_human_row_names_a_human=reject_audit_human_row_without_actor',
+                  'private.audit_events.audit_no_update_any_role=reject_audit_update_except_referential_null',
                   'private.operator_grants.operator_grants_no_client_write=reject_client_write',
                   'private.operator_grants.operator_grants_no_client_delete=reject_client_delete',
                   'private.operator_grants.set_updated_at=touch_updated_at',
+                  'private.support_case_events.support_case_events_actor_names_a_human=reject_case_event_without_actor',
                   'private.support_case_events.support_case_events_mint_seq=mint_support_case_seq',
                   'private.support_case_events.support_case_events_no_client_delete=reject_client_delete',
                   'private.support_case_events.support_case_events_no_client_write=reject_client_write',
-                  'private.support_case_events.support_case_events_no_update_any_role=reject_any_update',
+                  'private.support_case_events.support_case_events_no_update_any_role=reject_case_event_update_except_referential_null',
                   'private.support_cases.set_updated_at=touch_updated_at',
                   'private.support_cases.support_cases_guard_update=guard_support_case_update',
                   'private.support_cases.support_cases_mint_ref=mint_support_case_ref',
@@ -1752,7 +1757,17 @@ BEGIN
                                      -- is stricter than the house pattern, so it belongs on the list of
                                      -- guards that must never hold a privilege.
                                      'guard_commerce_order_freeze',
-                                     'reject_any_update')));
+                                     'reject_any_update',
+                                     -- Stage 11's four. Two refuse a rewrite of a trail except for the
+                                     -- nulling the database performs for its own key, and two refuse an
+                                     -- INSERT that claims a human author with no account named. Each of
+                                     -- them decides a caller's write, so a definer version would be a
+                                     -- guard with a privilege of its own to use — the same reason the
+                                     -- house pair is on this list.
+                                     'reject_audit_update_except_referential_null',
+                                     'reject_audit_human_row_without_actor',
+                                     'reject_case_event_update_except_referential_null',
+                                     'reject_case_event_without_actor')));
   -- Phase 47: "no client-writable trusted field". The grant list (C13/C22) says which
   -- tables a client may write; this says every table that must not be client-written
   -- also has a trigger refusing it, so a future GRANT cannot be the only line of

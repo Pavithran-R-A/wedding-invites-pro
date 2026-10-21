@@ -202,20 +202,25 @@ ALTER TABLE private.audit_events
   ADD CONSTRAINT audit_events_actor_kind_vocab_check
   CHECK (actor_kind IN ('system', 'operator', 'host', 'maintenance'));
 
--- "A human decision with no stated reason" and "a human decision that names no human" are both
--- unrepresentable, rather than discouraged. The pairing is what makes the column worth reading: a trail
--- that says *someone* took a wedding down, with no name and no why, is decoration with a timestamp.
+-- "A human decision with no stated reason" is unrepresentable rather than discouraged. The pairing is what
+-- makes the column worth reading: a trail that says *someone* took a wedding down, with no name and no why,
+-- is decoration with a timestamp.
 --
--- `coalesce` in the first of the two is load-bearing and was not there originally: `length(btrim(NULL))`
--- is NULL, `NULL > 0` is NULL, and a CHECK passes on NULL. Measured by battery 1 cell AI15, which planted
--- a human-kind row with a NULL reason and watched it be accepted. `actor_user_id IS NOT NULL` in the
--- second needs no such guard because `IS NOT NULL` is itself a predicate that can only be TRUE or FALSE.
+-- `coalesce` in this one is load-bearing and was not there originally: `length(btrim(NULL))` is NULL,
+-- `NULL > 0` is NULL, and a CHECK passes on NULL. Measured by battery 1 cell AI15, which planted a
+-- human-kind row with a NULL reason and watched it be accepted.
 ALTER TABLE private.audit_events
   ADD CONSTRAINT audit_events_human_action_has_reason_check
   CHECK (actor_kind = 'system' OR coalesce(length(btrim(reason)), 0) > 0);
-ALTER TABLE private.audit_events
-  ADD CONSTRAINT audit_events_human_action_names_an_actor_check
-  CHECK (actor_kind = 'system' OR actor_user_id IS NOT NULL);
+-- The sibling rule — "a human row must name a human" — is written below as an INSERT guard rather than as a
+-- table CHECK, and the reason is measured rather than preferred: the deletion of an account is carried out
+-- on this table as an UPDATE that nulls `actor_user_id` (`ON DELETE SET NULL` has no other implementation),
+-- and a table CHECK fires on that UPDATE too. Kept as a CHECK, the anti-forgery rule would therefore not
+-- merely forbid a forged row, it would make every account that ever acted undeletable — §12's "the
+-- recording row keeps its attribution null and survives" would be unreachable. `q11-logs/s11-probe-depth-1.txt`
+-- measures the nulling against both shapes. As an INSERT guard the rule is exactly as strong where it is a
+-- rule about *writing* (no body, and no hand, can create a human row that names nobody) and it stops
+-- pretending to be a rule about *rewriting*, which the trigger below already forbids outright.
 
 ALTER TABLE private.audit_events
   ADD CONSTRAINT audit_events_reason_is_bounded_check
@@ -248,17 +253,120 @@ CREATE UNIQUE INDEX audit_events_one_row_per_idempotency_key
 -- and closing *that* needs an anchor this stage does not build.
 REVOKE UPDATE, DELETE ON private.audit_events FROM service_role;
 
--- The absolute refusal, the same body the payment ledger uses (`20261017120000…:29-43`): it raises for
--- every role, `postgres` and `supabase_admin` included. Two BEFORE UPDATE triggers now exist on this
--- table, and they fire in trigger-name collation order, so `audit_append_only_no_update` runs first and
--- returns NEW for a trusted role, and `audit_no_update_any_role` then refuses it. The observable result is
--- deterministic and measured by the battery: a client role that somehow held the grant would hear the
--- guard's sentence, a trusted role hears "a correction is a new row and an audit event, never a rewrite",
--- and after the revocation every client role in fact hears `permission denied for table audit_events`
--- before any trigger runs — which is why the revocation, not the trigger, is the load-bearing half, and
--- the trigger is what stops `postgres` from being the exception.
+-- The absolute refusal, and the one thing it cannot refuse.
+--
+-- Stage 10's `private.reject_any_update()` is the body the payment ledger uses (`20261017120000…:29-43`):
+-- it raises for every role, `postgres` and `supabase_admin` included. Attaching it here was right about the
+-- rewrite and wrong about the *link*, and the difference is measurable rather than arguable: an
+-- `ON DELETE SET NULL` foreign key is implemented by Postgres as an UPDATE on the referencing row, so the
+-- very first thing the guard did on this table was refuse the database's own referential action.
+-- `q11-logs/s11-probe-fk-null-1.txt` cell M3 deleted a wedding that one trail row names and heard
+-- "rows are append-only" out of `private.reject_any_update()` — the trail's `wedding_id` is declared SET
+-- NULL (§12: the row survives its wedding, because a trail that vanishes with the object it describes is
+-- the hole an incident review cannot read back), and the declaration was decoration.
+--
+-- So the refusal is specialised rather than relaxed. It compares the two rows by *exclusion*: everything
+-- that is not one of the two attribution links must be identical, which means a column a later slice adds
+-- is refused by default instead of needing this body to be remembered. What is then allowed through is
+-- narrow twice over: the link must be going to NULL, and the statement must be arriving from inside
+-- another trigger.
+--
+-- The second of those is the one that took a measurement to get right. The obvious test — "is the parent
+-- row already gone" — is wrong, and wrong quietly: Postgres fires the referential action from the parent's
+-- AFTER ROW trigger, *inside the deleting command*, and a command cannot see its own in-flight deletion,
+-- so `NOT EXISTS (… auth.users …)` answers FALSE for exactly the rows this exception exists for.
+-- `q11-logs/s11-probe-ri-cells2-1.txt` measures that: every account and wedding delete issued through the
+-- SET NULL edges still refused with the parent-existence test in place. `pg_trigger_depth()` is the signal
+-- that does discriminate — 1 for a statement a caller or a body issued, 2 for the UPDATE the database
+-- issues for its own key, and the first two cells of `q11-logs/s11-probe-depth-1.txt` show the nulling
+-- landing under it. It is not caller-reachable: no role that can issue a statement against this table can
+-- also install a trigger on it, and every door that writes here is a function, not a trigger, so a body
+-- aiming at the hole finds depth 1 and the same sentence as before.
+CREATE FUNCTION private.reject_audit_update_except_referential_null() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $$
+DECLARE
+  v_old jsonb := to_jsonb(OLD);
+  v_new jsonb := to_jsonb(NEW);
+BEGIN
+  IF (v_new - 'actor_user_id' - 'wedding_id')
+     IS DISTINCT FROM (v_old - 'actor_user_id' - 'wedding_id') THEN
+    RAISE EXCEPTION '%.% rows are append-only: a correction is a new row and an audit event, never a rewrite',
+      TG_TABLE_SCHEMA, TG_TABLE_NAME
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF NEW.actor_user_id IS DISTINCT FROM OLD.actor_user_id
+     AND (NEW.actor_user_id IS NOT NULL OR pg_trigger_depth() < 2) THEN
+    RAISE EXCEPTION '%.% rows are append-only: a correction is a new row and an audit event, never a rewrite',
+      TG_TABLE_SCHEMA, TG_TABLE_NAME USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF NEW.wedding_id IS DISTINCT FROM OLD.wedding_id
+     AND (NEW.wedding_id IS NOT NULL OR pg_trigger_depth() < 2) THEN
+    RAISE EXCEPTION '%.% rows are append-only: a correction is a new row and an audit event, never a rewrite',
+      TG_TABLE_SCHEMA, TG_TABLE_NAME USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION private.reject_audit_update_except_referential_null()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+-- The anti-forgery rule, stated where it actually holds: at the moment the row is written. Same vocabulary,
+-- same refusal class, same SQLSTATE a table CHECK would have used (23514), so the error-handling surface
+-- cannot tell the two apart and neither can a test that asserts the state rather than the object.
+CREATE FUNCTION private.reject_audit_human_row_without_actor() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.actor_kind <> 'system' AND NEW.actor_user_id IS NULL THEN
+    RAISE EXCEPTION 'an audit event whose actor_kind is % must name the account that acted: a human '
+      'decision recorded as having no author is the forgery this column exists to prevent',
+      NEW.actor_kind USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION private.reject_audit_human_row_without_actor()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION private.reject_any_update() IS
+  'BEFORE UPDATE guard with no trusted branch: refuses every role, including the owner. Attached to the '
+  'payment ledger alone. `private.audit_events` needed the same posture with one hole big enough for the '
+  'database''s own referential action and no bigger, and took its own body instead — see '
+  'reject_audit_update_except_referential_null.';
+
+COMMENT ON FUNCTION private.reject_audit_update_except_referential_null() IS
+  'BEFORE UPDATE guard on the audit trail with no trusted branch: refuses every rewrite by every role, '
+  'including the owner, by comparing every column except the two attribution links. A link may move only to '
+  'NULL and only from inside another trigger, which is the signature of an ON DELETE SET NULL referential '
+  'action and nothing else — a caller cannot install a trigger here, and a door is a function, not a '
+  'trigger, so it arrives at depth 1 and is refused. SECURITY INVOKER, like every other guard here: a '
+  'definer deciding who may rewrite an audit row is a guard with a privilege of its own to use.';
+
+COMMENT ON FUNCTION private.reject_audit_human_row_without_actor() IS
+  'BEFORE INSERT guard on the audit trail: a row whose actor_kind is a human kind must name an account. '
+  'Deliberately an INSERT guard rather than a table CHECK because the deletion of the named account is '
+  'carried out on this table as an UPDATE that nulls the link, and a CHECK would refuse that too and make '
+  'every account that ever acted undeletable. Refuses with 23514, the state a CHECK would have used.';
+
+-- Two BEFORE UPDATE triggers now exist on this table, and they fire in trigger-name collation order, so
+-- `audit_append_only_no_update` runs first and returns NEW for a trusted role, and
+-- `audit_no_update_any_role` then refuses it. The observable result is deterministic and measured by the
+-- battery: a client role that somehow held the grant would hear the guard's sentence, a trusted role hears
+-- "a correction is a new row and an audit event, never a rewrite", and after the revocation every client
+-- role in fact hears `permission denied for table audit_events` before any trigger runs — which is why the
+-- revocation, not the trigger, is the load-bearing half, and the trigger is what stops `postgres` from
+-- being the exception.
 CREATE TRIGGER audit_no_update_any_role BEFORE UPDATE ON private.audit_events
-  FOR EACH ROW EXECUTE FUNCTION private.reject_any_update();
+  FOR EACH ROW EXECUTE FUNCTION private.reject_audit_update_except_referential_null();
+
+CREATE TRIGGER audit_human_row_names_a_human BEFORE INSERT ON private.audit_events
+  FOR EACH ROW EXECUTE FUNCTION private.reject_audit_human_row_without_actor();
 
 -- DELETE is left refused for client roles by `reject_client_delete` and is still permitted for the
 -- trusted roles. That is a boundary this file does not move: every existing teardown in this repository
@@ -267,12 +375,14 @@ CREATE TRIGGER audit_no_update_any_role BEFORE UPDATE ON private.audit_events
 -- the server key no longer can.
 COMMENT ON TABLE private.audit_events IS
   'The one audit trail. Append-only for every role on UPDATE (audit_no_update_any_role refuses postgres '
-  'too) and ungranted for UPDATE and DELETE to service_role; DELETE remains reachable only from the '
-  'trusted roles. A human row must name a human and state a reason (two table CHECKs), an operator action '
-  'is replay-protected by a partial unique idempotency key, and before_state/after_state are object-only '
-  'projections built inside the writing body. actor_user_id remains a caller-named column on the two '
-  'service-only bodies and is auth.uid()-derived everywhere else — see C29c-b for why that is attribution '
-  'rather than a privilege.';
+  'too, and permits only an attribution link the database is nulling from inside its own referential '
+  'trigger) and ungranted for UPDATE and DELETE to service_role; DELETE remains reachable only from the '
+  'trusted roles. A human row must name a human and state a reason — the reason as a table CHECK, the '
+  'actor as a BEFORE INSERT guard so that the nulling which carries out the account''s deletion is not '
+  'refused by a rule that was only ever about writing. An operator action is replay-protected by a partial '
+  'unique idempotency key, and before_state/after_state are object-only projections built inside the '
+  'writing body. actor_user_id remains a caller-named column on the two service-only bodies and is '
+  'auth.uid()-derived everywhere else — see C29c-b for why that is attribution rather than a privilege.';
 
 -- ===========================================================================
 -- 4. The two bodies that write authority — reachable by nobody (§3)

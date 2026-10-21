@@ -18,7 +18,7 @@
 -- belongs to `supabase/tests/api/stage11_operations.test.mjs`.
 --
 --   A01–A08c  what the migrations ship: empty, RLS with no policy, no client privilege, the declared
---             surface (32 / 51 / 41), the posture of the four new names, the five audit columns, the
+--             surface (32 / 51 / 45), the posture of the five new names, the five audit columns, the
 --             revocation and the trigger pair.
 --   A09–A26b  every privilege refusal, role by role, plus the digest proving none of them wrote a row.
 --   R01–R17   what the two bodies refuse to write, and the shape of the sentence they answer with.
@@ -32,13 +32,13 @@
 --   K01–K09b  the grant row's own CHECKs and its partial unique index, reachable only by a hand plant.
 --   AI01–AI24 the trail: the whole privilege matrix, attribution as attribution, the six refused
 --             mutations, the digest that does not move, the one power the server key still has, the replay
---             index, and the seven CHECKs.
+--             index, and the seven rules (six CHECKs and one INSERT guard).
 --   Z01–Z08   the census this file leaves behind. Z01 prints a CENSUS line rather than a PASS, so the
---             runner's two numbers differ by one by design: 134 assertions and 134 PASS lines, plus the
+--             runner's two numbers differ by one by design: 137 assertions and 137 PASS lines, plus the
 --             census.
 --
--- One cell has changed the migration rather than the expectation, and it is worth naming where the reader
--- will look for it. AI15 plants a human-kind audit row whose `reason` is NULL. Written against the first
+-- Two cells changed the migration rather than the expectation, and both are worth naming where the reader
+-- will look for them. AI15 plants a human-kind audit row whose `reason` is NULL. Written against the first
 -- draft of `20261020190000_stage11_operator_authority.sql`, the plant was *accepted*:
 -- `CHECK (actor_kind = 'system' OR length(btrim(reason)) > 0)` evaluates to NULL for a NULL reason, and a
 -- CHECK passes on NULL — so the rule §4 states ("a human decision with no stated reason is unrepresentable")
@@ -46,6 +46,15 @@
 -- `coalesce(…, 0)`; the cell is the measurement of both halves, and the sweep for the same three-valued-logic
 -- shape across every other migration CHECK found one sibling — `20260925120300_stage2_…:181` — already
 -- written with the guard.
+--
+-- AI16's change is a *placement*, and it was forced by the measurement group T of `85_support_lifecycle.sql`
+-- records. The sibling rule — a human-kind row must name an account — was a CHECK, and a CHECK also fires on
+-- the UPDATE the database performs for `ON DELETE SET NULL` when an account is removed. Kept as a CHECK it
+-- refused exactly the surviving rows §12 promises, and made every account that ever acted undeletable. It is
+-- now a BEFORE INSERT guard, which refuses the same hand plants with the same SQLSTATE and says nothing about
+-- an UPDATE. The UPDATE guard's own hole narrowed with it: a link may move only to NULL and only from inside
+-- another trigger (`pg_trigger_depth() >= 2`), because the parent-existence test shipped in the first draft
+-- was measured to be unreachable — a command cannot see its own in-flight deletion.
 --
 -- Five postures this file deliberately takes, each because the naive version of it is wrong.
 --   1. A refusal is asserted twice: as the SQLSTATE and sentence, and as the row that did NOT appear. A
@@ -402,19 +411,21 @@ BEGIN
   -- declared twice with two argument lists counts twice here. Slice 1 moved these numbers by three names in
   -- total and added no wrapper; slice 2 is the one that moves them again, and it moves all three: api 32
   -- (Stage 10's 22 plus the ten support wrappers), internal_api 51 (39 plus slice 1's pair plus slice 2's
-  -- ten bodies) and private 41 (37 plus the predicate plus the two mint triggers and the state-machine
-  -- guard). The step is worth stating as a sum rather than as a number because the difference between the
-  -- two slices is the finding this file exists to make: slice 1's half of Stage 11 is reachable by no
-  -- browser at all, and slice 2's half is a surface, which is why it has a battery of its own.
+  -- ten bodies) and private 45 (37 plus the predicate plus both slices' guard families). The step is worth
+  -- stating as a sum rather than as a number because the difference between the two slices is the finding
+  -- this file exists to make: slice 1's half of Stage 11 is reachable by no browser at all, and slice 2's
+  -- half is a surface, which is why it has a battery of its own.
   PERFORM pg_temp.s11a_eq('A06a the declared api surface is 32 names: Stage 10''s twenty-two plus slice 2''s '
     || 'ten wrappers, and slice 1 contributed none',
     (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'api'::regnamespace), 32);
   PERFORM pg_temp.s11a_eq('A06b internal_api is 51: thirty-nine at Stage 10, plus this slice''s pair, plus '
     || 'slice 2''s ten bodies',
     (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'internal_api'::regnamespace), 51);
-  PERFORM pg_temp.s11a_eq('A06c private is 41: thirty-seven at Stage 10, plus the predicate this slice '
-    || 'added, plus slice 2''s three trigger functions',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'private'::regnamespace), 41);
+  PERFORM pg_temp.s11a_eq('A06c private is 45: thirty-seven at Stage 10, plus the predicate this slice '
+    || 'added, plus this slice''s audit pair — the UPDATE guard with its one referential hole and the INSERT '
+    || 'guard that names a human — plus slice 2''s five trigger functions: two minters, the state-machine '
+    || 'guard, and the case event''s own UPDATE/INSERT pair',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'private'::regnamespace), 45);
 
   PERFORM pg_temp.s11a_array('A07 the audit trail gained exactly the five columns §4 names, and no existing '
     || 'column was repurposed: the new half of the row is named, not counted',
@@ -448,7 +459,7 @@ BEGIN
      WHERE c.relname = 'audit_events' AND c.relnamespace = 'private'::regnamespace
        AND NOT t.tgisinternal AND t.tgtype::int & 16 = 16 AND t.tgtype::int & 2 = 2),
     ARRAY['audit_append_only_no_update=reject_client_write',
-          'audit_no_update_any_role=reject_any_update']);
+          'audit_no_update_any_role=reject_audit_update_except_referential_null']);
 
   PERFORM pg_temp.s11a_array('A08c the grant table carries the two baseline guards plus the updated_at '
     || 'touch, and nothing else — a third writer-side trigger here would be a rule nobody described',
@@ -460,6 +471,20 @@ BEGIN
     ARRAY['operator_grants_no_client_delete=reject_client_delete',
           'operator_grants_no_client_write=reject_client_write',
           'set_updated_at=touch_updated_at']);
+
+  PERFORM pg_temp.s11a_array('A08d every trigger on the trail, on any edge: four names, and the fourth is '
+    || 'the one this slice moved from a table CHECK to a BEFORE INSERT guard so that the UPDATE an account '
+    || 'deletion performs is not refused by an anti-forgery rule — an inventory of only the UPDATE half '
+    || 'would not notice the guard being dropped',
+    (SELECT array_agg(t.tgname || '=' || p.proname ORDER BY t.tgname COLLATE "C") FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_proc p ON p.oid = t.tgfoid
+     WHERE c.relname = 'audit_events' AND c.relnamespace = 'private'::regnamespace
+       AND NOT t.tgisinternal),
+    ARRAY['audit_append_only_no_delete=reject_client_delete',
+          'audit_append_only_no_update=reject_client_write',
+          'audit_human_row_names_a_human=reject_audit_human_row_without_actor',
+          'audit_no_update_any_role=reject_audit_update_except_referential_null']);
 
   -- --------------------------------------------------------------------------- the refusals
   -- Every attempt below is made *as that role*, and the residue is re-counted after all of them. A refusal
@@ -975,7 +1000,7 @@ END $k$;
 -- 7. The one trail (AI01–AI24)
 -- ===========================================================================
 DO $ai$
-DECLARE s s11r%ROWTYPE; a0 text; c0 bigint; w jsonb; w2 jsonb; x uuid; v text;
+DECLARE s s11r%ROWTYPE; a0 text; c0 bigint; w jsonb; w2 jsonb; w3 jsonb; x uuid; v text;
         k1 constant text := 's11a-replay-key-1';
         r_own constant text := 'Battery 1: a synthetic support operator, for the qualification run only.';
 BEGIN
@@ -1062,6 +1087,25 @@ BEGIN
     || 'half AI09 cannot show on its own: a guard that rewrote a column and refused the rest would still '
     || 'leave a matching digest if the digest omitted that column', w2, w);
 
+  -- The seventh refusal, and the only one that tests the hole in the guard rather than its wall. The guard
+  -- lets `actor_user_id` move to NULL, because that is the signature of the referential action an account
+  -- deletion performs — so the question is who else can produce that signature. This caller can: a `postgres`
+  -- UPDATE that nulls the attribution is the forgery the column exists to prevent, dressed as the one shape
+  -- the hole admits. It is refused because the hole is not "a link that becomes NULL" but "a link the
+  -- database is nulling from inside its own trigger", which is a trigger depth a statement caller cannot
+  -- reach. The accepting half — the deletion whose row survives with a NULL — is group T of
+  -- `85_support_lifecycle.sql`, cells T-RI1/T-RI2.
+  v := pg_temp.s11a_try_write('postgres', NULL,
+    'UPDATE private.audit_events SET actor_user_id = NULL'
+    || ' WHERE subject_key = ' || quote_literal(x::text) || ' AND action = '
+    || quote_literal('granted'));
+  PERFORM pg_temp.s11a_err_is('AI10b the owner cannot null the attribution by hand: the guard''s one hole is '
+    || 'a trigger depth, not a value, so this arrives at depth 1 and hears the same sentence as AI03',
+    v, '42501', '%a correction is a new row and an audit event, never a rewrite%');
+  w3 := pg_temp.s11a_row('granted', x);
+  PERFORM pg_temp.s11a_eq('AI10c and the row still names the human who decided — a guard that raised after '
+    || 'nulling the column would be the forgery with an error message appended', w3, w);
+
   -- The residue, as a cell rather than a comment. Stating it here is the point: §4's promise is narrower
   -- than "a leaked key cannot touch the trail", and the measurement of the narrow version is what makes
   -- the sentence honest.
@@ -1115,8 +1159,10 @@ BEGIN
   DELETE FROM private.audit_events WHERE idempotency_key = k1;
   DELETE FROM private.audit_events WHERE subject_type = 's11a_plant';
 
-  -- The seven CHECKs the file adds to the trail, each reached by a plant because no body produces these
-  -- shapes. Names are asserted because a reviewer of a refusal has to be able to find the rule.
+  -- The rules this file adds to the trail, each reached by a plant because no body produces these shapes.
+  -- Six are CHECKs and the seventh (AI16) is a BEFORE INSERT guard that keeps a CHECK's SQLSTATE; the split
+  -- is measured, not preferred, and `85_support_lifecycle.sql` group T is the half that proves why.
+  -- Names are asserted because a reviewer of a refusal has to be able to find the rule.
   v := pg_temp.s11a_try_write('postgres', NULL,
     'INSERT INTO private.audit_events (subject_type, action, actor_kind, reason, actor_user_id) VALUES ('
     || quote_literal('s11a_plant') || ', ' || quote_literal('planted') || ', '
@@ -1128,9 +1174,10 @@ BEGIN
     'INSERT INTO private.audit_events (subject_type, action, actor_kind, reason, actor_user_id) VALUES ('
     || quote_literal('s11a_plant') || ', ' || quote_literal('planted') || ', '
     || quote_literal('operator') || ', ' || quote_literal('plant: nobody decided') || ', NULL)');
-  PERFORM pg_temp.s11a_err_is('AI16 and a human-kind row that names no human is refused by its own CHECK — '
-    || 'the sentence in R06 is the friendly version of this rule', v, '23514',
-    '%audit_events_human_action_names_an_actor_check%');
+  PERFORM pg_temp.s11a_err_is('AI16 and a human-kind row that names no human is refused by the guard that '
+    || 'replaced the CHECK — same SQLSTATE, same refusal, and a rule that no longer fires on the UPDATE an '
+    || 'account deletion performs; the sentence in R06 is the friendly version of this rule', v, '23514',
+    '%must name the account that acted%');
 
   v := pg_temp.s11a_try_write('postgres', NULL,
     'INSERT INTO private.audit_events (subject_type, action, actor_kind, reason, actor_user_id) VALUES ('

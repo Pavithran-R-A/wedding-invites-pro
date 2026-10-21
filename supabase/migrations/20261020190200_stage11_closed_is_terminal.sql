@@ -1,5 +1,6 @@
--- Stage 11 / file 3 of 5 — closure means closure, in the two places where slice 2 left it a sentence
--- rather than a rule.
+-- Stage 11 / the slice-2 closure repair (migration file 3 of 6, between slice 2 and slice 3) — closure
+-- means closure, in the two places where slice 2 left it a sentence rather than a rule, plus the
+-- referential-null exception the first version of this file dropped.
 --
 -- §5 states that `closed` is terminal, and `20261020190100_stage11_support_cases.sql` says so in three
 -- write doors — `reply_to_support_case` ("a closed support case takes no further messages"),
@@ -33,13 +34,26 @@
 -- row's `updated_at` did not appear to move even though the row was written. A battery cell that trusted
 -- `updated_at` to prove a write would have been measuring the clock, not the door.
 --
--- Two repairs, both name-preserving `CREATE OR REPLACE`, so `40_catalog.sql`'s census of 32 wrapper and
--- implementation names, 51 `api`-visible functions and 41 definer bodies does not move, and no grant or
--- revoke has to be re-earned. Nothing in this file adds a table, a column, a policy or a name.
--- `85_support_lifecycle.sql`'s group L measures both halves, including the release door's refusal.
+-- A third defect lives in the same body, and it was found by the battery rather than by a probe: when this
+-- file first replaced `guard_support_case_update`, it dropped the exception slice 2 had written for the
+-- database's own `ON DELETE SET NULL`. The declared link behaviour became decoration — every account named
+-- by a ticket was undeletable, and `85_support_lifecycle.sql` T72 heard this guard's "cannot change hands"
+-- where the schema's `support_cases_wedding_id_fkey` should have answered 23503. Measured with a diagnostic
+-- trigger on the built chain (`q11-logs/s11-depth-probe.sql`): the referential action arrives at
+-- `pg_trigger_depth() = 2` on both this table and `private.audit_events`, while a caller's statement arrives
+-- at 1. The body below therefore carries slice 2's exception again — for the attribution links only, never
+-- for `opened_at` or `open_idempotency_key` — and the terminal wall grants it exactly the database's own
+-- nulling, recognised by exclusion so no fourth column can ride along. T49 and T50 measure the depth-1
+-- refusals; T65–T72 and T-RI1/T-RI2 measure the accepting half.
+--
+-- Three repairs in two replaced bodies, both name-preserving `CREATE OR REPLACE`, so `40_catalog.sql`'s
+-- census of 32 wrapper and implementation names, 51 `api`-visible functions and 41 definer bodies does not
+-- move, and no grant or revoke has to be re-earned. Nothing in this file adds a table, a column, a policy
+-- or a name. `85_support_lifecycle.sql`'s group L measures the release door's refusal, and the T-RI block
+-- measures the nulling.
 
 -- ===========================================================================
--- 1. The wall: a closed row takes no write at all
+-- 1. The wall: a closed row takes no write a hand can issue
 -- ===========================================================================
 -- The terminal test moves above the same-status branch. That reordering is the whole repair: a write that
 -- changes nothing but the assignee is still a write to a finished ticket, and the branch that used to
@@ -49,6 +63,15 @@
 CREATE OR REPLACE FUNCTION private.guard_support_case_update() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SET search_path = ''
 AS $$
+DECLARE
+  -- The database's own `ON DELETE SET NULL` action arrives as a nested UPDATE on this row, at trigger
+  -- depth 2. A caller's statement and every door in this schema arrive at depth 1. Measured on the built
+  -- chain (`q11-logs/s11-depth-probe.sql`, a diagnostic trigger on this table): deleting an account that
+  -- filed a case reports depth=2 here, and deleting a wedding reports depth=2 on the audit table's
+  -- equivalent path. This is the same signal slice 2's guard used before this file rewrote its body; the
+  -- rewrite dropped it, which made every account named by a ticket undeletable and refused the very
+  -- `SET NULL` the key declares. Measured by `85_support_lifecycle.sql` T-RI (T65–T72).
+  v_referential boolean := pg_trigger_depth() >= 2;
 BEGIN
   -- What may never move after the case is opened, and why each of those is a fact rather than a field.
   IF NEW.case_ref IS DISTINCT FROM OLD.case_ref THEN
@@ -58,12 +81,20 @@ BEGIN
     RAISE EXCEPTION 'a support case cannot be re-parented onto another wedding: the wedding named on the '
       'ticket is the scope of every act it authorises' USING ERRCODE = '42501';
   END IF;
-  IF NEW.requester_user_id IS DISTINCT FROM OLD.requester_user_id THEN
+  IF NEW.requester_user_id IS DISTINCT FROM OLD.requester_user_id
+     AND (NEW.requester_user_id IS NOT NULL OR NOT v_referential) THEN
     RAISE EXCEPTION 'a support case cannot change hands: whose ticket it is decides whose read surface it '
       'appears on' USING ERRCODE = '42501';
   END IF;
+  -- The provenance link takes the same exception and the provenance *facts* do not: `opened_by_user_id` is
+  -- an account that can cease to exist, while the instant and the key are written once and are not derived
+  -- from any account. A hand that clears the link at depth 1 still hears the sentence (measured at T50).
   IF NEW.opened_by_user_id IS DISTINCT FROM OLD.opened_by_user_id
-     OR NEW.opened_at IS DISTINCT FROM OLD.opened_at
+     AND (NEW.opened_by_user_id IS NOT NULL OR NOT v_referential) THEN
+    RAISE EXCEPTION 'who opened this case and when are the first two facts in its history'
+      USING ERRCODE = '42501';
+  END IF;
+  IF NEW.opened_at IS DISTINCT FROM OLD.opened_at
      OR NEW.open_idempotency_key IS DISTINCT FROM OLD.open_idempotency_key THEN
     RAISE EXCEPTION 'who opened this case and when are the first two facts in its history'
       USING ERRCODE = '42501';
@@ -77,14 +108,38 @@ BEGIN
   -- Terminal, and tested before anything else about the write. Slice 2 put this below the same-status
   -- branch, which made it unreachable for the one column a same-status write is allowed to touch at all,
   -- and so a closed row kept accepting appends: `q11-logs/s11-s2-release-closed-probe2b.txt`.
+  --
+  -- The one write a finished ticket still takes is the database's own attribution nulling, and it is
+  -- recognised by exclusion rather than by naming the columns that may move: everything that is not an
+  -- attribution link — `updated_at` included, because `set_updated_at` has already stamped it by the time
+  -- this trigger fires — must be identical, and every link that did move must have moved to NULL. Same
+  -- shape as the audit trail's guard (`20261020190000…`), so a column a later slice adds is refused by
+  -- default instead of needing this body to be remembered. The depth test is what keeps it out of reach
+  -- of a caller; T49, T50 and T-RI2f measure the refusing and the accepting halves.
   IF OLD.status = 'closed' THEN
-    RAISE EXCEPTION 'a closed support case is terminal' USING ERRCODE = 'check_violation';
+    IF NOT (
+         v_referential
+         AND (to_jsonb(NEW) - 'requester_user_id' - 'opened_by_user_id' - 'assigned_operator_user_id'
+                - 'updated_at')
+             IS NOT DISTINCT FROM
+             (to_jsonb(OLD) - 'requester_user_id' - 'opened_by_user_id' - 'assigned_operator_user_id'
+                - 'updated_at')
+         AND (NEW.requester_user_id IS NULL
+              OR NEW.requester_user_id IS NOT DISTINCT FROM OLD.requester_user_id)
+         AND (NEW.opened_by_user_id IS NULL
+              OR NEW.opened_by_user_id IS NOT DISTINCT FROM OLD.opened_by_user_id)
+         AND (NEW.assigned_operator_user_id IS NULL
+              OR NEW.assigned_operator_user_id IS NOT DISTINCT FROM OLD.assigned_operator_user_id)
+       ) THEN
+      RAISE EXCEPTION 'a closed support case is terminal' USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 
   -- A write that moves no status may move no resting evidence either — the same posture the output
   -- registry takes (`20261013120000_stage9_render_outputs.sql`, "a write that changes no status may
   -- change no evidence either"). Only the assignment moves on a live status, and after the block above,
-  -- that sentence is finally true: a closed row never reaches it.
+  -- that sentence is finally true: a closed row reaches this branch only through the database's own
+  -- status-preserving link nulling, which changed no resolution.
   IF NEW.status = OLD.status THEN
     IF NEW.resolved_at IS DISTINCT FROM OLD.resolved_at
        OR NEW.resolution_code IS DISTINCT FROM OLD.resolution_code THEN
@@ -141,9 +196,10 @@ REVOKE ALL ON FUNCTION private.guard_support_case_update()
 COMMENT ON FUNCTION private.guard_support_case_update() IS
   'The state machine as data, and the row-level wall against a hand at the console. Three refusals that '
   'answer three questions: an immutable fact being rewritten (42501), a closed row being written to at all '
-  '(terminal, tested before the same-status branch), and an edge that does not exist. Entering a resting '
-  'state requires a code and stamps `resolved_at`; the reopen from `resolved` clears both, because the '
-  'thread and the trail still hold the earlier ending.';
+  '(terminal, tested before the same-status branch), and an edge that does not exist. One write passes: the '
+  'database''s own ON DELETE SET NULL of an attribution link at trigger depth 2, changed by exclusion so '
+  'no other column can ride along. Entering a resting state requires a code and stamps `resolved_at`; the '
+  'reopen from `resolved` clears both, because the thread and the trail still hold the earlier ending.';
 
 -- ===========================================================================
 -- 2. The door: the release says the same sentence as the claim
