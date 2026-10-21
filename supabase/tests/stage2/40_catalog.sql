@@ -171,15 +171,19 @@ DECLARE
                        'commerce_payment_attempts','commerce_payment_events',
                        'commerce_refunds','commerce_policy']
             ELSE ARRAY[]::text[] END
-    -- Stage 11's one table, and its arrival here is the assertion that matters more than the count it
-    -- moves: operational authority is a credential, and C06 is the line that says a credential lives in
-    -- the schema no browser role can even name. `20_attacks.sql` group 4 and C11/C14 prove the reach half;
-    -- this inventory proves the location half, and a Stage 11 that had put `operator_grants` in `public`
-    -- would fail here before any grant question was asked. Measured on a chain that applied Stage 2
-    -- through Stage 11 — nine names, the eight above plus this one — in
-    -- `q11-logs/s11-catalog-readout-1.txt`.
+    -- Stage 11's three tables, and their arrival here is the assertion that matters more than the count
+    -- they move: operational authority is a credential, and C06 is the line that says a credential lives
+    -- in the schema no browser role can even name. `20_attacks.sql` group 4 and C11/C14 prove the reach
+    -- half; this inventory proves the location half, and a Stage 11 that had put `operator_grants` in
+    -- `public` would fail here before any grant question was asked. Slice 2 adds the two support tables
+    -- for the same reason and not a different one: a ticket carries a host's own words about a wedding,
+    -- so `private.support_cases` and `private.support_case_events` are reachable only through the paired
+    -- wrapper/body boundary, and the measured grant posture on both is false for `anon`,
+    -- `authenticated` and `service_role` alike. Measured on a chain that applied Stage 2 through Stage 11
+    -- — eleven names, the eight above plus these three — in `q11-logs/s11-s2-readout-2.txt` section 6;
+    -- slice 1's nine-name readout is in `q11-logs/s11-catalog-readout-1.txt`.
     || CASE WHEN pg_temp.st2_at_least('stage11')
-            THEN ARRAY['operator_grants']
+            THEN ARRAY['operator_grants','support_cases','support_case_events']
             ELSE ARRAY[]::text[] END;
   legacy_tbls     text[] := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
@@ -342,7 +346,28 @@ DECLARE
     -- `q11-logs/s11-catalog-readout-1.txt`.
     || CASE WHEN pg_temp.st2_at_least('stage11')
             THEN ARRAY['operator_grants(user_id)->auth.users=CASCADE',
-                       'operator_grants(granted_by_user_id)->auth.users=SETNULL']
+                       'operator_grants(granted_by_user_id)->auth.users=SETNULL',
+                       -- Slice 2's six, and the split is the same sentence the ledger rows learned:
+                       -- a *recording* row keeps its attribution null and survives, because an event
+                       -- that vanished with the person it was written by would be an audit hole; the
+                       -- *thing recorded* likewise outlives the accounts it names. Nothing in Stage 11
+                       -- CASCADEs from `auth.users` into a case, and that is deliberate — §5's whole
+                       -- thesis is that a ticket is evidence about a wedding, so erasing an account
+                       -- must not be an erasure path for the trail of who handled it.
+                       -- `support_case_events(case_id)` is the one NO ACTION: an event cannot exist
+                       -- for a case that does not, and `support_cases_no_client_delete` already means
+                       -- no ordinary path deletes a case at all, so the restrict refuses a hand at the
+                       -- console rather than blocking a designed lifecycle. `support_cases(wedding_id)`
+                       -- is NO ACTION for the Stage 2 reason — a wedding with an open ticket is not
+                       -- deletable, and inventing a cascade here would be inventing a data-retention
+                       -- answer that §13 has not given. All six measured in
+                       -- `q11-logs/s11-s2-readout-2.txt` section 10.
+                       'support_case_events(actor_user_id)->auth.users=SETNULL',
+                       'support_case_events(case_id)->private.support_cases=NOACTION',
+                       'support_cases(assigned_operator_user_id)->auth.users=SETNULL',
+                       'support_cases(opened_by_user_id)->auth.users=SETNULL',
+                       'support_cases(requester_user_id)->auth.users=SETNULL',
+                       'support_cases(wedding_id)->weddings=NOACTION']
             ELSE ARRAY[]::text[] END;
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
@@ -406,8 +431,23 @@ DECLARE
     -- the assertion that the indexed half is indexed. Measured against
     -- `q11-logs/s11-catalog-readout-1.txt`; the label count is `cardinality()` of this array, so the
     -- number in the sentence moves with the list instead of being re-typed.
+    --
+    -- Slice 2's four entries, and one label appears twice because the list is one row per *constraint*,
+    -- not per edge: `support_cases` has three roads to `auth.users` and only `requester_user_id` is an
+    -- index prefix (`support_cases_requester_opened_idx`), so the opening attribution and the holder are
+    -- the two that are unindexed. Each is unindexed for the same reason `operator_grants` was: they are
+    -- attribution and custody, not query keys, and the only FK check an index would serve is an account
+    -- DELETE that nulls one column on a table whose ordinary path is a wrapper that never deletes.
+    -- `support_cases->weddings` is the fourth for the reason above it — `wedding_id` on a case is a
+    -- stamp, and the queue answers are scoped by requester or holder, so the column that *is* an index
+    -- prefix (`status_opened_idx`) is not the one this edge needs. Twenty entries measured against
+    -- `q11-logs/s11-s2-readout-2.txt` section 11, over the same predicate C48 runs.
     || CASE WHEN pg_temp.st2_at_least('stage11')
-            THEN ARRAY['operator_grants->auth.users']
+            THEN ARRAY['operator_grants->auth.users',
+                       'support_case_events->auth.users',
+                       'support_cases->auth.users',
+                       'support_cases->auth.users',
+                       'support_cases->weddings']
             ELSE ARRAY[]::text[] END;
   t text;
 BEGIN
@@ -850,10 +890,33 @@ BEGIN
         -- A17–A19 of `80_operator_authority.sql` measure anon, `authenticated` and `service_role` each
         -- failing to reach it), so the definer posture buys a *nested* caller's answer and no caller of
         -- that kind exists until the slices that need one are written. What it costs is one name in a
-        -- closed list, which is why the list is the assertion. Measured: 26 definers at this head, the
-        -- 25 above plus this one (`q11-logs/s11-catalog-readout-1.txt`).
+        -- closed list, which is why the list is the assertion. Measured: 26 definers at Stage 11 slice 1,
+        -- the 25 above plus this one (`q11-logs/s11-catalog-readout-1.txt`).
+        --
+        -- Slice 2 brings the count to 36 by adding the ten support bodies, and for the standing reason
+        -- rather than a new one: each of the ten reads or writes `private.support_cases`,
+        -- `private.support_case_events` or `private.operator_grants`, on which no browser role holds a
+        -- single table privilege (C06, C11, C12 — readout `q11-logs/s11-s2-readout-2.txt` §12 measures
+        -- the zero again), so an INVOKER body answering a host's "what is the status of my case" would
+        -- raise `permission denied for table support_cases` where the answer is a row the caller owns.
+        -- The four host-side doors are definers for that reason; the six operator-side doors are
+        -- definers because the predicate that distinguishes an operator from a host is itself the
+        -- definer `private.actor_is_operator` above, reached now by exactly the nested callers whose
+        -- absence slice 1 could only predict. Nothing here is a definer that writes money, a credential
+        -- or a cultural approval: the ten are the support queue and no other table.
+        -- All thirty-six, listed rather than counted, is what C26 asserts; `api` still holds none (C26b).
         || CASE WHEN pg_temp.st2_at_least('stage11')
-                THEN ARRAY['private.actor_is_operator']
+                THEN ARRAY['private.actor_is_operator',
+                           'internal_api.get_my_support_case',
+                           'internal_api.get_my_support_cases',
+                           'internal_api.get_operator_case',
+                           'internal_api.open_support_case',
+                           'internal_api.operator_add_case_note',
+                           'internal_api.operator_case_queue',
+                           'internal_api.operator_claim_case',
+                           'internal_api.operator_release_case',
+                           'internal_api.operator_transition_case',
+                           'internal_api.reply_to_support_case']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -886,16 +949,22 @@ BEGIN
   -- The wrapper count is the head's, not a constant: eight from Stage 5, which added the document
   -- preview, thirteen from Stage 7, which added the five family-review verbs, nineteen from
   -- Stage 8, which added the six household-invitation verbs, twenty-one from Stage 9, which added
-  -- the two read doors over the render contract and its manifest, and twenty-two from Stage 10, which
-  -- added one door over the purchase state. Only one, because the commerce write verbs stay
+  -- the two read doors over the render contract and its manifest, twenty-two from Stage 10, which
+  -- added one door over the purchase state, and thirty-two from Stage 11 slice 2, which added the
+  -- support queue's ten. Only one door, because the commerce write verbs stay
   -- server-side: a browser that could place an order could choose its own price, and the whole point of
   -- the quote is that it cannot. So the exposed surface grows by a read, and the six service-only
   -- implementations beside it are reachable from no wrapper at all.
+  -- Stage 11's ten are the first doors whose authority is not wedding ownership, and the count is
+  -- still what makes them visible: six of them are operator verbs presented to `authenticated` like
+  -- any other, so this census is the file a reviewer reads to see the whole door list at once, while
+  -- `85_support_lifecycle.sql` is the file that proves four of the ten refuse a non-operator.
   -- Every wrapper still has to be one line, whatever the number is.
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage10') THEN 22
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 32
+                                       WHEN pg_temp.st2_at_least('stage10') THEN 22
                                        WHEN pg_temp.st2_at_least('stage9') THEN 21
                                        WHEN pg_temp.st2_at_least('stage8') THEN 19
                                        WHEN pg_temp.st2_at_least('stage7') THEN 13
@@ -1004,7 +1073,7 @@ BEGIN
                            'record_commerce_event',
                            'revoke_commerce_entitlement']
                 ELSE ARRAY[]::text[] END
-        -- Stage 11's two, and they are the second time this census is allowed to be asymmetric about a
+        -- Stage 11 slice 1's two, and they are the second time this census is allowed to be asymmetric about a
         -- write — with a different reason, which is why it is spelled out again rather than folded into
         -- the paragraph above. Stage 10 left six bodies unpaired because a wrapper would be a door a
         -- *customer* could walk through; these two are unpaired because a wrapper would be a door an
@@ -1016,7 +1085,22 @@ BEGIN
         -- with EXECUTE held by nobody — not the owner's delegate roles, not the server key.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY['grant_operator_role',
-                           'revoke_operator_role']
+                           'revoke_operator_role',
+                           -- Slice 2's ten are the opposite case: every one of them paired, because a
+                           -- support door has to be reachable by a browser — the host's own four to
+                           -- open and answer a case, the operator's six to work the queue — and the
+                           -- whole point of pairing them is that the *body* is where the operator test
+                           -- lives. Each body takes its wrapper's name exactly, which is the shape
+                           -- C26f checks pair by pair, including the mirrored caller matrix. Nothing
+                           -- here is a body sitting unpaired in the unexposed schema waiting for a
+                           -- caller that turns out to be a browser: C26e's census and C29a's list move
+                           -- together by exactly ten, and `q11-logs/s11-s2-readout-2.txt` §12 measures
+                           -- the two support tables' table-level privileges at zero for every client
+                           -- role, so the pair is the only way in.
+                           'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
+                           'open_support_case', 'operator_add_case_note', 'operator_case_queue',
+                           'operator_claim_case', 'operator_release_case',
+                           'operator_transition_case', 'reply_to_support_case']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -1029,7 +1113,8 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage10') THEN 22
+      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 32
+              WHEN pg_temp.st2_at_least('stage10') THEN 22
               WHEN pg_temp.st2_at_least('stage9') THEN 21
               WHEN pg_temp.st2_at_least('stage8') THEN 19
               WHEN pg_temp.st2_at_least('stage7') THEN 13
@@ -1120,8 +1205,9 @@ BEGIN
           AND has_function_privilege('authenticated', p.oid, 'EXECUTE')) s),
     -- Fourteen names when this was written, sixteen from Stage 5, which paired one more wrapper
     -- with one more body, twenty-six from Stage 7, which paired five, thirty-eight from Stage 8,
-    -- which paired six, forty-two from Stage 9, which paired two, and forty-four from Stage 10, which
-    -- paired one of the seven commerce bodies it added and left six ungrantable. The pack-maintenance
+    -- which paired six, forty-two from Stage 9, which paired two, forty-four from Stage 10, which
+    -- paired one of the seven commerce bodies it added and left six ungrantable, and sixty-four from
+    -- Stage 11 slice 2, which paired all ten of its support doors. The pack-maintenance
     -- bodies are absent from every version of this list because they are granted to nobody a
     -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
     -- appeared for one of them would show up as a diff in this set.
@@ -1202,6 +1288,38 @@ BEGIN
         || CASE WHEN pg_temp.st2_at_least('stage10')
                 THEN ARRAY['api.commerce_host_summary',
                            'internal_api.commerce_host_summary']
+                ELSE ARRAY[]::text[] END
+        -- Stage 11 slice 2's twenty, and this is the set where the operator doors have to be seen
+        -- plainly rather than inferred: all ten pairs are granted to `authenticated`, because the
+        -- grant is what lets the request reach a body, and the body is what decides whether the
+        -- caller is an operator. So this census moves by twenty while C28a — the anonymous surface —
+        -- does not move at all, and the six operator doors' real boundary lives in the
+        -- `operator_grants` read inside each body plus `85_support_lifecycle.sql`'s refusal cells,
+        -- not in any list of roles. That is exactly the shape §4 asks for ("not merely by hiding
+        -- links"), stated here so that a reviewer comparing this line with C26e can see the four
+        -- host doors and the six operator doors are the same grant, and can then go and read the
+        -- refusals rather than take the grant list on faith.
+        || CASE WHEN pg_temp.st2_at_least('stage11')
+                THEN ARRAY['api.get_my_support_case',
+                           'api.get_my_support_cases',
+                           'api.get_operator_case',
+                           'api.open_support_case',
+                           'api.operator_add_case_note',
+                           'api.operator_case_queue',
+                           'api.operator_claim_case',
+                           'api.operator_release_case',
+                           'api.operator_transition_case',
+                           'api.reply_to_support_case',
+                           'internal_api.get_my_support_case',
+                           'internal_api.get_my_support_cases',
+                           'internal_api.get_operator_case',
+                           'internal_api.open_support_case',
+                           'internal_api.operator_add_case_note',
+                           'internal_api.operator_case_queue',
+                           'internal_api.operator_claim_case',
+                           'internal_api.operator_release_case',
+                           'internal_api.operator_transition_case',
+                           'internal_api.reply_to_support_case']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -1267,6 +1385,21 @@ BEGIN
         -- commerce answer that has an HTTP shape.
         || CASE WHEN pg_temp.st2_at_least('stage10')
                 THEN ARRAY['commerce_host_summary']
+                ELSE ARRAY[]::text[] END
+        -- Stage 11 slice 2's ten — the first names on this boundary whose authority is not ownership of
+        -- the wedding they mention. Four are a host's own (`open_support_case` writes a case about a
+        -- wedding the caller owns; `get_my_support_case(s)` and `reply_to_support_case` are scoped by
+        -- `auth.uid()`, never by an argument a caller could point elsewhere). Six are an operator's, and
+        -- they are on this list because a trusted-path console still needs an HTTP shape; their refusal
+        -- path is the body's own `operator_grants` read, which C29c below cannot express and
+        -- `85_support_lifecycle.sql` measures name by name. Naming all ten here is what makes "the
+        -- admin surface is six verbs, not a hidden route" a checkable claim rather than a design
+        -- assertion — an eleventh door has to be written into this file first.
+        || CASE WHEN pg_temp.st2_at_least('stage11')
+                THEN ARRAY['get_my_support_case', 'get_my_support_cases', 'get_operator_case',
+                           'open_support_case', 'operator_add_case_note', 'operator_case_queue',
+                           'operator_claim_case', 'operator_release_case',
+                           'operator_transition_case', 'reply_to_support_case']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
   -- "the credential never appears in a query string": with no parameter to name, a
@@ -1532,12 +1665,33 @@ BEGIN
         -- guard, timestamp — listed for the same reason as every other line here: this inventory is the
         -- alarm for an arrival nobody qualified, and equally for a disappearance. Measured against
         -- `q11-logs/s11-catalog-readout-1.txt`.
+        --
+        -- Slice 2's nine are in `q11-logs/s11-s2-census-2.txt`, and the one to read first is
+        -- `support_case_events.support_case_events_no_update_any_role`: the events ledger takes the same
+        -- posture `audit_events` was given above, because a case's history is the artefact an operator
+        -- is later judged against and "append-only unless you hold the key" would be the same half-claim
+        -- in a new table. The other three on that side are the house pair and the seq minter; on the case
+        -- row itself the house pair, the timestamp, the ref minter that replaces a presented
+        -- `case_ref` with one the caller cannot choose, and `guard_support_case_update` — the guard that
+        -- decides which columns a status transition may touch, so that a case's `opened_by_user_id` and
+        -- `wedding_id` cannot be steered by an UPDATE that is otherwise legal. All nine are INVOKER,
+        -- which is what C32 keeps: the definer triggers on canonical tables are still exactly the two
+        -- named there, and the support queue added none.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY[
                   'private.audit_events.audit_no_update_any_role=reject_any_update',
                   'private.operator_grants.operator_grants_no_client_write=reject_client_write',
                   'private.operator_grants.operator_grants_no_client_delete=reject_client_delete',
-                  'private.operator_grants.set_updated_at=touch_updated_at']
+                  'private.operator_grants.set_updated_at=touch_updated_at',
+                  'private.support_case_events.support_case_events_mint_seq=mint_support_case_seq',
+                  'private.support_case_events.support_case_events_no_client_delete=reject_client_delete',
+                  'private.support_case_events.support_case_events_no_client_write=reject_client_write',
+                  'private.support_case_events.support_case_events_no_update_any_role=reject_any_update',
+                  'private.support_cases.set_updated_at=touch_updated_at',
+                  'private.support_cases.support_cases_guard_update=guard_support_case_update',
+                  'private.support_cases.support_cases_mint_ref=mint_support_case_ref',
+                  'private.support_cases.support_cases_no_client_delete=reject_client_delete',
+                  'private.support_cases.support_cases_no_client_write=reject_client_write']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to

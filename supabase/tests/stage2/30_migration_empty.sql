@@ -117,9 +117,12 @@ DECLARE
   -- Stage 4's catalogue tables; Stage 10's six ledger tables are the second, and all six are
   -- in `private` — this head claims to add a server-side model, so a `public` commerce table
   -- would be a defect with an API role on the other end of it, and E01 is what catches it.
-  -- Stage 11's one table is the third arrival and the same argument applies with more force: an
+  -- Stage 11's tables are the third arrival and the same argument applies with more force: an
   -- operator credential in `public` would be readable by the role every browser request arrives
-  -- as, and E02 then insists it is empty on a chain that ran nothing but the migrations.
+  -- as, and E02 then insists they are empty on a chain that ran nothing but the migrations. Slice 1
+  -- brought one (the grant table); slice 2 brought the support queue's two, which hold free-text
+  -- summaries of a couple's problems — the most PII-shaped rows in the product, and the reason the
+  -- stage-11 head has three names here rather than one.
   canonical text[] := ARRAY[
     'public.approval_feedback', 'public.approval_requests', 'public.design_templates',
     'public.entitlements', 'public.guest_households', 'public.household_event_scopes',
@@ -140,7 +143,8 @@ DECLARE
                        'private.commerce_refunds', 'private.commerce_policy']
             ELSE ARRAY[]::text[] END
     || CASE WHEN pg_temp.st2_at_least('stage11')
-            THEN ARRAY['private.operator_grants']
+            THEN ARRAY['private.operator_grants', 'private.support_cases',
+                       'private.support_case_events']
             ELSE ARRAY[]::text[] END;
 BEGIN
 

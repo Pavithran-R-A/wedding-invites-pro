@@ -3862,21 +3862,45 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s4_eq('I1 the customer-facing surface is exactly the '
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN 'twenty-two'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN 'thirty-two'
+            WHEN pg_temp.s4_at_least('stage10') THEN 'twenty-two'
             WHEN pg_temp.s4_at_least('stage9') THEN 'twenty-one'
             WHEN pg_temp.s4_at_least('stage8') THEN 'nineteen'
             WHEN pg_temp.s4_at_least('stage7') THEN 'thirteen'
             WHEN pg_temp.s4_at_least('stage5') THEN 'eight'
             ELSE 'seven' END
     || ' entry points: Stage 4 added no wrapper to it, because a release selection is an ordinary UPDATE the row policy and the wedding trigger already govern (§5)'
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — Stage 7 added the five family-review verbs, Stage 8 the six guest verbs, Stage 9 the two render-manifest reads, and Stage 10 exactly one more: `commerce_host_summary`, the read a host needs to see a quote it was given. Stage 10''s other six commerce names are deliberately absent from this surface, because a browser that could open an order or record a payment would be a browser deciding its own paid status, and the fifteen names that follow Stage 4''s seven are every later name a browser can reach'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — Stage 7 added the five family-review verbs, Stage 8 the six guest verbs, Stage 9 the two render-manifest reads, Stage 10 exactly one more (`commerce_host_summary`), and Stage 11 ten: four host doors (`open_support_case`, `get_my_support_cases`, `get_my_support_case`, `reply_to_support_case`) and six operator ones (`operator_case_queue`, `get_operator_case`, `operator_add_case_note`, `operator_claim_case`, `operator_release_case`, `operator_transition_case`). Those ten are the first ten names on this surface whose authorization is not ownership of a wedding — which is exactly why every one of them is enumerated in this list rather than counted: a door that opens on somebody else''s ticket is the failure mode a count cannot see. Stage 11''s grant pair is deliberately absent from this surface, because a session that could mint its own authority would make every other line in this file a formality'
+            WHEN pg_temp.s4_at_least('stage10') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — Stage 7 added the five family-review verbs, Stage 8 the six guest verbs, Stage 9 the two render-manifest reads, and Stage 10 exactly one more: `commerce_host_summary`, the read a host needs to see a quote it was given. Stage 10''s other six commerce names are deliberately absent from this surface, because a browser that could open an order or record a payment would be a browser deciding its own paid status, and the fifteen names that follow Stage 4''s seven are every later name a browser can reach'
             WHEN pg_temp.s4_at_least('stage9') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — Stage 7 added the five family-review verbs, Stage 8 the six guest verbs, and Stage 9 the two render-manifest reads, so the fourteen names that follow Stage 4''s seven are every later name a browser can reach'
             WHEN pg_temp.s4_at_least('stage8') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — Stage 7 added the five family-review verbs and Stage 8 the six guest verbs, so the twelve names that follow Stage 4''s seven are every later name a browser can reach'
             WHEN pg_temp.s4_at_least('stage7') THEN ', Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — and Stage 7 added the five family-review verbs, which are the only later names a browser can reach'
             WHEN pg_temp.s4_at_least('stage5') THEN ', and Stage 5 added exactly one — the preview/freeze-parity read (§3.5) — which is the only new name a browser can reach'
             ELSE '' END,
     v_api,
-    CASE WHEN pg_temp.s4_at_least('stage10') THEN
+    -- Stage 11 slice 2's thirty-two, transcribed from `q11-logs/s11-s2-readout-2.txt` section 3 — the
+    -- list this suite's own query printed at this head, not a list written from §10's table. The
+    -- difference is worth recording: §10 named an `operator_assign_case` that would have made this
+    -- surface thirty-three, and C29c refused it because it names a person in an argument. What is here
+    -- instead is the claim/release pair, and the reason a name-level enumeration matters is precisely
+    -- that swap — a count would have hidden which verb a browser can point at another account with.
+    CASE WHEN pg_temp.s4_at_least('stage11') THEN
+      ARRAY['commerce_host_summary', 'create_invitation_version', 'get_approval_requests',
+            'get_guest_invitation_state', 'get_invitation_publication_state',
+            'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
+            'issue_guest_invitations', 'list_invitation_outputs', 'open_support_case',
+            'operator_add_case_note', 'operator_case_queue', 'operator_claim_case',
+            'operator_release_case', 'operator_transition_case',
+            'preview_invitation', 'preview_invitation_document',
+            'publish_invitation_version', 'render_invitation_document',
+            'reply_to_support_case',
+            'request_family_review', 'resolve_family_review',
+            'resolve_guest_invitation', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_guest_invitation',
+            'revoke_invitation_publication', 'rotate_guest_invitation',
+            'rotate_invitation_token', 'submit_family_review',
+            'submit_guest_rsvp']::text[]
+    WHEN pg_temp.s4_at_least('stage10') THEN
       ARRAY['commerce_host_summary', 'create_invitation_version', 'get_approval_requests',
             'get_guest_invitation_state', 'get_invitation_publication_state',
             'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',
@@ -3967,7 +3991,7 @@ BEGIN
   -- would have, which is why both halves are enumerated by name rather than counted.
   PERFORM pg_temp.s4_eq('I2 and the privileged surface is '
     || CASE WHEN pg_temp.s4_at_least('stage11')
-         THEN 'exactly these forty-one names — the twenty-two public twins plus the nineteen maintenance functions, of which six are Stage 10''s commerce write paths, two are Stage 11''s operator-grant pair, and eleven are the pack-maintenance names Stage 5 enumerated'
+         THEN 'exactly these fifty-one names — the thirty-two public twins plus the nineteen maintenance functions, of which six are Stage 10''s commerce write paths, two are Stage 11''s operator-grant pair, and eleven are the pack-maintenance names Stage 5 enumerated. Stage 11 slice 2 grows the twin half by ten and the maintenance half by nothing'
          WHEN pg_temp.s4_at_least('stage10')
          THEN 'exactly these thirty-nine names — the twenty-two public twins plus the seventeen maintenance functions, of which six are Stage 10''s commerce write paths and eleven are the pack-maintenance names Stage 5 enumerated'
          WHEN pg_temp.s4_at_least('stage9')
@@ -3980,7 +4004,7 @@ BEGIN
          THEN 'exactly these nineteen names — the eight public twins plus the eleven maintenance functions, listed so an unlisted privilege is a failing assertion'
          ELSE 'the same seven names, so there is no fourth way into a publication action and no privileged function without a public twin' END,
     v_names,
-    -- Stage 11's forty-one, transcribed from the list this assertion printed when it first refused
+    -- Stage 11 slice 1's forty-one, transcribed from the list this assertion printed when it first refused
     -- (`q11-logs/s11-iter-next-1.txt`) rather than predicted: the thirty-nine above plus
     -- `grant_operator_role` and `revoke_operator_role`, and no wrapper for either — which is why the
     -- twin-less half grows from seventeen to nineteen while the callable half stays at twenty-two. An
@@ -3988,29 +4012,37 @@ BEGIN
     -- "a host may read the quote, nothing may open an order", and this head's is "no session at all may
     -- move operational authority from inside the database". Both are stated here as names, because a
     -- count would not tell a hidden privilege from a deleted one.
+    --
+    -- Slice 2's fifty-one, and the provenance is different in kind: this array was generated from
+    -- `q11-logs/s11-s2-g1f-rows.txt` — the 51 rows this suite's own row expression printed against a
+    -- chain rebuilt from Stage 2 through slice 2 — by `q11-logs/s11-s2-array.mjs`, and pasted. Ten names
+    -- join the twin half (the four host doors, two operator reads, four operator writes) and none joins
+    -- the twin-less half, which is why the maintenance list is still exactly the nineteen it was: a
+    -- Stage 11 support body written twin-less would appear here and not in I1, and that diff is the whole
+    -- reason both halves are enumerated by name.
     CASE WHEN pg_temp.s4_at_least('stage11') THEN
       ARRAY['approve_tradition_pack_release', 'commerce_host_summary',
             'commerce_reconcile', 'create_commerce_order', 'create_invitation_version',
             'create_tradition_pack', 'create_tradition_pack_release',
             'deprecate_tradition_pack_release', 'expire_commerce_order',
-            'get_approval_requests',
-            'get_guest_invitation_state', 'get_invitation_publication_state',
+            'get_approval_requests', 'get_guest_invitation_state',
+            'get_invitation_publication_state', 'get_my_support_case',
+            'get_my_support_cases', 'get_operator_case',
             'get_tradition_pack_review_packet', 'grant_commerce_entitlement',
-            'grant_operator_role',
-            'inspect_tradition_pack_release',
-            'issue_guest_invitations', 'list_invitation_outputs',
-            'preview_invitation', 'preview_invitation_document',
-            'publish_invitation_version', 'record_commerce_event',
-            'render_invitation_document', 'request_family_review',
-            'resolve_family_review', 'resolve_guest_invitation', 'resolve_public_invitation',
-            'revoke_commerce_entitlement',
-            'revoke_family_review', 'revoke_guest_invitation',
-            'revoke_invitation_publication', 'revoke_operator_role',
-            'rotate_guest_invitation',
-            'rotate_invitation_token', 'submit_family_review', 'submit_guest_rsvp',
-            'submit_tradition_pack_review', 'tradition_pack_catalog',
-            'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
-            'validate_tradition_pack_release']::text[]
+            'grant_operator_role', 'inspect_tradition_pack_release',
+            'issue_guest_invitations', 'list_invitation_outputs', 'open_support_case',
+            'operator_add_case_note', 'operator_case_queue', 'operator_claim_case',
+            'operator_release_case', 'operator_transition_case', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'record_commerce_event', 'render_invitation_document',
+            'reply_to_support_case', 'request_family_review', 'resolve_family_review',
+            'resolve_guest_invitation', 'resolve_public_invitation',
+            'revoke_commerce_entitlement', 'revoke_family_review',
+            'revoke_guest_invitation', 'revoke_invitation_publication',
+            'revoke_operator_role', 'rotate_guest_invitation', 'rotate_invitation_token',
+            'submit_family_review', 'submit_guest_rsvp', 'submit_tradition_pack_review',
+            'tradition_pack_catalog', 'tradition_pack_retention_report',
+            'update_draft_tradition_pack_release', 'validate_tradition_pack_release']::text[]
     WHEN pg_temp.s4_at_least('stage10') THEN
       ARRAY['approve_tradition_pack_release', 'commerce_host_summary',
             'commerce_reconcile', 'create_commerce_order', 'create_invitation_version',
@@ -4093,7 +4125,7 @@ BEGIN
 
   PERFORM pg_temp.s4_jq('I3 the shape that makes that split mean something: every `api` function runs as the caller, every `internal_api` one has a pinned search path, and '
     || CASE WHEN pg_temp.s4_at_least('stage11')
-         THEN 'exactly the twenty-two with a public twin are DEFINER — the nineteen maintenance bodies are INVOKER, so they add a workflow and no privilege; Stage 11''s operator-grant pair joins the unprivileged half, which is the half that makes the grant bodies write `private.operator_grants` as the calling role — a role with no INSERT on that table cannot mint authority by calling them, whatever it can do with a name'
+         THEN 'exactly the thirty-two with a public twin are DEFINER — the nineteen maintenance bodies are INVOKER, so they add a workflow and no privilege. Stage 11 slice 2 is the first head where every new body is a DEFINER: all ten support bodies, because the two case tables grant nothing to any browser role, so a ticket is only ever readable by a body that re-derives `auth.uid()` itself. Stage 11''s operator-grant pair stays in the unprivileged half, which is the half that makes the grant bodies write `private.operator_grants` as the calling role — a role with no INSERT on that table cannot mint authority by calling them, whatever it can do with a name'
          WHEN pg_temp.s4_at_least('stage10')
          THEN 'exactly the twenty-two with a public twin are DEFINER — the seventeen maintenance bodies are INVOKER, so they add a workflow and no privilege; Stage 10''s six commerce write paths are in the unprivileged half, which is the shape that makes "a browser cannot record its own payment" a fact of the grant list rather than a promise in an interface'
          WHEN pg_temp.s4_at_least('stage9')
@@ -4120,8 +4152,8 @@ BEGIN
                                   WHERE n.nspname = 'internal_api'
                                     AND p.proconfig @> ARRAY['search_path=""']))),
       CASE WHEN pg_temp.s4_at_least('stage11')
-             THEN jsonb_build_object('api_invoker', '22', 'api_pinned', '22',
-                                     'internal_definer', '22', 'internal_pinned', '41')
+             THEN jsonb_build_object('api_invoker', '32', 'api_pinned', '32',
+                                     'internal_definer', '32', 'internal_pinned', '51')
              WHEN pg_temp.s4_at_least('stage10')
              THEN jsonb_build_object('api_invoker', '22', 'api_pinned', '22',
                                      'internal_definer', '22', 'internal_pinned', '39')
@@ -4141,8 +4173,8 @@ BEGIN
                                      'internal_definer', '7', 'internal_pinned', '7') END);
 
   -- ------------------------------------------------------------ the governance machinery
-  -- NOTE, so a reader does not take this group's prose as the census: only the last two paragraphs —
-  -- Stage 10's and Stage 11's — are re-measured at every head from here on. The five above them describe
+  -- NOTE, so a reader does not take this group's prose as the census: only the last three paragraphs —
+  -- Stage 10's and Stage 11's two — are re-measured at every head from here on. The five above them describe
   -- the head each of those stages was qualified at, and each states a `private` total (30, 30, 33) that
   -- later stages grew past. The ladder below is the measurement; this prose is the archive.
   -- Stage 6 adds three functions to `private` — the key minter and the two registry guards — and no
@@ -4201,8 +4233,18 @@ BEGIN
   -- nothing, and no role but its owner can execute it today (cells A17-A19), so the DEFINER posture buys
   -- the answer a *nested* caller needs rather than a new door for any account. The three booleans stay
   -- the load-bearing half: a definer in a schema an account cannot name is a body, not a door.
+  --
+  -- Slice 2 is the first Stage 11 head that moves all three of I4's numbers at once: ten names into
+  -- `internal_api` and the same ten into `api` — the paired shape, which is what the whole qualification
+  -- has been building since Stage 3 — and three into `private`, the two mint triggers and the case-update
+  -- guard. So 22 → 32, 41 → 51, 38 → 41 and the total 101 → 124. What did *not* move is the load-bearing
+  -- half: `usage_anon` and `usage_auth` are still false, which is the sentence "no account can name the
+  -- schema the case rows live in", and `private_definers` is still the same four names measured in
+  -- `q11-logs/s11-s2-readout-2.txt` section 5 — slice 2 added no definer to `private` at all, because a
+  -- trigger that mints a reference or refuses an update runs as the statement's owner and needs no
+  -- escalation. Every number in this paragraph is read from that file; none is derived from the §5 table.
   PERFORM pg_temp.s4_jq('I4 the whole privileged inventory is '
-    || CASE WHEN pg_temp.s4_at_least('stage11') THEN '101'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN '124'
             WHEN pg_temp.s4_at_least('stage10') THEN '98'
             WHEN pg_temp.s4_at_least('stage9') THEN '86'
             WHEN pg_temp.s4_at_least('stage8') THEN '79'
@@ -4220,7 +4262,7 @@ BEGIN
               'usage_auth', (SELECT has_schema_privilege('authenticated', 'private', 'USAGE')::text),
               'usage_maint', (SELECT has_schema_privilege('service_role', 'private', 'USAGE')::text))),
       CASE WHEN pg_temp.s4_at_least('stage11')
-             THEN jsonb_build_object('api', '22', 'internal_api', '41', 'private', '38',
+             THEN jsonb_build_object('api', '32', 'internal_api', '51', 'private', '41',
                                      'public', '0', 'usage_anon', 'false',
                                      'usage_auth', 'false', 'usage_maint', 'true')
              WHEN pg_temp.s4_at_least('stage10')
@@ -4386,7 +4428,7 @@ BEGIN
   -- so a zero in the first half is known to be a clean schema rather than a pattern that
   -- matches nothing.
   PERFORM pg_temp.s4_jq('I8 no function in api, internal_api or private is test-shaped: the scan finds none of this stage''s fixture markers in any of the '
-    || CASE WHEN pg_temp.s4_at_least('stage11') THEN '101'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN '124'
             WHEN pg_temp.s4_at_least('stage10') THEN '98'
              WHEN pg_temp.s4_at_least('stage9') THEN '86'
              WHEN pg_temp.s4_at_least('stage8') THEN '79'
@@ -4406,7 +4448,7 @@ BEGIN
                                     OR p.prosrc ILIKE '%fixture%'
                                      OR p.proname ILIKE '%test%')))),
     jsonb_build_object('real_scanned',
-      CASE WHEN pg_temp.s4_at_least('stage11') THEN '101'
+      CASE WHEN pg_temp.s4_at_least('stage11') THEN '124'
             WHEN pg_temp.s4_at_least('stage10') THEN '98'
              WHEN pg_temp.s4_at_least('stage9') THEN '86'
              WHEN pg_temp.s4_at_least('stage8') THEN '79'
@@ -4444,7 +4486,8 @@ BEGIN
     || array_to_string(v_api, ', '), v_api, 'stage4_inventory_probe');
   PERFORM pg_temp.s4_eq('I9b and I1''s exact equality is what rejects it, so the assertion below is the same one a future migration would trip',
     cardinality(v_api)::bigint,
-    CASE WHEN pg_temp.s4_at_least('stage10') THEN 23::bigint
+    CASE WHEN pg_temp.s4_at_least('stage11') THEN 33::bigint
+         WHEN pg_temp.s4_at_least('stage10') THEN 23::bigint
          WHEN pg_temp.s4_at_least('stage9') THEN 22::bigint
          WHEN pg_temp.s4_at_least('stage8') THEN 20::bigint
          WHEN pg_temp.s4_at_least('stage7') THEN 14::bigint
@@ -4456,7 +4499,8 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s4_eq('I10 and with the probe removed the surface is the '
-    || CASE WHEN pg_temp.s4_at_least('stage10') THEN 'twenty-two'
+    || CASE WHEN pg_temp.s4_at_least('stage11') THEN 'thirty-two'
+            WHEN pg_temp.s4_at_least('stage10') THEN 'twenty-two'
             WHEN pg_temp.s4_at_least('stage9') THEN 'twenty-one'
             WHEN pg_temp.s4_at_least('stage8') THEN 'nineteen'
             WHEN pg_temp.s4_at_least('stage7') THEN 'thirteen'
@@ -4464,7 +4508,22 @@ BEGIN
             ELSE 'seven' END
     || ' again, which is the state the rest of the suite and the application both depend on',
     v_api,
-    CASE WHEN pg_temp.s4_at_least('stage10') THEN
+    CASE WHEN pg_temp.s4_at_least('stage11') THEN
+      ARRAY['commerce_host_summary', 'create_invitation_version',
+            'get_approval_requests', 'get_guest_invitation_state',
+            'get_invitation_publication_state', 'get_my_support_case',
+            'get_my_support_cases', 'get_operator_case', 'issue_guest_invitations',
+            'list_invitation_outputs', 'open_support_case', 'operator_add_case_note',
+            'operator_case_queue', 'operator_claim_case', 'operator_release_case',
+            'operator_transition_case', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'render_invitation_document', 'reply_to_support_case',
+            'request_family_review', 'resolve_family_review', 'resolve_guest_invitation',
+            'resolve_public_invitation', 'revoke_family_review',
+            'revoke_guest_invitation', 'revoke_invitation_publication',
+            'rotate_guest_invitation', 'rotate_invitation_token', 'submit_family_review',
+            'submit_guest_rsvp']::text[]
+    WHEN pg_temp.s4_at_least('stage10') THEN
       ARRAY['commerce_host_summary', 'create_invitation_version', 'get_approval_requests',
             'get_guest_invitation_state', 'get_invitation_publication_state',
             'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',
@@ -4520,7 +4579,7 @@ BEGIN
   SELECT count(*) INTO v_scanned FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname IN ('api', 'internal_api', 'private');
   PERFORM pg_temp.s4_eq('I10b and no residue of the probe is left anywhere in the inventory', v_scanned,
-    CASE WHEN pg_temp.s4_at_least('stage11') THEN 101::bigint
+    CASE WHEN pg_temp.s4_at_least('stage11') THEN 124::bigint
          WHEN pg_temp.s4_at_least('stage10') THEN 98::bigint
          WHEN pg_temp.s4_at_least('stage9') THEN 86::bigint
          WHEN pg_temp.s4_at_least('stage8') THEN 79::bigint

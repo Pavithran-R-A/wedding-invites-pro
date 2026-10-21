@@ -1,10 +1,13 @@
 -- Stage 11 battery 1: operator authority, and the one audit trail that has to be able to say who decided.
 --
 -- Run by `supabase/tests/stage11/run.sh authority` on a chain that has applied every migration and run
--- nothing else, as the owner role, in one transaction that commits. It is the only battery in this chain
--- mode, so group A's "the state the migrations ship" cells measure the post-migration schema rather than a
--- schema this file has already written to — which is what makes A01, the seeded-operator refusal that
--- `operations-admin-security.md` §14 records as a standing constraint, a measurement instead of a tautology.
+-- nothing else, as the owner role, in one transaction that commits. It sorts first in the runner's
+-- `[89]*.sql` glob, and that ordering is load-bearing: group A's "the state the migrations ship" cells
+-- measure the post-migration schema rather than a schema a battery has already written to, which is what
+-- makes A01, the seeded-operator refusal that `operations-admin-security.md` §14 records as a standing
+-- constraint, a measurement instead of a tautology. Slice 2's battery runs after this one on the same
+-- chain and therefore inherits the three grant rows and four trail rows this file leaves, which is why it
+-- measures its own effects as digests and deltas rather than as absolutes.
 --
 -- What this file is allowed to claim, and what it is not. Everything here is SQL: it proves the table, the
 -- predicate, the two bodies, the five audit columns, the audit CHECKs, the idempotency index and the
@@ -15,7 +18,7 @@
 -- belongs to `supabase/tests/api/stage11_operations.test.mjs`.
 --
 --   A01–A08c  what the migrations ship: empty, RLS with no policy, no client privilege, the declared
---             surface (22 / 41 / 38), the posture of the four new names, the five audit columns, the
+--             surface (32 / 51 / 41), the posture of the four new names, the five audit columns, the
 --             revocation and the trigger pair.
 --   A09–A26b  every privilege refusal, role by role, plus the digest proving none of them wrote a row.
 --   R01–R17   what the two bodies refuse to write, and the shape of the sentence they answer with.
@@ -396,14 +399,22 @@ BEGIN
         AND p.proname IN ('grant_operator_role','revoke_operator_role','actor_is_operator')), 0);
 
   -- The declared surface for this head, counted from `pg_proc` rather than grepped from source, so a name
-  -- declared twice with two argument lists counts twice here. api 22 (Stage 10 shipped it; slice 1 adds no
-  -- wrapper), internal_api 41 (39 + the pair), private 38 (37 + the predicate).
-  PERFORM pg_temp.s11a_eq('A06a the declared api surface is unchanged at 22 names',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'api'::regnamespace), 22);
-  PERFORM pg_temp.s11a_eq('A06b internal_api grows by exactly the two service-only bodies: 41',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'internal_api'::regnamespace), 41);
-  PERFORM pg_temp.s11a_eq('A06c private grows by exactly the one predicate: 38',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'private'::regnamespace), 38);
+  -- declared twice with two argument lists counts twice here. Slice 1 moved these numbers by three names in
+  -- total and added no wrapper; slice 2 is the one that moves them again, and it moves all three: api 32
+  -- (Stage 10's 22 plus the ten support wrappers), internal_api 51 (39 plus slice 1's pair plus slice 2's
+  -- ten bodies) and private 41 (37 plus the predicate plus the two mint triggers and the state-machine
+  -- guard). The step is worth stating as a sum rather than as a number because the difference between the
+  -- two slices is the finding this file exists to make: slice 1's half of Stage 11 is reachable by no
+  -- browser at all, and slice 2's half is a surface, which is why it has a battery of its own.
+  PERFORM pg_temp.s11a_eq('A06a the declared api surface is 32 names: Stage 10''s twenty-two plus slice 2''s '
+    || 'ten wrappers, and slice 1 contributed none',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'api'::regnamespace), 32);
+  PERFORM pg_temp.s11a_eq('A06b internal_api is 51: thirty-nine at Stage 10, plus this slice''s pair, plus '
+    || 'slice 2''s ten bodies',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'internal_api'::regnamespace), 51);
+  PERFORM pg_temp.s11a_eq('A06c private is 41: thirty-seven at Stage 10, plus the predicate this slice '
+    || 'added, plus slice 2''s three trigger functions',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'private'::regnamespace), 41);
 
   PERFORM pg_temp.s11a_array('A07 the audit trail gained exactly the five columns §4 names, and no existing '
     || 'column was repurposed: the new half of the row is named, not counted',
@@ -1217,12 +1228,12 @@ BEGIN
   -- its own, all in `pg_temp`, and the claim a reader needs is that none of them reached a published
   -- namespace. `'pg_temp'::regnamespace` cannot express that — the alias resolves only through the search
   -- path, and the cast raises — so each namespace is named directly instead.
-  PERFORM pg_temp.s11a_eq('Z07 the declared api surface is still the 22 names this file found at A06a, '
+  PERFORM pg_temp.s11a_eq('Z07 the declared api surface is still the 32 names this file found at A06a, '
     || 'measured after every group has run',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 22);
-  PERFORM pg_temp.s11a_eq('Z07b and internal_api is still 41: a battery that leaked a helper into a '
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 32);
+  PERFORM pg_temp.s11a_eq('Z07b and internal_api is still 51: a battery that leaked a helper into a '
     || 'privileged namespace would move this number and nothing else here would notice',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 41);
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 51);
 
   -- The floor counts this cell too, so the number it compares against is the number the file prints and
   -- not one less than it: a floor a reader has to adjust mentally is a floor that gets mis-set at its next

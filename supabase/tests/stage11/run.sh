@@ -22,7 +22,11 @@
 # `rsvp_responses` total. Those are true on a chain that ran nothing but that pair and false on a chain that
 # has also run `tests/stage2/20_attacks.sql`, which deliberately commits seed rows. Stage 11's battery 1
 # adds a census of exactly that shape — grant rows by status, trail rows by action — so it gets its own
-# empty chain too.
+# empty chain too. Battery 2 gets the *same* chain rather than a second empty one, because it sorts after
+# battery 1 in the glob and inherits the three grant rows and four trail rows battery 1 leaves behind; that
+# is why every absolute count in `85_support_lifecycle.sql` is either a delta from a number captured at the
+# top of its own group or a digest, and why group Z's census counts rows this stage's two batteries created
+# rather than cluster totals.
 #
 #   authority  bootstrap -> storage fixture -> published -> stage2..stage11 -> Stage 11's [89]*
 #   historic   TWO chains, same stage loop: `clean` (no legacy seed) runs Stage 2's empty-chain outcome
@@ -36,20 +40,23 @@
 #
 # `app.stage_head=stage11` travels to the head-aware assertions for the reason every runner since Stage 5
 # gives: an expectation that only holds at one head has to be duplicated, and one that names the head it is
-# measuring is a stronger claim. What this head moves is inventories, not behaviour: `private` gains one
-# table and one predicate, `internal_api` gains two service-only bodies, `api` gains nothing, and
+# measuring is a stronger claim. What this head moves is inventories, not behaviour: `private` gains three
+# tables and four functions, `internal_api` gains twelve bodies, `api` gains ten wrappers, and
 # `service_role` *loses* UPDATE and DELETE on `private.audit_events`. The Stage 10 publish gate ships
 # permissive and stays permissive, so every historical publication suite must still pass unmodified — if
 # one of them refuses, that is a Stage 11 defect and not a stale expectation.
 #
 # The numbers this head should print, stated as a derivation rather than a guess so that a chain probe
 # printing something else is a finding: Stage 10 shipped 22 `api` names, 39 `internal_api` names and 37
-# `private` names. Slice 1 adds no wrapper, two `internal_api` bodies and one `private` function, making
-# 22 / 41 / 38. `PUBLIC_TABLES` and `STORAGE_BUCKETS` must not move: a head that changes the
-# customer-facing inventory while claiming to add only a server-side credential store has put its tables
-# where an API role can see them. Every number below is printed from `pg_proc` and `pg_class`, never
-# grepped out of source, because a name declared twice with two argument lists counts twice here and once
-# in a grep.
+# `private` names. Slice 1 adds no wrapper, two `internal_api` bodies and one `private` function; slice 2
+# adds ten `api` wrappers, ten `internal_api` bodies and three `private` trigger functions, making
+# 32 / 51 / 41 — and battery 1's A06a–A06c measure exactly that sum from `pg_proc`. `PUBLIC_TABLES` and
+# `STORAGE_BUCKETS` must not move: a head that changes the customer-facing inventory while claiming to add
+# only a server-side credential store has put its tables where an API role can see them. Slice 2 adds no
+# bucket and no `public` table; its two new tables are in `private` for the same reason the grant table is,
+# and `40_catalog.sql` C06 measures that again rather than taking this sentence on faith. Every number
+# below is printed from `pg_proc` and `pg_class`, never grepped out of source, because a name declared
+# twice with two argument lists counts twice here and once in a grep.
 #
 # Boundary, stated rather than hidden: plain Postgres plus `supabase/tests/rls/00_bootstrap.sql` and the
 # Stage 6 storage-schema fixture. It proves the grant table, the predicate, the two bodies, the audit
