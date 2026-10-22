@@ -1,10 +1,14 @@
 # Stage 11 — Operations, support and incident administration: authority model and threat model
 
-**Status: design and threat model, and the contract the Stage 11 migrations are written against.**
-Nothing in this document is exercised yet: every count below is read out of the live local stack or
-out of a file at a named SHA, and every capability here is labelled **designed** until a battery
-measures it. It authorises no operator, no refund, no erasure, no takedown of a real customer's
-invitation and no live commerce.
+**Status: design and threat model, and the contract the Stage 11 migrations are written against — with
+slices 1–4 now exercised.** The four batteries have run, on the runner's own chains, against a real
+PostgreSQL 17, and §13's `M:` columns cite those logs; what has **not** run is the HTTP, browser and race
+tiers, because they need the shared `localvivaahvarnam` stack and starting Docker is a human-only action. So
+"every capability here is labelled **designed** until a battery measures it" still governs this document —
+a battery has measured a great deal of it, and no line here claims the wire tier on that strength. Every
+count is read out of a live database or out of a file at a named SHA, and each §15 block says which head it
+belongs to. It authorises no operator, no refund, no erasure, no takedown of a real customer's invitation
+and no live commerce.
 **Branch baseline:** `stage11/operations-admin` at `9f3076a4c0426df4defae8f5b7150ff811f34f5b`, on top of
 merged Stage 10 at `c9eb27aa2e27422d9da3bdc29bedd3e49b8adb21`.
 **Binding sources:** [`docs/superpowers/specs/2026-10-20-stage11-operations-admin-kickoff.md`](../superpowers/specs/2026-10-20-stage11-operations-admin-kickoff.md),
@@ -42,7 +46,11 @@ that a signed file link died when the row was merely marked.
 ## 2. The substrate as measured at this baseline
 
 Read from the running `localvivaahvarnam` database (`supabase_db_localvivaahvarnam`, 31 applied
-migrations, matching the 31 files under `supabase/migrations/`) and from the migrations themselves.
+migrations, matching the 31 files under `supabase/migrations/`) and from the migrations themselves. These
+are **baseline** figures, taken before any Stage 11 slice landed, and they are kept unedited for that reason;
+the same three schemas re-measured at the slice-4 head read 40 `api`, 60 `internal_api` and 52 `private` over
+36 migration files — measured on the runner's throwaway PostgreSQL chains, not on this stack, which has not
+been pushed since slice 1 (§16) — and that is what §10 and §15's last block carry.
 
 | Fact | Measured value | Consequence for Stage 11 |
 | --- | --- | --- |
@@ -244,10 +252,16 @@ over a uuid a caller picked.
 ## 6. Publication takedown: two facts, said separately
 
 **Decision.** `internal_api.operator_takedown_publication(p_wedding_id uuid, p_case_ref text,
-p_reason text, p_idempotency_key uuid)` and `…p_purge_objects boolean` are **not** the same operation,
+p_reason text, p_idempotency_key uuid)` and
+`internal_api.operator_purge_publication_objects(p_case_ref text, p_actor_user_id uuid,
+p_idempotency_key uuid)` are **not** the same operation,
 and the reason is measured, not stylistic: §2's `E-06` row proves that marking a row retired does not
 stop delivery, so a single call that claimed both would be a false claim. Two functions, two audit verbs,
-two answers:
+two answers. An earlier draft of this section carried the second half as a `p_purge_objects boolean` on the
+first signature; no such argument ships, measured from `pg_get_function_arguments` on both bodies in
+`q11-logs/s11-s4-actor-params-1.txt`, and the withdrawal is the point — a flag that decides whether an
+irreversible step is included is a flag a caller sets by accident, on the one act in the stage that cannot
+be undone:
 
 1. `operator_takedown_publication` — requires scope `operations`, a matching open case, a
    `p_reason IN ('owner_request','terms_violation','safety','legal','duplicate')`, and an idempotency key.
@@ -260,16 +274,25 @@ two answers:
    (`publication_revoked`, `credentials_revoked`, `outputs_invalidated`). It does not delete a byte.
    Its return says, in as many fields: which credentials died, that previously issued file links are
    **not** covered by this action, and which purge would cover them.
-2. `operator_purge_publication_objects(p_case_ref, p_idempotency_key)` — the irreversible half, and the
-   only path in Stage 11 that can remove something a real guest already holds. It requires scope
-   `operations`, **a second distinct idempotency key**, the case named above, and is refused entirely
-   from any surface other than the trusted CLI (§10). It is a *planner*: it returns the exact
-   `object_key` list and the count, and the CLI refuses to execute it without `--yes` after showing that
-   list. Removal goes through the Storage API's own delete (the route `stage9-output-publisher.mjs`
-   `remove` uses, `:337-346`), which is how Stage 9 measured that a deleted object fails both the live
-   signed URL and the owner's re-mint. The registry rows are already `invalidated`, so the delete-then-mark
+2. `operator_purge_publication_objects(p_case_ref, p_actor_user_id, p_idempotency_key)` — the *plan* in
+   front of the irreversible half, and not itself an irreversible act: the shipped body deletes nothing,
+   measured as `DELETE FROM` absent from its own stored `prosecdef` source in
+   `q11-logs/s11-s4-doc-probe-1.txt` section O, and returns the exact `object_key` list and its count.
+   It requires **a second distinct idempotency key**, the case named above, and is refused entirely
+   from any surface other than the trusted CLI (§10). The actor is the third argument, and that is the
+   one place in the stage where an operator is named rather than derived: on the peer-authenticated
+   `postgres` channel `auth.uid()` is NULL by construction, so nobody is on the session, and an
+   unattributed irreversible plan would be unanswerable afterwards (§4). Naming is not trusting — the body
+   reads `private.operator_grants` for exactly that uuid with the same four conditions slice 1's predicate
+   applies to a session (`scope = 'operations'`, `status = 'active'`, unexpired, and the account exists in
+   `auth.users`), and refuses an unknown id, a lapsed grant and a NULL actor each with its own sentence.
+   The wedding is read from the case through `private.operator_authorising_case`, never supplied.
+   The removal itself goes through the Storage API's own delete (the route `stage9-output-publisher.mjs`
+   `remove` uses, `:337-347`), which is how Stage 9 measured that a deleted object fails both the live
+   signed URL and the owner's re-mint, and the CLI refuses to execute a plan without `--yes` after showing
+   its key list. The registry rows are already `invalidated`, so the delete-then-mark
    ordering that Stage 9's design §12 states, and its migration restates at
-   `20261013120000_stage9_render_outputs.sql:396`, is preserved rather than inverted.
+   `20261013120000_stage9_render_outputs.sql:395-396`, is preserved rather than inverted.
 
 **Host impact.** The host sees the truth through the doors that already exist — `api.get_invitation_publication_state`
 answers revoked, and `api.list_invitation_outputs` prints the retired state with the reason vocabulary
@@ -358,7 +381,9 @@ its own newest-row timestamp so "current" is a fact rather than an assumption:
 
 | Block | Source it reads | Meaning |
 | --- | --- | --- |
-| `migrations` | `supabase_migrations.schema_migrations` | applied count and highest version. The comparison against the 31 files in the repository is the CLI's job, because a file listing is not a database fact, and the CLI prints both numbers or says it could not read one. |
+| `migrations` | `supabase_migrations.schema_migrations` | applied count and highest version. The comparison against the files under `supabase/migrations/` is the CLI's job, because a file listing is not a database fact: that directory holds 36 files at this head — 31 at §2's baseline plus this stage's five — which is exactly
+why the tool reads it instead of carrying a number, and why it prints both figures or says it could not read
+one. |
 | `publication` | `public.publications` | counts by status inside/outside the window, plus weddings with an active publication. |
 | `credentials` | `private.access_tokens` | live vs revoked vs expired, by kind, and `last_used_at` distribution — the "which link did I send and when did it stop working" question Stage 3 left for support. |
 | `delivery` | `public.invitation_outputs` | counts by status, and `failed` rows at the attempt ceiling (the stuck state Stage 9's repair made visible). |
@@ -383,8 +408,20 @@ body is `plpgsql`, owned by `postgres`, fully qualified inside, `SET search_path
 `SECURITY` clause is decided per body against the measured precedent rather than by one adjective. This
 section originally said "every `internal_api` body is `SECURITY DEFINER`", and that is false of the
 schema it describes: 17 of the 39 names at the Stage 10 head are `prosecdef = f` with EXECUTE false for all
-three client roles, and Stage 11's two grant bodies follow them (§3). The predicate is the one Stage 11
-body that is a definer, and §3 gives the measured reason it has to be.
+three client roles, and Stage 11's two grant bodies follow them (§3). The sentence that followed — "the
+predicate is the one Stage 11 body that is a definer" — was true of slice 1 alone, and the head now
+measures the whole shape instead: `internal_api` holds 60 names of which 41 are `prosecdef = t` and 19 are
+not, `private` holds 52 of which 5 are definers, and `api` holds 40 of which none are. Of the 23 names this
+stage wrote, **21 are definers** — the 19 paired bodies plus slice 4's unexposed purge, and in `private`
+both `actor_is_operator` and `operator_authorising_case`; the other 2 are the grant pair, which follows the
+Stage 10 precedent for the reason §3 gives. A paired body has to be a definer for the same forced reason
+the predicate did — it reads `private.operator_grants` and the queue tables on behalf of a caller that
+holds no grant on any of them, so an INVOKER body would raise `permission denied` instead of answering the
+question the door asks — and §3's ruling for the grant pair is that reachability must stay a property of
+the *role*, which is exactly what a body with no reachable surface does not need.
+`q11-logs/s11-s4-doc-probe4-1.txt` sections S1–S3 is the per-name reading behind every figure here, and the
+same probe's S6 is the assertion §13's erasure row leans on: none of the seven privileged bodies this stage
+wrote contains a `DELETE FROM` clause.
 
 | Wrapper | Callable by | Authorisation inside the body |
 | --- | --- | --- |
@@ -402,19 +439,29 @@ body that is a definer, and §3 gives the measured reason it has to be.
 | `api.operator_operations_summary(p_window_hours)` | `authenticated` | `operations`, STABLE |
 | — not a wrapper — `internal_api.operator_purge_publication_objects`, `internal_api.grant_operator_role`, `internal_api.revoke_operator_role` | **no role at all**: zero EXECUTE grants; reached only by the trusted `postgres` path | see §3 and §11 |
 
-Slices 1–3 have shipped, so this table is now partly measured rather than wholly planned: at this head
-`api` holds 36 names, `internal_api` 55 and `private` 48 functions, and the grant pair, the ten support
-doors and the four privacy doors are the ones the batteries exercise. The takedown, commerce-oversight and
-health rows are still slices 4's and 5's designs — no such name exists yet, and §13 keeps every one of
-those arms under `p:` rather than implying a run. The privacy row is also where the design was amended by
-measurement: the *advance* door takes the key and the create door does not, because the host's duplicate
-anchor is the live row itself (§8).
+Slices 1–4 have shipped, so this table is now partly measured rather than wholly planned: at this head
+`api` holds 40 names, `internal_api` 60 and `private` 52 functions, and the grant pair, the ten support
+doors, the four privacy doors and slice 4's four operator doors — plus that slice's one body with no door
+in front of it — are the names the batteries exercise. Only the health row is still slice 5's design:
+`api.operator_operations_summary` has no name at this head, and §13 keeps that arm under `p:` rather than
+implying a run. The privacy row is also where the design was amended by measurement: the *advance* door
+takes the key and the create door does not, because the host's duplicate anchor is the live row itself (§8).
+The other amendment is in the same column of this table: `api.operator_takedown_plan` is `operations` + a
+read-only projection, and its body returns the key list §6 step 2 would need without touching a byte —
+which is why slice 4's fourth refusal cell measures it as a *plan* that a revoked publication can still be
+handed to, rather than as a half of the irreversible act (§6).
 
-**No `api` function is granted to `anon`**, so the anonymous door set stays the five §2 measured, and
-`API33`/`API34`, `C28a`/`C28b` and the Stage 3/7/8 HTTP refusals are re-run rather than re-explained.
-The purge body is deliberately *not* exposed: the one irreversible act in the stage has no browser
-surface at all, so a stolen session cannot reach it, and the CLI reaches it as `postgres` over the
-peer-authenticated channel the repository's other maintenance tools already use.
+**No `api` function is granted to `anon`**, so the anonymous door set stays the five §2 measured — which
+this head re-measures rather than inherits, because `C28a` deliberately took no stage11 branch and the
+catalogue still passed 106 assertions against a schema that contains slice 4
+(`q11-logs/s11-s4-historic-1603.txt`). `API33`/`API34`, `C28a`/`C28b` and the Stage 3/7/8 HTTP refusals are
+therefore re-run rather than re-explained. The purge body is deliberately *not* exposed. §6 measures it as
+the plan in front of the irreversible half, so what the ruling in this section buys is that neither the
+plan nor the objects it names can be reached by a request at all: EXECUTE on
+`internal_api.operator_purge_publication_objects` is false for `anon`, `authenticated` and `service_role`
+(`q11-logs/s11-s4-purge-probe-1.txt`), the `delete` verb lives in the trusted publisher rather than in this
+body, and the CLI reaches the plan as `postgres` over the peer-authenticated channel the repository's other
+maintenance tools already use.
 
 ## 11. The trusted operations tool
 
@@ -453,14 +500,22 @@ promises, because the function that writes them is not the only thing that can e
 `public.weddings` is **NO ACTION** and every FK to `auth.users` this stage adds is `ON DELETE SET NULL`
 except `operator_grants.user_id`, which cascades deliberately: an erased account must not leave a live
 operational grant pointing at nothing, and §2 measured that cascade posture is the only guard that
-survives a parent delete. The stage **adds seven** `auth.users` edges through slice 3 — two in slice 1
+survives a parent delete. The stage **adds eight** `auth.users` edges through slice 4 — two in slice 1
 (`operator_grants.user_id` CASCADE, `operator_grants.granted_by_user_id` SET NULL), four in slice 2
-(the three `support_cases` attribution links and `support_case_events.actor_user_id`, all SET NULL) and
-one in slice 3 (`privacy_requests.requester_user_id`, SET NULL) — listed as a closed set in
-`40_catalog.sql` C46 and counted from `pg_constraint` on the built chain rather than from this paragraph.
-Slice 3 also adds the stage's third `public.weddings` edge on the same NO ACTION rule,
-`privacy_requests_wedding_id_fkey`, which C46 names beside the two support edges and C48 accepts as
-unindexed for the measured reason §8 gives. `audit_events.actor_user_id` is not one of them: that SET
+(the three `support_cases` attribution links and `support_case_events.actor_user_id`, all SET NULL), one in
+slice 3 (`privacy_requests.requester_user_id`, SET NULL) and one in slice 4
+(`commerce_review_notes.author_user_id`, SET NULL) — listed as a closed set in `40_catalog.sql` C46 and
+counted from `pg_constraint` on the built chain rather than from this paragraph
+(`q11-logs/s11-s4-doc-probe-1.txt` sections D and E read all nine edges into `auth.users` that the survey
+finds, eight of them the stage's and `audit_events.actor_user_id` the older one, each with the ON-DELETE
+posture this paragraph names beside it). Slice 3 also adds the stage's **second** `public.weddings` edge on
+the same NO ACTION rule, `privacy_requests_wedding_id_fkey`, which C46 names beside the single support edge
+and C48 accepts as unindexed for the measured reason §8 gives — the draft called it the stage's third edge
+"beside the two support edges", and `q11-logs/s11-s4-doc-probe3-1.txt` section L is the reading that says
+otherwise: `private` holds exactly two edges into `public.weddings` that this stage wrote, so slice 4's note
+table adds neither. It reaches its wedding through the case it cites rather than by naming one, which is the
+same one-data-model rule that keeps §7's queue a projection over Stage 10's tables instead of a copy of
+them. `audit_events.actor_user_id` is not one of them: that SET
 NULL edge predates the stage (`20260925120400_stage2_assets_entitlements_secrets.sql:98`), which is why
 the trail's guard had to accommodate a link it did not add. `case_ref`/`request_ref` uniqueness is the
 idempotency anchor for the §5 rule,
@@ -468,7 +523,7 @@ and `support_case_events (case_id, seq)` and `(case_id, idempotency_key)` are un
 `invitation_outputs` gains **no** column: Stage 9's vocabulary already carries `publication_revoked`, and
 a new reason would be a new word for a fact that has one.
 
-Three row guards are specialised rather than absolute, for the same measured reason, and this is the one
+Four row guards are specialised rather than absolute, for the same measured reason, and this is the one
 place a reader should not have to infer it from a battery. `private.audit_events` lets exactly one UPDATE
 through — an attribution link going to NULL at `pg_trigger_depth() = 2`, which is the database carrying
 out its own `ON DELETE SET NULL`, compared by exclusion so nothing else may ride along. `private.
@@ -480,78 +535,124 @@ and only at depth 2, so the declaration "the ticket survives its requester" hold
 link go NULL at depth 2 and nothing else about the row move — `request_ref`, `wedding_id`, `kind`,
 `host_note` and `requested_at` are refused unconditionally, and a *statement's own* NULL at depth 1 is
 refused with the same sentence as a hand-off (`D01`, `D02`) — so a request that was declined or satisfied
-still survives its requester. The insert half is a separate `BEFORE INSERT` guard rather than a CHECK,
+still survives its requester. `private.commerce_review_notes` repeats it a fourth time, on the column this
+stage cannot afford to lose loosely: its UPDATE guard compares the rows *by exclusion* — `(v_new -
+'author_user_id')` against `(v_old - 'author_user_id')` — so a column a later slice adds is refused by
+default rather than allowed by omission, and the one mutation it admits is the author link going to NULL at
+`pg_trigger_depth() >= 2`, which is the only way the erase of a reviewer's account can be carried out on a
+note without also letting that note be edited. The insert half is a separate `BEFORE INSERT` guard rather than a CHECK,
 because a CHECK on the same column would be re-evaluated on every UPDATE and would then refuse the
-database's own referential action. Everything at depth 1 — every statement a caller or a body can issue —
+database's own referential action — slice 4 wrote the same pair of halves for the same reason, and its
+migration records the consequence the other three did not have to state: kept as a CHECK, the
+require-an-author rule would not merely refuse a forged note, it would make every reviewer who ever
+annotated a refund impossible to delete. Everything at depth 1 — every statement a caller or a body can issue —
 is refused with the same sentence as before. Measured by `85_support_lifecycle.sql` T49/T50 (the
 refusals), T-RI1/T-RI2 (the accepting half) and T65–T72, with the depth itself measured by
 `q11-logs/s11-depth-probe.sql` and the closed-row half by `q11-logs/s11-closed-ri-probe.sql`; the privacy
 half by `90_privacy_intake.sql` `D01`–`D08b` (the refusals, including the NULL note and the terminal row)
-and `D13`–`D15` (the accepting half, with the new physical tuple as the proof the action executed).
+and `D13`–`D15` (the accepting half, with the new physical tuple as the proof the action executed), and the
+note half by `92_takedown_and_oversight.sql` `O01`–`O10` (a client INSERT, UPDATE and DELETE refused, then
+the owner's *own* hand refused twice — `O04` an edit of the text, `O05` the exact hand-null shape the
+foreign key produces — plus the order/refund disagreement trigger and the author-less INSERT) and
+`O11`–`O16` (the author's account erased, the note surviving with every other byte identical, the trail and
+event rows surviving with the id nulled, and the money digest unchanged).
 
 ## 13. Threat model → control → test
 
 Four vocabularies again, because each tier names its own cells: unit `OD-*`
 (`scripts/stage11-operations-cli.test.mjs`), SQL batteries a letter and two digits grouped per battery
-(`80_operator_authority.sql`, `85_support_lifecycle.sql`, `90_privacy_intake.sql`, and the planned
-`90_takedown_and_oversight.sql` and `95_operations_health.sql`), the race tier prefixed `RC*`/`RD*` for
+(`80_operator_authority.sql`, `85_support_lifecycle.sql`, `90_privacy_intake.sql`,
+`92_takedown_and_oversight.sql`, and the planned `95_operations_health.sql`), the race tier prefixed
+`RC*`/`RD*` for
 the same reason Stage 10 gave, HTTP dashed (`A-*` authority, `C-*` cases, `T-*` takedown, `R-*` refund
 oversight, `V-*` privacy, `H-*` health), and audit-integrity cells `AI-*`. **A citation that no run log
 carries is a claim, not evidence**, so this table is written before the code and re-read after the
 batteries, and any row whose arm did not run says so in the Stage 11 audit rather than here.
 
-Slices 1–3 have now run, so the third column is split rather than rewritten: `M:` ids are in the log of
-the battery that owns them — `q11-logs/s11-s3-st11qual_authority3-80_operator_authority.txt` reports
-`STAGE11 AUTHORITY TESTS PASSED (137)`, `q11-logs/s11-s3-authority3-85_support_lifecycle-2.txt` 641 and
-`q11-logs/s11-s3-authority3-90_privacy_intake-2.txt` 191, each with the same number of `NOTICE:  PASS`
-lines — and `p:` ids are still plans. The families `80_operator_authority.sql` actually measures are
+Slices 1–4 have now run, so the third column is split rather than rewritten: `M:` ids are in the log of
+the battery that owns them. At this head `q11-logs/s11-s4-authority-1619.txt` reports the four batteries on
+one chain — `80_operator_authority.sql` 137, `85_support_lifecycle.sql` 641, `90_privacy_intake.sql` 191 and
+`92_takedown_and_oversight.sql` 208, each with the same number of `NOTICE:  PASS` lines as its reported
+total — and the slice-3 logs beside the numbers below (`s11-s3-st11qual_authority3-80_operator_authority.txt`,
+`s11-s3-authority3-85_support_lifecycle-2.txt`, `s11-s3-authority3-90_privacy_intake-2.txt`) are kept
+because those are the runs in which each cell first went green. A battery's number is re-measured at each
+head, not inherited: the 137, 641 and 191 are the same figures at both heads because slice 4 moved
+*figures* inside those files rather than adding cells — `85_support_lifecycle.sql`'s own census cells S09,
+S10 and S10b now read 40 / 60 / 52, where the slice-3 log records the same three cells reading 36 / 55 / 48
+— and `p:` ids are still plans. The families `80_operator_authority.sql` actually measures are
 `A01-A26b` (the state the migrations ship, then every privilege refusal role by role), `R01-R17` (the
 shape of what the two bodies refuse to write), `W01-W15b` (the success path, grant and revocation),
 `T01-T11c` (`actor_is_operator`'s truth table), `K01-K09b` (the grant row's own CHECKs and its partial
 unique index, reachable only by a hand plant), `AI01-AI24` (the trail) and `Z02-Z07b` (the census; `Z01`
 prints the CENSUS line rather than a PASS, which is why the two numbers agree rather than differ).
 `85_support_lifecycle.sql` measures the support lifecycle through its own `s11b` helpers and
-`90_privacy_intake.sql` the privacy intake through `s11q`. A slice-1 id in the table below is read from
-`80_operator_authority.sql` by long-standing convention; a cell from either later battery names its file
-beside the id, because the letter vocabularies overlap.
+`90_privacy_intake.sql` the privacy intake through `s11q`. `92_takedown_and_oversight.sql` runs through
+`s11t` and in eight groups, each of which owns a letter: `T01-T29` (what the migration ships, before this
+file writes a row — columns, CHECKs, the four FK delete rules, the five triggers, the RLS-with-no-policy
+posture, the zero client grants, and the three schema censuses T14/T15/T16), `P01-P12` (the plant it built,
+and the digests every later group re-reads), `K01-K51` (the plan door, the takedown's effect set, its
+credential and artefact half, its replay anchor and the second wedding it must not touch), `U01-U27` (the
+purge planner: its zero-grant exposure, the four preconditions, and the wall that refuses it a browser),
+`Q01-Q22c` (the refund queue as a read that cannot become a verb), `N01-N30` (the note door, its derived
+`order_id`, its replay and its thread), `O01-O16` (the walls around the note and what survives its author)
+and `Z01-Z14` (the census read both ways — and unlike slice 1's `Z01`, this file's is a measured cell, so
+its 208 is 208 PASS lines with no CENSUS line excluded). A slice-1 id in the table below is read from
+`80_operator_authority.sql` by long-standing convention; a cell from any later battery names its file
+beside the id, because the letter vocabularies overlap — which slice 4 proves rather than illustrates, since
+`T` is slice 1's predicate family, slice 2's shape group and slice 4's own, and `Q` is slice 2's queue and
+slice 4's queue.
 
-Three consequences of measuring rather than planning, all recorded here because a later slice would
+Four consequences of measuring rather than planning, all recorded here because a later slice would
 otherwise inherit them silently. First, the letter `R` was allocated in this section to refund oversight
 and `T` to takedown before either battery existed, and slice 1 needed both letters for grant validation
 and the predicate — so the rule was that later batteries take letters the first battery does not own
-(`A`, `R`, `W`, `T`, `K`, `AI` and `Z`). Slice 2 and slice 3 then reused `A`, `R`, `S`, `D` and `Z`
-anyway, because two batteries written a slice apart converge on the alphabet; the rule is withdrawn and
-the convention that replaces it is that a citation names the battery file beside the cell id. Second, one
+(`A`, `R`, `W`, `T`, `K`, `AI` and `Z`). Slice 2, slice 3 and slice 4 then reused letters anyway, because
+batteries written a slice apart converge on the alphabet; the rule is withdrawn and the convention that
+replaces it is that a citation names the battery file beside the cell id. The collision is now measured
+rather than conceded: of the twenty-one letters the four batteries use, twelve are shared — `A` and `R` in
+batteries 1–3, `G`, `S`, `V` and `X` in 2 and 3, `K` in 1 and 4, `O` in 2 and 4, `P` in 2–4, `Q` in 3 and 4,
+`T` in 1, 2 and 4, and `Z` in all four — and nine belong to exactly one file: `AI` and `W` to slice 1, `C`
+and `L` to slice 2, `D`, `H` and `M` to slice 3, `N` and `U` to slice 4.
+`q11-logs/s11-s4-letter-collision-1.txt` is the census, taken from the four battery files' own first
+arguments. Second, the
+file's own number moved: this section planned `90_takedown_and_oversight.sql`, and `90_` was already taken
+by slice 3's privacy battery, which the same `authority` chain runs before this one and in the same glob
+(`supabase/tests/stage11/run.sh:247-251` now records the arrival — `85_`, `90_` and `92_` — and leaves only
+slice 5's `95_` as a plan). A fourth battery therefore had to arrive
+between `90_` and the still-unwritten `95_`, and the order is load-bearing rather than cosmetic — group P
+inherits tickets, threads, grants and trail rows from batteries 1–3 on that one chain, which is exactly why
+P10, P11 and Z10 count the plant's own five case ids instead of `private.support_cases`, and why the money
+and artefact absolutes in O15 *can* be cluster-wide: no battery before this one writes a refund. Third, one
 planned control turned out to be partly false and the measurement is what found it: the audit-rewrite row
 below carries `AI11` as the *limit* of the control rather than as a pass, and both `40_catalog.sql`'s
 `C15` and Stage 10's `N04b` had to be re-measured because this stage **removes** a privilege rather than
 adding one — a direction neither instrument was written to see, and §15 and §17 record both repairs.
-Third, the cell count is not the assertion: `90_privacy_intake.sql`'s 191 includes `M21`–`M22`, whose
+Fourth, the cell count is not the assertion: `90_privacy_intake.sql`'s 191 includes `M21`–`M22`, whose
 twenty probes all roll back, so a green total is only meaningful beside the census `Z01`–`Z12` that reads
 the surviving state back.
 
 | Threat | Control | Cases |
 | --- | --- | --- |
-| Anonymous caller reaches any operational surface | `private` not in `config.toml:32`; zero `anon` EXECUTE on every new wrapper | `M:` `A09`, `A10` (the grant table refused at the schema layer, before any object check runs), `A17` (the predicate unreachable), `A20`, `A23` (both bodies unreachable). `p:` HTTP `A-01`, `H-05`, and the `C28a`/`API33` re-runs |
-| A signed-in host operates on someone else's wedding | ownership re-derived from `auth.uid()` in every body; one shared SQLSTATE and sentence for "not yours"/"not there" | `M:` no slice-1 cell exists for this row, because the grant table is account-scoped and no wedding is involved — and the row is kept rather than dropped so the reader can see which arm is still only a claim. The adjacent measured refusals are `A11`, `A12`, `A21`, `A24`. `85_support_lifecycle.sql` `X00`–`X32` and `90_privacy_intake.sql` `X01`–`X06` are the case and privacy halves: a foreign wedding and an invented one answer identically, a host citing somebody else's request is refused, and the other kind on the host's own wedding is allowed because ownership, not the queue, is the scope. `p:` the takedown battery, HTTP `C-04`, `T-03`, `V-03` |
-| A signed-in host operates on **their own** wedding without operator status | `actor_is_operator` before any scope work; the table has no client grant to write | `M:` `A18` (the host is refused before the predicate is entered), `T01`-`T05`, `T07`, `T08` (no session, an account holding nothing, a uuid that is no account, an unknown duty word, a NULL, and the scopes never granted — all answer false rather than raising), `T10` (the human who minted every grant holds nothing themselves), `T11` (a live row past its expiry answers false). `p:` HTTP `A-02`, `A-03`, `T-01` |
-| Self-granting operator scope | no surface at all: zero EXECUTE on `internal_api.grant_operator_role` for every role, RLS with no policy, `reject_client_write`; reachable only from `postgres` | `M:` `A02`, `A02b` (RLS enabled with zero policies, which is the pair that makes the posture mean something), `A03` (no DML for any role a request can arrive as, server key included), `A05`, `A05b` (`internal_api` only, no `api` twin), `A20`-`A25` and `AI02` (both bodies, three roles, then the whole matrix), `A26`, `A26b` (and the count is still zero), `K01`-`K09b` (eight hand plants refused), `Z03`, `Z04`. `p:` HTTP `A-04`, `A-05`, unit `OD-12` |
-| Forgery of the actor in an audit row | §4's split, not one rule: no client-reachable callable takes an actor id, while the two service-only bodies do take `p_actor_user_id` — protected by the role that is the only one able to reach them, and by a refusal of any decider that names no account | `M:` `R05`, `R06`, `R12` (beneficiary and decider both checked against `auth.users`, on each side), `W04`, `W04b` (the audit actor and the grant's subject are different columns, and the kind is `maintenance`), `AI15`-`AI18`, `AI22`. `p:` HTTP `AI-1`, `C-09` |
-| Audit rewritten or deleted after the fact | `reject_audit_update_except_referential_null` on `private.audit_events` refuses every rewrite by every role including its own owner, with one measured hole: an attribution link going to NULL from inside the database's own referential trigger at depth 2. UPDATE and DELETE are both revoked from `service_role` | `M:` `A08`-`A08c`, `AI01`-`AI10` (six refused mutations, then the whole trail digests identically and the row they aimed at re-reads byte-identical), `AI12b`; `85_support_lifecycle.sql` T51 (a hand nulling `actor_user_id` at depth 1 is refused) and T-RI2f/T-RI2g (the erase of the named account nulls the link, moves no other byte, and deletes no row). **`AI11`/`AI11b` is the limit of the control, measured rather than glossed**: `service_role` keeps INSERT — it must, or 29 existing audit-writing sites stop working — so the cell requires a forged append to *succeed*, and the owner's DELETE is `AI12`. `p:` HTTP `AI-2`, `AI-3` |
-| Duplicate or replayed operator action | `audit_events.idempotency_key` unique; each body pre-reads the key and returns the recorded answer; second delivery acts on nothing; the privacy create door's anchor is the live row itself, because it takes no key | `M:` `AI13` (a second delivery of one key collides with the partial unique index), `AI14` (two keyless rows still coexist, which is the other half), `AI21` (an over-long key is refused with its own bound), `W08`, `W08b`, `W14`, `W14b` (a duplicate grant and a double revocation each refuse without writing), `85_support_lifecycle.sql` `R` group (the case queue's replay), `90_privacy_intake.sql` `H01`–`H03b` (a live duplicate answers `replayed = true` and writes no row) and `R01`–`R10b` (one key, one audit row; the replay reads the recorded answer and moves neither the request nor the trail). `p:` HTTP `C-07`, `T-05`, race `RD00`-`RD07` — **the race tier is where the concurrency claim lives and it has not run, so this row does not yet carry one** |
-| Race: two operators take the same wedding down at once | one active publication per wedding, `FOR UPDATE` on the publication row, the state machine's terminal `revoked`, one idempotency namespace | `p:` race tier `RC00`-`RC09` (two live sessions), asserted once both committed. Slice 1 has no publication surface to race |
-| Race: an action against a grant revoked mid-flight | `actor_is_operator` re-read inside the same transaction that acts, after `SELECT … FOR UPDATE` on the grant row | `p:` race tier `RC10`-`RC16`. Slice 1 measures the serial halves (`T11`, `W12`, `W12b`) and cannot see a second session at all |
+| Anonymous caller reaches any operational surface | `private` not in `config.toml:32`; zero `anon` EXECUTE on every new wrapper | `M:` `A09`, `A10` (the grant table refused at the schema layer, before any object check runs), `A17` (the predicate unreachable), `A20`, `A23` (both bodies unreachable). Slice 4 opens four more doors and closes all of them at the same layer: `92_takedown_and_oversight.sql` `K01` (anon cannot even reach the plan), `Q01` (nor the refund queue), `N01` (nor the note door) and `U01`-`U05` (the purge holds EXECUTE for nobody — `U02` refuses the very operator whose grant was revoked, `U03`/`U03b` stop the service role one wall earlier than the client roles, `U04` measures that there is no `api` wrapper to route around, `U05` reads the access list itself). The cluster-wide half is `40_catalog.sql` `C28a`, re-run at this head against a schema containing slice 4 (`q11-logs/s11-s4-historic-1603.txt`). `p:` HTTP `A-01`, `H-05`, `API33`/`API34` |
+| A signed-in host operates on someone else's wedding | ownership re-derived from `auth.uid()` in every body; one shared SQLSTATE and sentence for "not yours"/"not there" | `M:` no slice-1 cell exists for this row, because the grant table is account-scoped and no wedding is involved — and the row is kept rather than dropped so the reader can see which arm is still only a claim. The adjacent measured refusals are `A11`, `A12`, `A21`, `A24`. `85_support_lifecycle.sql` `X00`–`X32` and `90_privacy_intake.sql` `X01`–`X06` are the case and privacy halves: a foreign wedding and an invented one answer identically, a host citing somebody else's request is refused, and the other kind on the host's own wedding is allowed because ownership, not the queue, is the scope. `92_takedown_and_oversight.sql` measures the same refusal on the four doors slice 4 opens: `K02` (a wedding's own host, authenticated and holding no grant, is refused the plan) and `K03` (the hostile caller gets that same sentence, not a different one), `Q02`/`Q03` (a host cannot see the refund ledger it is standing in, nor can a stranger, in one sentence), `N02` (the refund's own host is refused a note) and `N06` (another wedding's ticket cannot carry a note about this wedding's refund). The scope half is measured too: `K20` refuses another wedding's ticket cited against this wedding, `K35`/`Z14` prove no credential outside the two weddings this file takes down was revoked, and `K47`/`K48` keep one operator's act on the wedding it cited. `p:` HTTP `C-04`, `T-03`, `V-03` |
+| A signed-in host operates on **their own** wedding without operator status | `actor_is_operator` before any scope work; the table has no client grant to write | `M:` `A18` (the host is refused before the predicate is entered), `80_operator_authority.sql`'s `T01`-`T05`, `T07`, `T08` (no session, an account holding nothing, a uuid that is no account, an unknown duty word, a NULL, and the scopes never granted — all answer false rather than raising), `T10` (the human who minted every grant holds nothing themselves), `T11` (a live row past its expiry answers false). Slice 4 reaches the same owner from four directions and refuses all four: `92_takedown_and_oversight.sql` `K02` (the wedding's own host, authenticated, holding no grant, cannot even plan a takedown), `Q02` (cannot read the refund queue), `N02` (cannot annotate its own refund) and `N04`-`N08` (a refund id that names no row, a guessed ticket ref, another wedding's ticket, a parked and a resolved case all answer in the same sentence, so the door cannot be used to probe what exists). `p:` HTTP `A-02`, `A-03`, `T-01` |
+| Self-granting operator scope | no surface at all: zero EXECUTE on `internal_api.grant_operator_role` for every role, RLS with no policy, `reject_client_write`; reachable only from `postgres` | `M:` `A02`, `A02b` (RLS enabled with zero policies, which is the pair that makes the posture mean something), `A03` (no DML for any role a request can arrive as, server key included), `A05`, `A05b` (`internal_api` only, no `api` twin), `A20`-`A25` and `AI02` (both bodies, three roles, then the whole matrix), `A26`, `A26b` (and the count is still zero), `80_operator_authority.sql`'s `K01`-`K09b` (eight hand plants refused) and `Z03`, `Z04`. Slice 4 adds the doors a self-granted scope would need: `92_takedown_and_oversight.sql` `U01`-`U05` (the purge is executed by nobody — not anon, not the operator whose grant was revoked, not the service role, and there is no `api` wrapper to route around, because its access list grants EXECUTE to nobody but the owner), `T11` (twelve of twelve role/verb pairs on the oversight table are false), `O01`-`O04` (a client role cannot insert, edit or delete a note and neither can the table's owner, whose hand is refused by the append-only trigger rather than a privilege), and `K04`/`K05` (a live grant in the wrong scope and a revoked `operations` grant are refused in the same sentence as no grant at all). `p:` HTTP `A-04`, `A-05`, unit `OD-12` |
+| Forgery of the actor in an audit row | §4's split, not one rule: no client-reachable callable takes an actor id, while the three service-only bodies this stage wrote do take `p_actor_user_id` — the grant pair and slice 4's purge planner — protected by the role that is the only one able to reach them, by a refusal of any decider that names no account, and by `40_catalog.sql` C29c-b holding the whole identity-taking set closed at nine names (six commerce, two operator-grant, one purge) with EXECUTE false for every browser role on each | `M:` `80_operator_authority.sql` `R05`, `R06`, `R12` (beneficiary and decider both checked against `auth.users`, on each side), `W04`, `W04b` (the audit actor and the grant's subject are different columns, and the kind is `maintenance`), `AI15`-`AI18`, `AI22`; slice 4's half is `92_takedown_and_oversight.sql` `U06`/`U07` (the purge refuses a NULL actor and an id that names no account *separately*, because the second is a forged attribution and the first is merely an anonymous one), `U08`-`U10` (a wrong-scope grant, a revoked grant and a finance reviewer all fail to name an actor), `U16` (the trail row takes its decider from the argument, since this channel has no session to read) and `O07` (a note that names no author cannot be inserted at all). `p:` HTTP `AI-1`, `C-09` |
+| Audit rewritten or deleted after the fact | `reject_audit_update_except_referential_null` on `private.audit_events` refuses every rewrite by every role including its own owner, with one measured hole: an attribution link going to NULL from inside the database's own referential trigger at depth 2. UPDATE and DELETE are both revoked from `service_role` | `M:` `A08`-`A08c`, `AI01`-`AI10` (six refused mutations, then the whole trail digests identically and the row they aimed at re-reads byte-identical), `AI12b`; `85_support_lifecycle.sql` T51 (a hand nulling `actor_user_id` at depth 1 is refused) and T-RI2f/T-RI2g (the erase of the named account nulls the link, moves no other byte, and deletes no row). **`AI11`/`AI11b` is the limit of the control, measured rather than glossed**: `service_role` keeps INSERT — it must, or 29 existing audit-writing sites stop working — so the cell requires a forged append to *succeed*, and the owner's DELETE is `AI12`; the revocation itself is re-read at this head from `pg_proc`-adjacent ACLs in `q11-logs/s11-s4-doc-probe-1.txt` section G (`service_role`: UPDATE false, DELETE false, INSERT true). Slice 4 holds the same line from the other side: `92_takedown_and_oversight.sql` `K38`/`K39` (one trail row per act, in the shape §4 requires, with a before/after pair that is a single-field object), `K46` (a refusal leaves no trail row behind), `U23` (the two append-only stores grow by exactly one row each for an accepted act and no more), `N19` (the note's before/after pair is the *same* value, which is what "the refund kept its history" means) and the group `Z03`-`Z06` census, which reads the ledger and the trail against each other both ways and shows the four replays in this file wrote no trail row at all. `p:` HTTP `AI-2`, `AI-3` |
+| Duplicate or replayed operator action | `audit_events.idempotency_key` unique; each body pre-reads the key and returns the recorded answer; second delivery acts on nothing; the privacy create door's anchor is the live row itself, because it takes no key | `M:` `AI13` (a second delivery of one key collides with the partial unique index), `AI14` (two keyless rows still coexist, which is the other half), `AI21` (an over-long key is refused with its own bound), `W08`, `W08b`, `W14`, `W14b` (a duplicate grant and a double revocation each refuse without writing), `85_support_lifecycle.sql` `R` group (the case queue's replay), `90_privacy_intake.sql` `H01`–`H03b` (a live duplicate answers `replayed = true` and writes no row) and `R01`–`R10b` (one key, one audit row; the replay reads the recorded answer and moves neither the request nor the trail). `92_takedown_and_oversight.sql` measures the replay on each of its three doors and on the key as one namespace: `K26` (a takedown with no key is refused — two clicks on one wedding must take it down once), `K42`/`K43`/`K44` (the same key is answered again with the *first* delivery's payload, reason and audit id, and writes nothing — one trail row, one event row, and nothing else moved), `K45`/`K46` (a fresh key on an already-down wedding is refused by the state rather than the key and leaves no trail row), `U11` + `U21`/`U22` (the purge planner requires its own key, re-plans under it with a current key list, and grows neither store), `N12` + `N21`/`N22` (a note with no key is refused; one key is one note), and `N27`-`N29`, the half the naive design misses — a key already spent on another refund, another body or another act is *refused* rather than answered with somebody else's recorded result, and the collision is symmetric across the three bodies. `Z06` closes the row: the four replays this file ran wrote no trail row at all. `p:` HTTP `C-07`, `T-05`, race `RD00`-`RD07` — **the race tier is where the concurrency claim lives and it has not run, so this row does not yet carry one** |
+| Race: two operators take the same wedding down at once | one active publication per wedding, `FOR UPDATE` on the publication row, the state machine's terminal `revoked`, one idempotency namespace | `M:` the serial half only, because slice 1 has no publication surface to race and slice 4's battery is one session — so what it can prove is the state machine, not the second session: `92_takedown_and_oversight.sql` `K26` (no key ⇒ refused, so two clicks cannot be two acts), `K42`-`K44` (a second delivery of one key answers the first payload and moves nothing), `K45`/`K46` (the state is the second lock: a new key on a wedding already down is refused by the publication's own state, not by the key, and writes no trail row), `U25` (one idempotency key cannot be spent on two weddings) and `Z11` (the file retires exactly the two publications it claims and no third). `p:` race tier `RC00`-`RC09` (two live sessions), asserted once both committed — **two operators committing at once is still unmeasured, and no cell in this row claims it** |
+| Race: an action against a grant revoked mid-flight | `actor_is_operator` re-read inside the same transaction that acts, after `SELECT … FOR UPDATE` on the grant row | `M:` slice 1 measures the serial halves (`80_operator_authority.sql` `T11`, `W12`, `W12b`) and cannot see a second session at all; slice 4 measures its own three, where a revoked grant is the mid-flight event it can actually stage: `92_takedown_and_oversight.sql` `K05` (a revoked `operations` grant is refused the same sentence as no grant at all), `U02` (the very operator who held the live grant cannot execute the purge once it is gone), `U09`/`U10` (a revoked grant and a money-only scope both fail to name an actor for the planner) and `U26` (five refusals of this body leave the grant table byte-identical — reading authority cannot spend it). `p:` race tier `RC10`-`RC16` |
 | Stale tab transitions a case twice | trigger-compared OLD/NEW edge table, per-case `seq`, and `SELECT … FOR UPDATE` on the case inside every mutating body. The design's `p_expected_status` argument did not ship: `operator_transition_case` takes no status it expects, so the serialisation is the row lock plus the edge table rather than an optimistic check | `M:` `85_support_lifecycle.sql` T06, T12, T30–T40 (the edge machine's own refusals). `p:` HTTP `C-05`, `C-06`, and the race tier — a second tab is a second session, and no two-session SQL or HTTP case exists yet |
-| Takedown claimed to kill a file link it does not kill | §6's split; purge is a separate, unexposed, twice-confirmed act; the answer text names its own limit | `p:` slice 4's battery — read with the battery file beside its letters, because `T` is also slice 1's predicate family — HTTP `T-06`..`T-09` measuring signed-URL status **before and after** each half, unit `OD-20`..`OD-24` |
-| Takedown of the wrong wedding, or an id-guessing operator | `wedding_id` of the target must equal the case's; composite FKs cannot re-parent; case ref is `SV-` + 8 random base32 | `p:` slice 4's battery, HTTP `T-02`, `T-04` |
-| Takedown leaves a guest roster reachable | the existing credential revocation set is reused, not re-derived (`20261009120000_stage8_guest_invitations_rsvp.sql:1087-1090`); household and wedding kinds both go | `p:` slice 4's battery, HTTP `T-10`, and the Stage 8 guest suite re-run green — which the Stage 11 head did run, in `q11-logs/s11-regress-1.txt` |
-| Refund queue used to move money | no insert/update on `commerce_refunds` from any Stage 11 body; notes only; policy singleton untouched | `p:` slice 4's oversight cells (`R` is also slice 1's refusal-to-write family, so the citation names the file), HTTP `R-01`..`R-07`. The census half of this row is measured: `q11-logs/s11-historic-5.txt` prints `POLICY=permissive GATE_PACKAGES=0 LIVE_CAPTURE=false` at the slice-1 head, and Stage 10's `N04b` re-measures the trail's DELETE posture against it |
-| Cross-wedding leak through a support note, or a credential/PII surfacing in an operator projection | host/operator message kinds are separate arms; projections are field-built; battery greps every returned value and every audit column for a token digest, an email, an object key | `M:` the projection half only, and only as shape: `W01` (a grant answer is seven named fields, not the row), `W11` (six), `W06`, `W06b`, `W07`, `W07b` (the payload is built field by field), and `s11a_gstate`/`s11a_adigest` proving a refused path left nothing. `p:` the note arms, HTTP `C-10`, `R-08`, `H-03`, unit `OD-30`-`OD-34` |
-| Erasure request silently deleting data | no Stage 11 body contains a DELETE; every FK this stage adds to `public.weddings` is NO ACTION, and the seven it adds to `auth.users` are SET NULL except the credential subject, which cascades so a duty cannot outlive its holder; a cell performs each attempt and counts rows, threads and trail bytes before and after | `M:` `85_support_lifecycle.sql` T-RI1/T-RI2 (erasing an account nulls the ticket's attribution links and every trail row's actor, and deletes no ticket, thread row or trail row), T72 (a wedding a ticket names refuses deletion on `support_cases_wedding_id_fkey`, with the corrected control in `q11-logs/s11-probe-fk-null-control.txt`), T45-T47 (only a ticket with no history at all is deletable, by the trusted channel, and the deletion is measured as one row), T65-T70 (the credential cascades with its subject while her acts are nulled rather than removed), Z06-Z08 (the census after two erasures). `90_privacy_intake.sql` is slice 3's half: `S14` scans all four bodies for a DELETE, `D01`–`D10` refuse the hand plants and both client DELETEs, `D11`–`D12` refuse the parent delete on `privacy_requests_wedding_id_fkey`, `D13`–`D15` erase the requester and read the surviving request back from a new physical tuple, `D17`–`D21` erase the operator and read the intact requests, trail and cascaded credential back, and `Z01`–`Z12` close on thirteen requests with exactly one NULL requester. `40_catalog.sql` `C46` re-measures the ON-DELETE inventory at the head; `AI12` records that a trusted role can still prune the trail. `p:` HTTP `V-04`-`V-07` |
+| Takedown claimed to kill a file link it does not kill | §6's split; purge is a separate, unexposed, twice-confirmed act; the answer text names its own limit | `M:` `92_takedown_and_oversight.sql` — read with the battery file beside its letters, because `T` is also slice 1's predicate family — `K30` (the answer reports the two credentials and the two artefacts it *reached*, not the three credentials and six artefacts on the wedding, which is the difference between a count of the effect and a count of the rows), `K31` (`file_links_still_valid_until_object_purge` is a field of the answer, so the door states its own limit instead of letting the operator infer it), `K37` (the objects those artefacts name are still in the bucket: five before the takedown, five after), `K49` (nothing was deleted by any of the file's acts), `U13`/`U17` (the planner's twelve fields include `delete_channel` and `objects_deleted_by_this_call`, so a plan is never mistaken for an erasure) and `U18`/`U19` + `Z08` (the bucket is counted before and after the plan and never changes size across the whole file). The absence is structural as well as counted: `q11-logs/s11-s4-doc-probe4-1.txt` section S6 finds no `DELETE FROM` clause in any of the seven privileged bodies this stage wrote. `p:` HTTP `T-06`..`T-09` measuring signed-URL status **before and after** each half, unit `OD-20`..`OD-24` |
+| Takedown of the wrong wedding, or an id-guessing operator | `wedding_id` of the target must equal the case's; composite FKs cannot re-parent; case ref is `SV-` + 8 random base32 | `M:` `92_takedown_and_oversight.sql` `K19`/`K20` (a ref that exists nowhere, and another wedding's ticket cited against this wedding, refuse in the same sentence, so the door is not an existence oracle), `K21`/`K22` (nor does a ticket parked on the host as `awaiting_information`, nor a resolved one — a finished ticket is the record of an act that already happened), `K23` (four ways to fail, one sentence, and nothing in the trail), `K24`/`K25` (an invented reason and no reason at all are refused by name and the five real ones are listed), `K27` (the authority question is answered before any of the others, so a caller missing the grant cannot probe the wedding half), `K47`/`K48` (the same operator citing the other wedding, and its effect stayed on that wedding), `P11` (every ref this file cites was minted by the database and matches its own shape — the `SV-` + 8 base32 space is measured, not assumed), `U25`/`U27` (a key spent on one wedding cannot buy a plan on another, and a wedding whose takedown this file has not recorded still cannot be purged) and the census `Z11`/`Z14` (exactly the two claimed publications retired; no credential outside those two weddings revoked). `p:` HTTP `T-02`, `T-04` |
+| Takedown leaves a guest roster reachable | the existing credential revocation set is reused, not re-derived (`20261009120000_stage8_guest_invitations_rsvp.sql:1087-1090`); household and wedding kinds both go | `M:` `92_takedown_and_oversight.sql` `K32`-`K35` (the publication retires; the two credential kinds on this wedding are both revoked; the credential that was already retired keeps its original timestamp instead of a fresh stamp; one credential of another wedding is not touched at all), `K36` (the two ready rows of the published version are invalidated while the registered, uploading, failed, superseded and other-wedding rows stay exactly where they were) and the census `Z12`/`Z14` (every invalidated artefact carries the reason the door gave, and no credential outside the two taken-down weddings revoked) — with `P06` the plant's own kind-and-revocation ledger those cells are read against. The Stage 8 guest suite re-ran green at this head on the `regress` chain: `stage 8 80_guest_invitation_links` 182 and `90_guest_rsvp` 185 (`q11-logs/s11-s4-regress-1615.txt`). `p:` HTTP `T-10` |
+| Refund queue used to move money | no insert/update on `commerce_refunds` from any Stage 11 body; notes only; policy singleton untouched | `M:` `92_takedown_and_oversight.sql` proves the read-only posture from both ends. From the door: `Q04` (the operator who took two invitations down this morning cannot read the ledger — `operations` is not `finance`), `Q07` (the answer says it moves no money and changes no entitlement, beside a row count read from the money tables), `Q20` (six queue reads later every digest this file froze before the first act is still equal) and `Q21` (the `commerce_policy` singleton is not reachable through this door either). From the data: `N15` (the note's four flags all point one way — look, not touch), `N20` (annotating writes one event row on the ticket and moves no status on it), `N30` (four notes written and the money byte-identical to the state the plant left), `K50`/`K51` (a takedown leaves the money untouched in every sense the schema can express, and the only tables that grew are the trail and the thread), `O08`-`O10` (the refund, the order and the ticket a note cites cannot be deleted out from under it) and `Z09`/`Z10` (no refund digest moved and no case status moved anywhere in this file). `T05` is the delete-rule inventory the row rests on: three parents refuse their own delete and only the author's link goes NULL. `p:` HTTP `R-01`..`R-07`. The older census half of this row is measured at the slice-1 head: `q11-logs/s11-historic-5.txt` prints `POLICY=permissive GATE_PACKAGES=0 LIVE_CAPTURE=false`, and Stage 10's `N04b` re-measures the trail's DELETE posture against it |
+| Cross-wedding leak through a support note, or a credential/PII surfacing in an operator projection | host/operator message kinds are separate arms; projections are field-built and each field list is named by a `keys` cell; and the batteries scan for the **absence** of what must not appear — a value planted where only the other side may read it, then looked for in the answer text | `M:` shape first: `80_operator_authority.sql` `W01` (a grant answer is seven named fields, not the row), `W11` (six), `W06`, `W06b`, `W07`, `W07b` (the payload is built field by field), and `s11a_gstate`/`s11a_adigest` proving a refused path left nothing. Then the absence scans, which are the half that can actually fail: `85_support_lifecycle.sql` `X03`-`X06` (three operator-arm rows planted by hand into a thread a host cannot see, the host's payload byte-identical after the plants, and none of the three arm names appearing anywhere in it — the filter is a `WHERE`, not a label the client hides), `X07` (the internal note's own sentence is absent, and that note names the host's address), `X30`/`X31` (an address appears exactly once where it belongs and the thread of that ticket holds none), and `92_takedown_and_oversight.sql` `U14`/`U15` (the three object keys go to the caller and *only* to the caller: none appears in the stored trail payload, and neither key shape appears there even as a pattern — `p/<43>` and `outputs/` both scanned) and `Q10`/`Q11` (the order half is six named fields; no `entitlement_id`, no `owner_user_id` at any level, and neither order owner's account uuid appears anywhere in the answer text). What is **not** shipped is a sweep of every returned value of every door for every PII class; the scans above are per-arm and named, and an unmeasured projection would be caught by the field lists rather than by a pattern. `p:` HTTP `C-10`, `R-08`, `H-03`, unit `OD-30`-`OD-34` |
+| Erasure request silently deleting data | no Stage 11 body contains a DELETE; every FK this stage adds to `public.weddings` is NO ACTION, and the eight it adds to `auth.users` are SET NULL except the credential subject, which cascades so a duty cannot outlive its holder (`q11-logs/s11-s4-doc-probe-1.txt` sections D and E name all eight edges and their delete rules; `private.audit_events.actor_user_id` and Stage 10's `commerce_orders.owner_user_id` sit in the same catalog listing but are not counted, because those tables predate the stage); a cell performs each attempt and counts rows, threads and trail bytes before and after | `M:` `85_support_lifecycle.sql` T-RI1/T-RI2 (erasing an account nulls the ticket's attribution links and every trail row's actor, and deletes no ticket, thread row or trail row), T72 (a wedding a ticket names refuses deletion on `support_cases_wedding_id_fkey`, with the corrected control in `q11-logs/s11-probe-fk-null-control.txt`), T45-T47 (only a ticket with no history at all is deletable, by the trusted channel, and the deletion is measured as one row), T65-T70 (the credential cascades with its subject while her acts are nulled rather than removed), Z06-Z08 (the census after two erasures). `90_privacy_intake.sql` is slice 3's half: `S14` scans all four bodies for a DELETE, `D01`–`D10` refuse the hand plants and both client DELETEs, `D11`–`D12` refuse the parent delete on `privacy_requests_wedding_id_fkey`, `D13`–`D15` erase the requester and read the surviving request back from a new physical tuple, `D17`–`D21` erase the operator and read the intact requests, trail and cascaded credential back, and `Z01`–`Z12` close on thirteen requests with exactly one NULL requester. `40_catalog.sql` `C46` re-measures the ON-DELETE inventory at the head; `AI12` records that a trusted role can still prune the trail. Slice 4's half is the note and its author: `92_takedown_and_oversight.sql` `O11` (the author's account can still be erased — the require-an-author rule is an INSERT trigger, not a CHECK, so deleting a reviewer never makes the record impossible to delete), `O11b` (and the erasure is not cost-free: `operator_grants.user_id` is ON DELETE CASCADE, so removing a person removes their duties with them, measured rather than assumed), `O12`-`O14` (the note survives with every other byte identical, its trail row and its event row survive too, and the note is still readable and still attributed to its ticket and its kind), `O15`/`O16` (nothing else disappeared in that group — the ledger, the artefacts, the credentials — and the erasure did not touch the money) and `T05` + `O08`-`O10` (three of the note's four parents refuse their own delete, and only the author's link goes NULL). The no-DELETE claim is now read from the catalog rather than inferred from four bodies: `q11-logs/s11-s4-doc-probe4-1.txt` section S6 scans all seven privileged bodies this stage wrote and finds none. `p:` HTTP `V-04`-`V-07` |
 | Health numbers that are decoration | every block carries `status: measured\|not_measured` and its own newest-row timestamp; three blocks are `not_measured` by construction | `p:` slice 5's `95_operations_health.sql` (each figure computed and re-computed by an independent query in the battery), HTTP `H-01`-`H-06` |
-| A service-role key in the tool, a log, or a bundle | CLI takes an account password through `--secret-env` only; `assertSecretFree`; `service-role-key-in-browser-code` unchanged in `src/`; a new product-contract rule (`operator-rpc-referenced-outside-cli`) refuses any `src/` mention of an `operator_*` name, self-tested | `M:` `A05b` and `A13`-`A16` are the SQL half of the same promise — there is no `api` wrapper to call and the server key can neither read who holds authority nor write, resurrect or erase a credential. `p:` unit `OD-40`-`OD-46`, `npm run product:check`, `npm run bundle:check`, HTTP `A-06` |
-| A new migration quietly exposing a `private` operational table | `40_catalog.sql` inventories widened behind a stage11 branch, `check-db-contract.mjs` `NON_CLIENT_SCHEMAS`, `API33`/`API34` name lists | `M:` `C06` names `privacy_requests` inside a twelve-table `private` inventory, `C15` still measures reach, `C26` reads 40 definers, `C26d`/`C26f` read 36 paired wrappers, `C28b` names all fourteen callables the stage exposes, `C31` carries the six privacy triggers, `C46` and `C48` the two new edges, and the file closes at 106 assertions (`q11-logs/s11-s3clean-40_catalog.txt`); `A06a`-`A06c` prove the *declared* surface did not move. `p:` `API33`/`API34` |
-| Privilege granted by hiding links rather than by the database | §10: no admin route, no admin component, and the denial matrix is run at the wire for all four caller classes | `M:` `A05b` — no slice-1 name exists on `api` at all, so there is no URL to hide behind, and the authority claim is therefore entirely a grant claim. `p:` every HTTP `A-*`, `C-*`, `T-*`, `R-*`, `V-*` refusal paired with the operator's success control |
+| A service-role key in the tool, a log, or a bundle | CLI takes an account password through `--secret-env` only; `assertSecretFree`; `service-role-key-in-browser-code` unchanged in `src/`; a new product-contract rule (`operator-rpc-referenced-outside-cli`) refuses any `src/` mention of an `operator_*` name, self-tested | `M:` `80_operator_authority.sql` `A05b` and `A13`-`A16` are the SQL half of the same promise — there is no `api` wrapper to call and the server key can neither read who holds authority nor write, resurrect or erase a credential, four refusals all named `permission denied for table operator_grants`. Slice 4 measured the harder version of the same boundary on the one body this stage could have handed to the server key and deliberately did not: `92_takedown_and_oversight.sql` `U03` stops `service_role` at `permission denied for schema internal_api`, `U03b` reads why the two refusals differ — `internal_api` USAGE is `true`/`true`/`false` for anon/authenticated/service_role, so the browser roles reach the function and are refused there while the server key never reaches it — `U04` counts zero `api` wrappers for the purge, and `U05` asks the database rather than this file and gets three `false`, with the measured ACL literally `{postgres=X/postgres}`: owner only, no PUBLIC half at all. Neither a browser session nor the server key has a wire path to the irreversible act; the tool half can only be measured once §11's CLI exists. `p:` unit `OD-40`-`OD-46`, `npm run product:check`, `npm run bundle:check`, HTTP `A-06` |
+| A new migration quietly exposing a `private` operational table | `40_catalog.sql` inventories widened behind a stage11 branch, `check-db-contract.mjs` `NON_CLIENT_SCHEMAS`, `API33`/`API34` name lists | `M:` `C06` names `commerce_review_notes` among the five `private` tables this stage declares, inside a thirteen-table inventory that `92_takedown_and_oversight.sql` T16 measures independently; `C15` still measures reach; `C26` pins the definer set by name, and the count that set now carries is 46 — five more than slice 3, the figure T17 measures from `pg_proc`; `C26d`/`C26f` read 40 paired wrappers (`40_catalog.sql:1081` and `:1247` both declare 40 at this head); `C29a`'s stage11 arm names all eighteen of the stage's exposed RPCs (ten from slice 2, four from slice 3, four from slice 4) and `C28b` pins the thirty-six-name wrapper-plus-implementation set that goes with them — and `internal_api.operator_purge_publication_objects` is *absent* from both, which is the unexposed body showing up in the catalogue as a measured absence; `C29c-b` holds the identity-taking set closed at nine names; `C31` carries the stage's twenty-six triggers, of which slice 4's five on the review-note row are the newest and all INVOKER; `C46` and `C48` carry the new edges; and the file closes at 106 assertions at this head — `q11-logs/s11-s4-historic-1603.txt` prints `STAGE2 CATALOG TESTS PASSED (106)` twice, once per chain, beside the census `API_NAMES=40 INTERNAL_NAMES=60 PRIVATE_FUNCS=52`. `A06a`-`A06c` prove the *declared* surface did not move. `p:` `API33`/`API34` |
+| Privilege granted by hiding links rather than by the database | §10: no admin route, no admin component, and the denial matrix is run at the wire for all four caller classes | `M:` `80_operator_authority.sql` `A05b` — slice 1's three names have no `api` wrapper at all, so for the authority surface there is no URL to hide behind and the claim is purely a grant claim, which `A13`-`A16` then test against the server key as well. The stage has since chosen to ship a browser-reachable surface, so this row can no longer rest on absence: `40_catalog.sql` `C29a` names eighteen exposed `api` RPCs at this head (ten from slice 2, four from slice 3, four from slice 4) and `C28b` pins the thirty-six-name wrapper-plus-implementation set beside them, which means an exposure is a decision with a name in the catalogue rather than a link that was never clicked. What holds the line is refusal at the door, measured per battery: `92_takedown_and_oversight.sql` `K01`, `Q01`, `N01` run each of its three doors as anon, `U01`/`U02` add the purge and refuse it even to the operator holding a live `operations` grant once that operator is on a session, `85_support_lifecycle.sql` `P01`-`P03` and `90_privacy_intake.sql` `P01`/`P02`/`Q11` run their own anon arms — the letter `P` is one of the collided ones, which is why the file rides the id — and `80_operator_authority.sql` `A09`/`A10` refuse an anonymous read and an anonymous write of the grant table itself at the schema layer. `p:` every HTTP `A-*`, `C-*`, `T-*`, `R-*`, `V-*` refusal paired with the operator's success control |
 
 ## 14. What Stage 11 refuses to build
 
@@ -562,7 +663,7 @@ and §13 says which of those arms has not run.
 | Refused | Why | The assertion that keeps it refused |
 | --- | --- | --- |
 | an admin/operator page in the browser | the kickoff's own first boundary; the authority-critical surface is provable at the wire and in SQL, and a UI whose door is its URL is the failure mode, not the feature | `src/App.tsx` gains no route; the product-contract rule above fires on any `operator_*` name under `src/`; `bundle:check` finds no operator chunk |
-| an irreversible act reachable over HTTP | §6, and "human/owner-only approval for operations that impact unrelated real customers" | `internal_api.operator_purge_publication_objects` has zero EXECUTE grants and `API33` lists it as service-only |
+| an irreversible act reachable over HTTP | §6, and "human/owner-only approval for operations that impact unrelated real customers" | `92_takedown_and_oversight.sql` `U05` measures the zero: the three roles a browser can arrive as each answer `false` for EXECUTE and the access list is `{postgres=X/postgres}`; `U03`/`U03b` add that the server key has no USAGE on the schema to ask in, `U04` that no `api` wrapper exists, and `U02` that even a live `operations` grant on a session is refused. `p:` `API33` lists it as service-only |
 | a refund, chargeback, capture or entitlement write | Stage 10 §12 and ADR 0008: no provider, no price | §13's refund-queue row; the six commerce tables stay grant-free |
 | destructive erasure | Stage 13 owns retention and identity verification | §13's erasure row; readiness row stays intake-qualified |
 | a rate-limiting, lockout or abuse feature | no application server exists to host one, and §2 measured the absence | the health projection's three `not_measured` blocks; `40_catalog.sql` finds no such table |
@@ -642,6 +743,59 @@ line count equal to its reported total. The first run of each cell that moved is
 rather than deleted: `s11-s3-st11qual_authority3-85_support_lifecycle.txt` is the slice-2 expectation
 failing at 36/55/48, and `s11-s3c-90_review_boundary-1.txt` is `G2` failing before its literal moved.
 
+Slice 4 is the fourth such list, and it moved figures rather than shapes: one table, four browser-reachable
+pairs, five privileged bodies — four mirrors plus the twin-less purge — four private functions and five
+triggers. At the slice-4 head:
+
+- `supabase/tests/stage2/30_migration_empty.sql` — `E01`'s stage11 arm names all five declared tables,
+  `private.commerce_review_notes` last, and because `E02` loops that same list the suite's total moves with
+  it: `STAGE2 CLEAN-CHAIN TESTS PASSED (55)` where slice 3 read 54.
+- `supabase/tests/stage2/40_catalog.sql` — `C06` thirteen `private` tables, `C26` 46 definers, `C26d`/`C26f`
+  forty paired wrappers, `C28b` the thirty-six-name signed-in set with the purge body *absent* from it,
+  `C29a` eighteen exposed RPCs, `C29c-b` still nine identity-taking names, `C31` twenty-six stage triggers,
+  `C46`/`C48` the new edges. The file still closes at 106 assertions — arms widened, no cell added.
+- `supabase/tests/stage3/30_publication.sql` — `G1f` reads sixty `internal_api` bodies and `G1g` grows to a
+  twentieth `unpaired-internal` name, which is slice 4's purge and is the first time that census moved at
+  this stage; `G4` does **not** move, because all four of slice 4's doors take arguments, so the
+  argument-free list is still four names.
+- `supabase/tests/stage4/50_pack_release.sql` — `I1` forty, `I2` sixty (forty twins plus twenty
+  maintenance), `I3` forty-one definers against nineteen INVOKER bodies, `I4`/`I8` 152 real functions,
+  `I9b` 41 with this suite's own probe installed.
+- `supabase/tests/stage5/50_review_binding.sql` — `M5b` forty names.
+- `supabase/tests/stage7/90_review_boundary.sql` — `G2` sixty, `G3` forty and forty, `G3f` the twenty a host
+  cannot call at all.
+- `supabase/tests/stage10/90_commerce_functions.sql` — `R20`'s executor census gains slice 4's review-desk
+  pair, `api` and `internal_api` both.
+- `supabase/tests/stage11/85_support_lifecycle.sql` — `S09`/`S10`/`S10b` read 40 / 60 / 52.
+
+The slice-4 head was swept, and three runs were red before the green one, which is why the red logs are kept
+in `../q11-logs/` rather than dropped. `run.sh authority` first failed inside the new battery itself:
+`q11-logs/s11-s4-authority-1617.txt` prints `P10` reading twelve ticket statuses, because on the shared
+chain the earlier batteries each open tickets of their own — the cell was scoped to the plant's own five
+case ids, not the expectation widened. The green run of the same mode, `q11-logs/s11-s4-authority-1619.txt`,
+reports 137 / 641 / 191 / 208 with PASS-line equality on all four. `regress` was then red twice for the
+reason this section exists to catch — a stale literal in an older suite, not a broken schema:
+`s11-s4-regress-1604.txt` prints Stage 10's `R20` refusing the two new review-desk names and
+`s11-s4-regress2-1608.txt` prints Stage 7's `G1` missing slice 4's four doors from its name list. After both
+literals moved, `bash supabase/tests/stage11/run.sh regress` finished `exit=0` on all four pairs — Stage 10's
+380 and 293, Stage 9's 134 and 94, Stage 8's 182 and 185, Stage 7's 255 and 116
+(`q11-logs/s11-s4-regress-1615.txt`) — and `run.sh historic` finished `exit=0` with `migration_empty` 55 and
+77 on the clean and legacy chains, the draft invariant 46 and 49, publication 284, attacks 464, catalog 106
+on both chains, pack release 428, the reviewed fixture 57, review binding 122, definition vocabulary 50,
+document resolution 124, asset registry 91 and storage policies 80, under the same censuses slice 3 recorded:
+`API_NAMES=40`, `OPERATOR_GRANTS=0 ACTIVE=0`,
+`AUDIT_POSTURE=svc_select=true svc_insert=true svc_update=false svc_delete=false before_update_triggers=2`
+(`q11-logs/s11-s4-historic-1603.txt`, `q11-logs/s11-s4-tier-codes.txt`). Six recorded runs in that file —
+three red, three green — each exit code written beside the log it belongs to.
+
+After the last prose and comment edits landed on `run.sh` and on this document, the three modes were run
+again as one command rather than trusted from the three separate logs: `bash supabase/tests/stage11/run.sh all`
+finished `exit=0` (`q11-logs/s11-s4-all-1701.txt`, `MODE=all exit=0` in the same tier file) with the same
+four Stage 11 totals 137 / 641 / 191 / 208, the same eight older-stage pairs, the same Stage 2–6 sweep on both
+chains, and the same `API_NAMES=40 INTERNAL_NAMES=60 PRIVATE_FUNCS=52 PUBLIC_TABLES=20 PRIVATE_TABLES=13
+STORAGE_BUCKETS=3` census printed above every chain — so the certified tree is the tree this section
+describes, not an earlier draft of it.
+
 Three planned claims here were wrong, and measurement is what said so.
 
 First, this section used to promise "the two counts this stage *lowers*: `service_role` loses UPDATE
@@ -659,7 +813,13 @@ instrument's, and the revocation is therefore asserted privilege by privilege in
 Second, the plan listed `C28a` and `C28b` — the anonymous and signed-in callable matrices — as cells to
 extend. They took no branch, and that absence is the assertion: slice 1 exposes no callable at all, so a
 browser-visible closed set that did not move is the evidence, while a `C26e`/`G1g` that grew by exactly
-two unpaired names is the evidence for the side that did.
+two unpaired names is the evidence for the side that did. That sentence held for two slices and then
+only for one of them: `C28b` gained its stage11 arm when slice 2 opened ten doors, and carries the
+thirty-six-name set §13's catalogue row reads at this head, so a signed-in callable surface that grows
+without being named there is now a failing assertion. `C28a`'s anonymous matrix still has no Stage 11 arm,
+and slice 4 re-measured that rather than assuming it — `92_takedown_and_oversight.sql` `U05` is the cell
+that would move if an irreversible body were ever handed to `anon`, and the 106 that `C28a` sits inside is
+printed again on both chains in `q11-logs/s11-s4-historic-1603.txt`.
 
 Third, the runner shipped with different modes than planned. `supabase/tests/stage11/run.sh` is new on
 the "a new head gets a new runner" rule (`stage10/run.sh:16-21`), with `STAGE11_LOCAL=1`,
@@ -705,7 +865,7 @@ finished ticket), `…190300_stage11_privacy_intake.sql`,
 its catalogue branch edit in the same commit, and each applied to this repository's own local stack by
 `npx supabase db push --local --skip-vault` **after** a `--dry-run` shows exactly the expected pending
 files — the sequence Stage 10 recorded for the publish-gate repair. No `supabase db push` without
-`--local`, no reset of the shared database, no shadow of another project's stack. Through slice 3 the
+`--local`, no reset of the shared database, no shadow of another project's stack. Through slice 4 the
 migrations are qualified on native PostgreSQL 17 chains built by the runner; the shared
 `localvivaahvarnam` stack apply is outstanding rather than performed, because Docker Desktop is not
 running and starting it is a human-only action. No sentence in this document reports that apply as done,
