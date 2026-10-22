@@ -184,9 +184,16 @@ DECLARE
     -- table privilege for any client role. Measured on a chain that applied Stage 2 through Stage 11
     -- — twelve names, the eight above plus these four — in `q11-logs/s11-s2-readout-2.txt` section 6
     -- for the eleven-name head; slice 3's arrival is measured in `q11-logs/s11-s3-readout-1.txt`.
-    -- Slice 1's nine-name readout is in `q11-logs/s11-catalog-readout-1.txt`.
+    -- Slice 1's nine-name readout is in `q11-logs/s11-catalog-readout-1.txt`. Slice 4 brings the
+    -- thirteenth, `commerce_review_notes`, and its arrival here carries the same claim with more force
+    -- than any of the other four: it is the first table in the product that records a human's *opinion*
+    -- about money already taken — a refund or dispute read — so the schema question and the reach
+    -- question are the same question, and C06 answers it by inventory. Measured on the same chain:
+    -- thirteen names, the twelve above plus this one (`q11-logs/hist-clean-1006.txt` is the run that
+    -- refused it at twelve).
     || CASE WHEN pg_temp.st2_at_least('stage11')
-            THEN ARRAY['operator_grants','support_cases','support_case_events','privacy_requests']
+            THEN ARRAY['operator_grants','support_cases','support_case_events','privacy_requests',
+                       'commerce_review_notes']
             ELSE ARRAY[]::text[] END;
   legacy_tbls     text[] := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
@@ -381,7 +388,24 @@ DECLARE
                        -- the link and leaves the row standing (D13–D14, D21). Stated as SQL rather than
                        -- as prose the migration's COMMENT could carry and no assertion could check.
                        'privacy_requests(requester_user_id)->auth.users=SETNULL',
-                       'privacy_requests(wedding_id)->weddings=NOACTION']
+                       'privacy_requests(wedding_id)->weddings=NOACTION',
+                       -- Slice 4's four, and they are one sentence about what a review note is: an
+                       -- opinion a named human recorded about money that has already moved. The three
+                       -- edges into the money and the ticket are NO ACTION — a note cannot describe a
+                       -- refund, an order or a case that does not exist, and unlike the ledger's own
+                       -- SET NULL rows this row has no independent meaning if its subject is gone. The
+                       -- delete those refusals guard is already unreachable by design (the refund row
+                       -- sits behind `commerce_refunds`' append-only posture and the case behind
+                       -- `support_cases_no_client_delete`), so NO ACTION refuses a hand at the console
+                       -- rather than blocking a lifecycle — the same reasoning `support_case_events`
+                       -- gives for its `case_id` edge above. `author_user_id` is the SET NULL, mirroring
+                       -- `audit_events` and `commerce_orders`: staff turnover must not erase the record
+                       -- that a decision was reviewed, so the person is released and the note stands.
+                       -- All four measured on `q11-logs/s11-s4-fk-probe-3.txt`.
+                       'commerce_review_notes(author_user_id)->auth.users=SETNULL',
+                       'commerce_review_notes(case_ref)->private.support_cases=NOACTION',
+                       'commerce_review_notes(order_id)->private.commerce_orders=NOACTION',
+                       'commerce_review_notes(refund_id)->private.commerce_refunds=NOACTION']
             ELSE ARRAY[]::text[] END;
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
@@ -470,7 +494,23 @@ DECLARE
                        -- the same reason as `support_cases->weddings`: a wedding with a standing request
                        -- is not deletable by design, so the FK check is a rare refusal rather than a
                        -- customer path.
-                       'privacy_requests->weddings']
+                       'privacy_requests->weddings',
+                       -- Slice 4's two, and the pair is exactly the columns no index leads with. The
+                       -- other two edges on the same table are *not* here because `refund_id` is the
+                       -- leading column of both `commerce_review_notes_one_row_per_key` and
+                       -- `commerce_review_notes_refund_created_idx`, and `case_ref` leads
+                       -- `commerce_review_notes_case_idx` — so the two refusals that a delete of a
+                       -- refund or a case would trigger are index probes, which is why the NO ACTION
+                       -- edges above cost nothing to enforce. `order_id` is unindexed because it is a
+                       -- derived stamp: `private.derive_commerce_review_note_order` fills it from the
+                       -- refund at insert time and the update guard refuses any later write, so no
+                       -- query path walks notes by order and the only FK check an index would serve is
+                       -- an order DELETE that the ledger's own NO ACTION posture already refuses.
+                       -- `author_user_id` is the attribution case again, the same reason every other
+                       -- human-naming column in this list has. Four index definitions measured on
+                       -- `q11-logs/s11-s4-fk-probe-3.txt`.
+                       'commerce_review_notes->auth.users',
+                       'commerce_review_notes->private.commerce_orders']
             ELSE ARRAY[]::text[] END;
   t text;
 BEGIN
@@ -939,6 +979,30 @@ BEGIN
         -- operator is `private.actor_is_operator`, itself a definer over `private.operator_grants`. All
         -- four are paired with wrappers (C26e), and nothing here writes money, a credential or a cultural
         -- approval: the four are the request queue and no other table.
+        --
+        -- Slice 4 brings the count to forty-six with five bodies and one predicate, and the two halves
+        -- are refused for two different tables. `operator_takedown_plan`, `operator_takedown_publication`,
+        -- `operator_commerce_review_queue` and `operator_add_commerce_review_note` read and write
+        -- `private.commerce_orders`, `private.commerce_refunds`, `private.commerce_review_notes` and
+        -- `private.support_cases` — none of which any browser role holds a single privilege on (C06, C11,
+        -- C12) — so an INVOKER body would answer a queue request with `permission denied for table
+        -- commerce_orders` instead of a row list. `operator_purge_publication_objects` is a definer for
+        -- the storage half of the same act: it deletes `storage.objects` rows no client role may name,
+        -- and it is the one slice-4 body with no `api` wrapper beside it, so C26e and C26b carry that
+        -- asymmetry rather than this list. `private.operator_authorising_case` is the fifth definer in
+        -- `private` for the predicate reason slice 1 established — it resolves a case reference against
+        -- `private.support_cases` from inside a body that already runs above its caller.
+        --
+        -- What this list deliberately does *not* contain is slice 4's three guards on the review-note
+        -- trail (`private.derive_commerce_review_note_order`, `private.reject_commerce_review_note_without_author`,
+        -- `private.reject_commerce_review_note_update_except_referential_null`): all three are measured
+        -- `prosecdef = false` on this chain, and they can afford to be, because the only statement that
+        -- ever inserts a note is the definer body above it — so the row arrives as the owner, RLS is
+        -- bypassed for the owner rather than for the guard, and the guard reads the NEW row as that same
+        -- caller. The UPDATE guard has one further context, and it is the reason it exists in two
+        -- halves: the `author_user_id` SET NULL cascade rewrites a note when its author's account is
+        -- erased, and that rewrite is not issued by any body on this list. Measured as 46 definers at
+        -- slice 4 — the 40 above plus these six.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY['private.actor_is_operator',
                            'internal_api.create_privacy_request',
@@ -954,7 +1018,15 @@ BEGIN
                            'internal_api.operator_claim_case',
                            'internal_api.operator_release_case',
                            'internal_api.operator_transition_case',
-                           'internal_api.reply_to_support_case']
+                           'internal_api.reply_to_support_case',
+                           -- Slice 4's six, and the list keeps its shape: five paired bodies plus one
+                           -- predicate that has to read a table no browser role can name.
+                           'internal_api.operator_commerce_review_queue',
+                           'internal_api.operator_add_commerce_review_note',
+                           'internal_api.operator_purge_publication_objects',
+                           'internal_api.operator_takedown_plan',
+                           'internal_api.operator_takedown_publication',
+                           'private.operator_authorising_case']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
     NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -990,7 +1062,10 @@ BEGIN
   -- the two read doors over the render contract and its manifest, twenty-two from Stage 10, which
   -- added one door over the purchase state, thirty-two from Stage 11 slice 2, which added the
   -- support queue's ten, and thirty-six from slice 3, which added the privacy desk's four — the
-  -- host's file/read pair and the operator's queue/advance pair, every one paired. Only one door was
+  -- host's file/read pair and the operator's queue/advance pair, every one paired. Slice 4 makes it
+  -- forty with the takedown plan, the takedown itself, the review queue and the review note — four of
+  -- its five bodies paired, the fifth (`operator_purge_publication_objects`) deliberately left behind
+  -- in the unexposed schema, which is why this count and C26e's differ by exactly one at this head. Only one door was
   -- added by Stage 10's commerce slice, because the commerce write verbs stay
   -- server-side: a browser that could place an order could choose its own price, and the whole point of
   -- the quote is that it cannot. So the exposed surface grows by a read, and the six service-only
@@ -1003,7 +1078,7 @@ BEGIN
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 36
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 40
                                        WHEN pg_temp.st2_at_least('stage10') THEN 22
                                        WHEN pg_temp.st2_at_least('stage9') THEN 21
                                        WHEN pg_temp.st2_at_least('stage8') THEN 19
@@ -1146,7 +1221,17 @@ BEGIN
                            -- by exactly four, and no unpaired privacy body exists — a body sitting in the
                            -- unexposed schema with no wrapper would be a door no request can reach.
                            'create_privacy_request', 'get_my_privacy_requests',
-                           'operator_advance_privacy_request', 'operator_privacy_queue']
+                           'operator_advance_privacy_request', 'operator_privacy_queue',
+                           -- Slice 4 brings five bodies and this census is where its asymmetry shows:
+                           -- four are paired exactly as slices 2 and 3 were, and the fifth —
+                           -- `operator_purge_publication_objects` — has no wrapper and cannot get one,
+                           -- because it deletes `storage.objects` rows and a door that deletes files on
+                           -- a caller's say-so is the surface this stage's threat model refuses. So
+                           -- C26e moves by five while C26d and C26f move by four, and the difference is
+                           -- the assertion rather than an accident of arithmetic.
+                           'operator_add_commerce_review_note', 'operator_commerce_review_queue',
+                           'operator_purge_publication_objects', 'operator_takedown_plan',
+                           'operator_takedown_publication']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -1159,7 +1244,7 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 36
+      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 40
               WHEN pg_temp.st2_at_least('stage10') THEN 22
               WHEN pg_temp.st2_at_least('stage9') THEN 21
               WHEN pg_temp.st2_at_least('stage8') THEN 19
@@ -1253,7 +1338,9 @@ BEGIN
     -- with one more body, twenty-six from Stage 7, which paired five, thirty-eight from Stage 8,
     -- which paired six, forty-two from Stage 9, which paired two, forty-four from Stage 10, which
     -- paired one of the seven commerce bodies it added and left six ungrantable, and sixty-four from
-    -- Stage 11 slice 2, which paired all ten of its support doors. The pack-maintenance
+    -- Stage 11 slice 2, which paired all ten of its support doors. Slice 3 makes seventy-two and slice 4
+    -- eighty, each by four pairs, and slice 4's five-body/four-pair split is the reason the two numbers
+    -- do not move together with C26e's census. The pack-maintenance
     -- bodies are absent from every version of this list because they are granted to nobody a
     -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
     -- appeared for one of them would show up as a diff in this set.
@@ -1379,7 +1466,27 @@ BEGIN
                            'internal_api.operator_privacy_queue',
                            'internal_api.operator_release_case',
                            'internal_api.operator_transition_case',
-                           'internal_api.reply_to_support_case']
+                           'internal_api.reply_to_support_case',
+                           -- Slice 4's eight, and this is the cell that records which of its five bodies
+                           -- a browser can even name. The four takedown and review pairs are granted for
+                           -- the same reason every operator door above them is: the grant lets the request
+                           -- reach the body, the body decides. The fifth body,
+                           -- `internal_api.operator_purge_publication_objects`, is *absent* here and that
+                           -- absence is §10's whole claim — the irreversible step has no door at all.
+                           -- Measured, not inferred: `anon`, `authenticated`, `service_role` all answer
+                           -- false for it and only the owner is true (`q11-logs/s11-s4-purge-probe-1.txt`),
+                           -- which is what lets a definer takedown body reach it over the peer-authenticated
+                           -- channel while no key a browser can hold can. So C26e moves by five names for
+                           -- slice 4 while this set moves by eight — four pairs — and the one body with no
+                           -- pair is the one this census must not contain.
+                           'api.operator_add_commerce_review_note',
+                           'api.operator_commerce_review_queue',
+                           'api.operator_takedown_plan',
+                           'api.operator_takedown_publication',
+                           'internal_api.operator_add_commerce_review_note',
+                           'internal_api.operator_commerce_review_queue',
+                           'internal_api.operator_takedown_plan',
+                           'internal_api.operator_takedown_publication']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -1460,12 +1567,24 @@ BEGIN
         -- same reason the support ten are — so that "the privacy surface is four verbs, and every one
         -- of them re-authorizes inside its body" is a checked claim; an unlisted fifth door would have
         -- to be written into this file before it could ship.
+        -- Slice 4's four are the desk's money-and-taking-down doors: two to read and annotate the
+        -- refund/dispute queue, two to plan and carry out a safe takedown. They join this list so that
+        -- "the oversight surface is four verbs and the purge has no verb" is checkable — and the
+        -- sentence that matters here is the absence. Slice 4 ships five privileged bodies and only four
+        -- names on this boundary, because §10 rules the irreversible object-purge step to
+        -- `internal_api.operator_purge_publication_objects`, which no request can reach: it is
+        -- owner-only EXECUTE, measured false for `anon`, `authenticated` and `service_role` in
+        -- `q11-logs/s11-s4-purge-probe-1.txt`. A fifth name on this list would be a browser able to
+        -- delete a served artefact, and that is exactly what this cell is here to notice.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY['create_privacy_request', 'get_my_privacy_requests',
                            'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
                            'open_support_case', 'operator_add_case_note',
+                           'operator_add_commerce_review_note',
                            'operator_advance_privacy_request', 'operator_case_queue',
-                           'operator_claim_case', 'operator_privacy_queue', 'operator_release_case',
+                           'operator_claim_case', 'operator_commerce_review_queue',
+                           'operator_privacy_queue', 'operator_release_case',
+                           'operator_takedown_plan', 'operator_takedown_publication',
                            'operator_transition_case', 'reply_to_support_case']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
@@ -1531,7 +1650,7 @@ BEGIN
                      OR has_function_privilege('authenticated', p.oid, 'EXECUTE'))));
   PERFORM pg_temp.st2_ok('C29c-b the only identity-taking callables are '
     || (CASE WHEN pg_temp.st2_at_least('stage11')
-             THEN 'the eight service-only bodies (six commerce, two operator-grant)'
+             THEN 'the nine service-only bodies (six commerce, two operator-grant, one purge)'
              ELSE 'the six service-only commerce bodies' END)
     || ', and each is ungrantable to a browser role',
     (SELECT array_agg(x ORDER BY x) FROM (
@@ -1548,6 +1667,15 @@ BEGIN
                        'internal_api.grant_commerce_entitlement.p_actor_user_id',
                        'internal_api.grant_operator_role.p_actor_user_id',
                        'internal_api.grant_operator_role.p_user_id',
+                       -- Slice 4's one, and it is the name this stage's §10 ruling is written into: the
+                       -- purge takes an actor id because it runs only over the peer-authenticated channel,
+                       -- where `auth.uid()` is NULL by construction and an irreversible act with no name
+                       -- against it would be unanswerable afterwards (§2 of the migration). What keeps it
+                       -- an attribution rather than a privilege is the second half of this assertion —
+                       -- EXECUTE is false for `anon`, `authenticated` and `service_role` alike
+                       -- (`q11-logs/s11-s4-purge-probe-1.txt`), so the only caller is the owner, reached
+                       -- from inside a definer body, and no request can name it at all.
+                       'internal_api.operator_purge_publication_objects.p_actor_user_id',
                        'internal_api.record_commerce_event.p_actor_user_id',
                        'internal_api.revoke_commerce_entitlement.p_actor_user_id',
                        'internal_api.revoke_operator_role.p_actor_user_id',
@@ -1777,7 +1905,21 @@ BEGIN
                   'private.privacy_requests.privacy_requests_no_client_delete=reject_client_delete',
                   'private.privacy_requests.privacy_requests_no_client_write=reject_client_write',
                   'private.privacy_requests.privacy_requests_require_requester=reject_privacy_request_without_requester',
-                  'private.privacy_requests.set_updated_at=touch_updated_at']
+                  'private.privacy_requests.set_updated_at=touch_updated_at',
+                  -- Slice 4's five on the review-note row, and the set is worth reading as a shape: two
+                  -- are the table's own invariants that no CHECK can carry (an author must name a real
+                  -- account, and `order_id` must be the refund's own order rather than a supplied value),
+                  -- one is the update rule and it is the interesting one — a note is a *statement*, so
+                  -- the guard refuses UPDATE for every role and names the one null that may still move
+                  -- through it, the `author_user_id` SET NULL this catalogue's C46 records. The last two
+                  -- are the house pattern. All five are INVOKER (measured `prosecdef=false` for each on
+                  -- `q11-logs/s11-s4-fk-probe-1.txt`), so C32's canonical definer-trigger pair does not
+                  -- move for slice 4 either.
+                  'private.commerce_review_notes.commerce_review_notes_author_names_a_human=reject_commerce_review_note_without_author',
+                  'private.commerce_review_notes.commerce_review_notes_derive_order=derive_commerce_review_note_order',
+                  'private.commerce_review_notes.commerce_review_notes_no_client_delete=reject_client_delete',
+                  'private.commerce_review_notes.commerce_review_notes_no_client_write=reject_client_write',
+                  'private.commerce_review_notes.commerce_review_notes_no_update_any_role=reject_commerce_review_note_update_except_referential_null']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to

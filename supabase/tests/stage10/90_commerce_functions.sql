@@ -686,12 +686,32 @@ DECLARE s s10res%ROWTYPE; v text;
 BEGIN
   SELECT * INTO s FROM s10res;
 
-  PERFORM pg_temp.s10f_array('R20 the doors `authenticated` may execute are exactly the two projections',
+  -- Head-aware because this predicate is a name pattern rather than a Stage 10 declaration: it asks "which
+  -- doors containing `commerce` may a browser role execute", and Stage 11 slice 4 legitimately answers six.
+  -- Its two new pairs — the finance desk's queue and its note door, each an `api` wrapper over an
+  -- `internal_api` body — are granted to `authenticated` for the same measured reason §9 gave for the host
+  -- projection: the grant is the only way in, and the authority is the body re-deriving `auth.uid()` and
+  -- matching it against a live `finance_review` row in `private.operator_grants`, so the signed-in customer
+  -- that is not on the desk gets `insufficient_privilege` rather than the queue. Nothing here can move
+  -- money: the queue reads a completed refund, and the note door only inserts — its UPDATE trigger names no
+  -- role at all and lets exactly the database's own referential null through, and its DELETE backstop is the
+  -- same one N04 measures for the rest of the money model. The
+  -- pattern's two negatives, R21 and R22, are untouched and still empty — `anon` and `service_role` gained
+  -- no commerce door.
+  PERFORM pg_temp.s10f_array('R20 the doors `authenticated` may execute are exactly the '
+    || CASE WHEN pg_temp.s10f_at_least('stage11') THEN 'six — the host projection pair plus the '
+            || 'finance desk''s queue-and-note pair and the two bodies behind them'
+            ELSE 'two projections' END,
     ARRAY(SELECT n.nspname || '.' || p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname IN ('api','internal_api') AND p.proname LIKE '%commerce%'
         AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
       ORDER BY 1),
-    ARRAY['api.commerce_host_summary', 'internal_api.commerce_host_summary']);
+    CASE WHEN pg_temp.s10f_at_least('stage11') THEN
+      ARRAY['api.commerce_host_summary', 'api.operator_add_commerce_review_note',
+            'api.operator_commerce_review_queue', 'internal_api.commerce_host_summary',
+            'internal_api.operator_add_commerce_review_note',
+            'internal_api.operator_commerce_review_queue']
+    ELSE ARRAY['api.commerce_host_summary', 'internal_api.commerce_host_summary'] END);
 
   PERFORM pg_temp.s10f_array('R21 and `anon` may execute none of the eight',
     ARRAY(SELECT n.nspname || '.' || p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -1529,7 +1549,11 @@ BEGIN
        AND (a.attname ~* '(price|amount|paid|billing|charge|order|invoice|tax|gst|currency)')), 0::bigint);
 
   -- No tax/GST/invoice/quantity anywhere in the ledger (§12), and the list is the one this file prints above.
-  PERFORM pg_temp.s10f_eq('N03 none of the six ledger tables carries a tax, invoice or quantity column',
+  -- Head-aware only in its wording: the sweep's predicate is `commerce%` on `private`, so slice 4's note
+  -- table is inside it at this head, and the assertion it satisfies is the stronger one.
+  PERFORM pg_temp.s10f_eq('N03 none of the '
+    || CASE WHEN pg_temp.s10f_at_least('stage11') THEN 'seven' ELSE 'six' END
+    || ' ledger tables carries a tax, invoice or quantity column',
     (SELECT count(*) FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid
      WHERE c.relnamespace = 'private'::regnamespace AND c.relname LIKE 'commerce%'
@@ -1577,21 +1601,49 @@ BEGIN
         AND has_function_privilege('anon', p.oid, 'EXECUTE')), 0::bigint);
 
   -- The declared surface, as the shape §10 promises rather than a number this file re-types.
-  PERFORM pg_temp.s10f_array('N07 the exposed commerce surface is exactly the one projection this stage added',
+  -- The two commerce-surface lists below are head-aware for the same reason R20 is: the predicate is a name
+  -- pattern, and Stage 11 slice 4's finance desk puts two `api` names and two bodies that contain the word
+  -- `commerce` in front of this suite. Their arrival is what the pattern was for — a later stage that
+  -- quietly widened the money surface moves these lists and has to justify the names here, in prose, rather
+  -- than slipping past a count. N09 grows the same way, because the oversight note table is named for what
+  -- it reviews; N03's forbidden-column sweep now runs over seven tables instead of six and still prints
+  -- zero, and N10's negative — no commerce table in the customer-facing schema — is unchanged by it, which
+  -- is the distinction worth keeping: a desk that reads the ledger is not a second ledger.
+  PERFORM pg_temp.s10f_array('N07 the exposed commerce surface is exactly the one projection this stage added'
+    || CASE WHEN pg_temp.s10f_at_least('stage11')
+            THEN ' plus slice 4''s two finance-desk doors' ELSE '' END,
     ARRAY(SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
            WHERE n.nspname = 'api' AND p.proname LIKE '%commerce%' ORDER BY 1),
-    ARRAY['commerce_host_summary']);
-  PERFORM pg_temp.s10f_array('N08 and the internal commerce surface is the seven names §9 shipped',
+    CASE WHEN pg_temp.s10f_at_least('stage11') THEN
+      ARRAY['commerce_host_summary', 'operator_add_commerce_review_note',
+            'operator_commerce_review_queue']
+    ELSE ARRAY['commerce_host_summary'] END);
+  PERFORM pg_temp.s10f_array('N08 and the internal commerce surface is the seven names §9 shipped'
+    || CASE WHEN pg_temp.s10f_at_least('stage11')
+            THEN ' plus the two bodies behind those doors' ELSE '' END,
     ARRAY(SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
            WHERE n.nspname = 'internal_api' AND p.proname LIKE '%commerce%' ORDER BY 1),
-    ARRAY['commerce_host_summary','commerce_reconcile','create_commerce_order',
-          'expire_commerce_order','grant_commerce_entitlement','record_commerce_event',
-          'revoke_commerce_entitlement']);
-  PERFORM pg_temp.s10f_array('N09 and the ledger is six tables in private, none of them in public',
+    CASE WHEN pg_temp.s10f_at_least('stage11') THEN
+      ARRAY['commerce_host_summary','commerce_reconcile','create_commerce_order',
+            'expire_commerce_order','grant_commerce_entitlement',
+            'operator_add_commerce_review_note','operator_commerce_review_queue',
+            'record_commerce_event','revoke_commerce_entitlement']
+    ELSE
+      ARRAY['commerce_host_summary','commerce_reconcile','create_commerce_order',
+            'expire_commerce_order','grant_commerce_entitlement','record_commerce_event',
+            'revoke_commerce_entitlement'] END);
+  PERFORM pg_temp.s10f_array('N09 and the ledger is six tables in private, none of them in public'
+    || CASE WHEN pg_temp.s10f_at_least('stage11')
+            THEN ' — seven once the oversight note table counts, still none in public' ELSE '' END,
     ARRAY(SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
            WHERE n.nspname = 'private' AND c.relname LIKE 'commerce%' AND c.relkind = 'r' ORDER BY 1),
-    ARRAY['commerce_orders','commerce_packages','commerce_payment_attempts',
-          'commerce_payment_events','commerce_policy','commerce_refunds']);
+    CASE WHEN pg_temp.s10f_at_least('stage11') THEN
+      ARRAY['commerce_orders','commerce_packages','commerce_payment_attempts',
+            'commerce_payment_events','commerce_policy','commerce_refunds',
+            'commerce_review_notes']
+    ELSE
+      ARRAY['commerce_orders','commerce_packages','commerce_payment_attempts',
+            'commerce_payment_events','commerce_policy','commerce_refunds'] END);
   PERFORM pg_temp.s10f_eq('N10 and no commerce table was added to the customer-facing schema',
     (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relname LIKE 'commerce%'), 0::bigint);

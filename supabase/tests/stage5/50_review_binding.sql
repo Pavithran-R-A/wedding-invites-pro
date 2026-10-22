@@ -1284,7 +1284,7 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the '
-    || CASE WHEN pg_temp.s5_at_least('stage11') THEN 'thirty-six names'
+    || CASE WHEN pg_temp.s5_at_least('stage11') THEN 'forty names'
             WHEN pg_temp.s5_at_least('stage10') THEN 'twenty-two names'
             WHEN pg_temp.s5_at_least('stage9') THEN 'twenty-one names'
             WHEN pg_temp.s5_at_least('stage8') THEN 'nineteen names'
@@ -1316,7 +1316,14 @@ BEGIN
               || 'refuse anyone else with `insufficient_privilege`, so the grant is deliberately not '
               || 'the authority on that surface — and slice 3 adds four privacy names: the host''s '
               || 'file-and-read pair and the operator desk''s queue-and-advance pair, all four as '
-              || 'wrappers over `internal_api` bodies'
+              || 'wrappers over `internal_api` bodies. Slice 4 adds four more on the same wrapper-over-body '
+              || 'shape: the finance desk''s queue-and-note pair and the takedown plan-and-publication pair. '
+              || 'The fifth body that slice writes has no name here, and that absence is the ruling rather '
+              || 'than an omission — `operator_purge_publication_objects` is the plan in front of removing '
+              || 'the rendered objects behind a publication (the body deletes nothing; §6 hands the delete '
+              || 'to the CLI''s Storage call), §10 keeps that step off the browser surface entirely, and '
+              || 'this assertion enumerates the surface by name rather than by count, so a wrapper added '
+              || 'for it later fails here rather than passing a total'
             WHEN pg_temp.s5_at_least('stage10') THEN
               ', from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
               || 'read the link state — plus the two doors a guest walks through, to read its own '
@@ -1349,9 +1356,11 @@ BEGIN
             'get_invitation_publication_state', 'get_my_privacy_requests',
             'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
             'issue_guest_invitations', 'list_invitation_outputs', 'open_support_case',
-            'operator_add_case_note', 'operator_advance_privacy_request',
-            'operator_case_queue', 'operator_claim_case', 'operator_privacy_queue',
-            'operator_release_case', 'operator_transition_case', 'preview_invitation',
+            'operator_add_case_note', 'operator_add_commerce_review_note',
+            'operator_advance_privacy_request',
+            'operator_case_queue', 'operator_claim_case', 'operator_commerce_review_queue',
+            'operator_privacy_queue', 'operator_release_case', 'operator_takedown_plan',
+            'operator_takedown_publication', 'operator_transition_case', 'preview_invitation',
             'preview_invitation_document', 'publish_invitation_version',
             'render_invitation_document', 'reply_to_support_case',
             'request_family_review', 'resolve_family_review',

@@ -347,17 +347,19 @@ BEGIN
 
   -- The surface counts this head declares. Each is a pg_proc count, not a grep: a name declared twice with
   -- two argument lists counts twice here and once in a text search.
-  PERFORM pg_temp.s11q_eq('S10 the stage''s declared surface at this file: 36 api wrappers, 55 internal '
-    || 'bodies, 48 private names',
+  PERFORM pg_temp.s11q_eq('S10 the stage''s declared surface at this file: 40 api wrappers, 60 internal '
+    || 'bodies, 52 private names',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'api'),
-    36);
-  PERFORM pg_temp.s11q_eq('S10b and the twelve names this file adds are the only movement: four pairs',
+    40);
+  PERFORM pg_temp.s11q_eq('S10b and the twelve names this file adds are the only movement: four pairs, on '
+    || 'top of slice 4''s four wrappers and five bodies',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'internal_api'), 55);
-  PERFORM pg_temp.s11q_eq('S10c and three private helpers join the schema', 
+      WHERE n.nspname = 'internal_api'), 60);
+  PERFORM pg_temp.s11q_eq('S10c and three private helpers join the schema, plus slice 4''s four on the '
+    || 'review-note trail',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'private'), 48);
+      WHERE n.nspname = 'private'), 52);
 
   PERFORM pg_temp.s11q_array('S11 the four bodies are definers with a pinned path, owned by postgres',
     ARRAY(SELECT p.proname::text || '=' || p.prosecdef::text || '/' ||

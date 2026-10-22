@@ -1437,6 +1437,19 @@ BEGIN
       -- `20261020190300_stage11_privacy_intake.sql` and nothing else — and that output
       -- (`q11-logs/s11-s3-g1-matrix-rows.txt`, thirty-six lines) replaced it whole again. Nothing
       -- below was transcribed from the migration text.
+      --
+      -- Slice 4's forty: the thirty-six above plus the two refund/dispute desk doors
+      -- (`operator_commerce_review_queue`, `operator_add_commerce_review_note`) and the two takedown
+      -- doors (`operator_takedown_plan`, `operator_takedown_publication`). All four rows carry the same
+      -- eight properties the thirty-six do, and the one worth re-reading rather than skimming is
+      -- `service_role=n`: the server key has no path through a takedown either, so "the platform took
+      -- this down" can only ever trace to a named operator session — which is the kickoff's rule that a
+      -- refund or takedown must not be executable by whoever holds the key, expressed as one column of
+      -- a census. `vol=s` on the queue read, `vol=v` on the three writes, because a note body and a
+      -- takedown reason must never appear in a query string an access log keeps. Provenance is the same
+      -- instrument widened: `q11-logs/s11-s4-emit-matrices.sql` runs this suite's own row expression
+      -- against `st11qual_hc`, the historic chain `q11-logs/s11_hist_probe.sh` builds at the slice-4
+      -- head, and the 40 lines it printed (`q11-logs/s11-s4-g1-rows.txt`) replaced this literal whole.
       $matrix11$commerce_host_summary(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 create_invitation_version(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 create_privacy_request(p_wedding_id uuid, p_kind text, p_note text) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1451,11 +1464,15 @@ issue_guest_invitations(p_wedding_id uuid, p_household_ids uuid[], p_expires_at 
 list_invitation_outputs(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 open_support_case(p_wedding_id uuid, p_category text, p_severity text, p_summary text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_add_case_note(p_case_ref text, p_kind text, p_body text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_add_commerce_review_note(p_refund_id uuid, p_case_ref text, p_kind text, p_note text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_advance_privacy_request(p_request_ref text, p_status text, p_note text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_case_queue(p_status text, p_category text, p_limit integer) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_claim_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_commerce_review_queue(p_status text, p_limit integer) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_privacy_queue(p_status text) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_release_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_takedown_plan(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_takedown_publication(p_wedding_id uuid, p_case_ref text, p_reason text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_transition_case(p_case_ref text, p_to_status text, p_resolution_code text, p_body text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation_document(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1649,22 +1666,42 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
   -- which has no USAGE on this schema at all (G6b) — so the privileged half of Stage 9 is a read
   -- surface, and the artefacts themselves are written by the backend over the table.
     CASE WHEN pg_temp.st3p_at_least('stage11') THEN
-      -- Stage 11 slice 3's fifty-five: slice 1's forty-one (the thirty-nine in the Stage 10 arm below,
+      -- Stage 11 slice 4's sixty: slice 1's forty-one (the thirty-nine in the Stage 10 arm below,
       -- plus the two grant bodies `grant_operator_role` and `revoke_operator_role`), the ten bodies
       -- the support workflow adds — the four host doors `open_support_case`, `get_my_support_case`,
       -- `get_my_support_cases`, `reply_to_support_case`, the two operator reads `operator_case_queue`,
       -- `get_operator_case`, and the four operator writes `operator_add_case_note`,
-      -- `operator_claim_case`, `operator_release_case`, `operator_transition_case` — and slice 3's four
+      -- `operator_claim_case`, `operator_release_case`, `operator_transition_case` — slice 3's four
       -- privacy doors: `create_privacy_request` and `get_my_privacy_requests` (the host's file/read
       -- pair), `operator_privacy_queue` and `operator_advance_privacy_request` (the desk's read/advance
-      -- pair). All ten support rows and all four privacy rows are the `definer=y` / `authenticated=y`
-      -- half of the shape this head already carries, for one reason: those bodies read and write
-      -- `private.support_cases`, `private.support_case_events` and `private.privacy_requests`, and the
+      -- pair) — and slice 4's five oversight bodies: `operator_takedown_plan` and
+      -- `operator_takedown_publication` (the plan/write pair over one wedding's publication),
+      -- `operator_commerce_review_queue` and `operator_add_commerce_review_note` (the finance desk's
+      -- read/annotate pair over a completed refund), and `operator_purge_publication_objects`.
+      -- All ten support rows, all four privacy rows and four of the five new rows are the `definer=y` /
+      -- `authenticated=y` half of the shape this head already carries, for one reason: those bodies read
+      -- and write `private.support_cases`, `private.support_case_events` and `private.privacy_requests`,
+      -- and the
       -- measured grant table on all three is false for `anon`, `authenticated` and `service_role` alike,
       -- so authorization is the body re-deriving `auth.uid()` and matching it against the requester, the
       -- holder edge or an operator grant — the same move as Stage 9's two render reads and Stage 10's
-      -- `commerce_host_summary`, not a new one. Reads are `vol=s`, writes `vol=v`; all fourteen keep
-      -- `search_path=""`, `owner=postgres`, `anon=n`, `service_role=n` and `public=n`.
+      -- `commerce_host_summary`, not a new one. Reads are `vol=s`, writes `vol=v`; every one of the
+      -- twenty-one rows this stage adds keeps `search_path=""`, `owner=postgres`, `anon=n`,
+      -- `service_role=n` and `public=n`.
+      -- The fifth slice-4 row is the exception this census exists to catch. `operator_purge_publication_objects`
+      -- is `definer=y` with `authenticated=n`: a privileged body in the schema PostgREST does not serve
+      -- (`supabase/config.toml:32` exposes exactly `public` and `api`), with no `api` wrapper in front of
+      -- it and no EXECUTE held by any browser role. It is the planning half of the stage's only
+      -- irreversible act — §6 step 2 removes the rendered objects behind a publication — and the body
+      -- itself deletes nothing: the row it writes carries `objects_deleted_by_this_call=false` and names
+      -- the Storage API as the delete channel, so removal belongs to the CLI and to Stage 9's
+      -- delete-then-mark ordering. §10 of `20261020190400_stage11_takedown_and_oversight.sql` keeps it off
+      -- the API surface entirely, which is why it is G1g's twentieth `unpaired-internal` name and not a
+      -- G1h pair line; nothing in any migration calls it either, so the only way to reach it is the
+      -- object owner over the peer-authenticated `psql` channel — §10's operator CLI. It takes
+      -- `p_actor_user_id uuid` because that channel has `auth.uid()` NULL by construction. EXECUTE false
+      -- for `anon`, `authenticated`, `service_role` and `public` alike is measured in
+      -- `q11-logs/s11-s4-purge-probe-1.txt`.
       -- Slice 1's two rows keep the posture Stage 10's six write bodies established, which §3 now cites
       -- as the precedent this stage follows rather than the definer one it had assumed: `definer=n`,
       -- `lang=plpgsql`, `vol=v`, `search_path=""`, `owner=postgres`, EXECUTE false for `anon`,
@@ -1683,7 +1720,13 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
       -- `q11-logs/s11-iterate.sh` rebuilds from Stage 2 through this migration, and the 51 lines it
       -- printed (`q11-logs/s11-s2-g1f-rows.txt`) replaced this literal whole. Slice 3's four rows were
       -- emitted by the same expression and inserted at their `COLLATE "C"` positions; the 55-line
-      -- result is `q11-logs/s11-s3-g1f-rows.txt`. The order matters: the one
+      -- result is `q11-logs/s11-s3-g1f-rows.txt`. Slice 4's five rows were emitted by the third
+      -- expression in `q11-logs/s11-s4-emit-matrices.sql` against `st11qual_hc` (the chain
+      -- `q11-logs/s11_s4_chain.sh` builds from Stage 2 through this migration); its 60 lines are
+      -- `q11-logs/s11-s4-g1f-rows.txt` and `q11-logs/s11-s4-apply-matrices.cjs` replaced this literal
+      -- with them whole instead of adding rows by hand. The splice was read back with `git diff`, which
+      -- showed five added impl rows and four added `api` rows and no removed row — the asymmetry being
+      -- the point: five bodies, four wrappers. The order matters: the one
       -- place where §10's design disagreed with the census was `operator_assign_case`, which C29c has
       -- refused since Stage 2 because it names a person in an argument, and what settled it was the
       -- measurement — the migration changed to `operator_claim_case` / `operator_release_case`, and the
@@ -1713,11 +1756,16 @@ issue_guest_invitations(p_wedding_id uuid, p_household_ids uuid[], p_expires_at 
 list_invitation_outputs(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 open_support_case(p_wedding_id uuid, p_category text, p_severity text, p_summary text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_add_case_note(p_case_ref text, p_kind text, p_body text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_add_commerce_review_note(p_refund_id uuid, p_case_ref text, p_kind text, p_note text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_advance_privacy_request(p_request_ref text, p_status text, p_note text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_case_queue(p_status text, p_category text, p_limit integer) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_claim_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_commerce_review_queue(p_status text, p_limit integer) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_privacy_queue(p_status text) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_purge_publication_objects(p_case_ref text, p_actor_user_id uuid, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
 operator_release_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_takedown_plan(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_takedown_publication(p_wedding_id uuid, p_case_ref text, p_reason text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_transition_case(p_case_ref text, p_to_status text, p_resolution_code text, p_body text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation_document(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1969,13 +2017,25 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
       -- literal would fail on the extra text, which is why the expectation below is the whole string and
       -- not a count of internal names.
       --
+      -- Slice 4 makes it twenty, and the twentieth name is the finding rather than the arithmetic. Slice 4
+      -- ships five privileged bodies and four wrappers, so exactly one body arrives unpaired:
+      -- `internal_api.operator_purge_publication_objects`. That is §10's ruling — the irreversible
+      -- object-purge step is deliberately given no browser-facing door at all — and this census is the
+      -- instrument that turns the ruling into a check, because the same file's G1h stays one-for-one over
+      -- the paired names: a purge wrapper added later by somebody who wanted an HTTP shape for it would
+      -- show up here as an `unpaired-api` row and in G1h's missing line, not as a silent pass. Its EXECUTE
+      -- is false for `anon`, `authenticated` and `service_role` alike
+      -- (`q11-logs/s11-s4-purge-probe-1.txt`), which is the second half of the same claim — nothing but its
+      -- owner reaches it, over the peer-authenticated channel: no wrapper, and no call site for it in any
+      -- migration body either.
+      --
       -- The other half of the sentence is the absence: no `unpaired-api` row appeared. That is the only
       -- part of this census that would notice a new browser-facing callable with no privileged body behind
       -- it — a wrapper reading a table directly, or a name added to `api` and forgotten in `internal_api`.
       -- A ladder that listed only the internal half would accept that silently, so the expectation is the
       -- whole string, and the string contains no such row. Order stays mechanical (`ORDER BY t COLLATE
       -- "C"` over the composed tag, computed by the query above); only membership and reasons are claims.
-      'unpaired-internal approve_tradition_pack_release, unpaired-internal commerce_reconcile, unpaired-internal create_commerce_order, unpaired-internal create_tradition_pack, unpaired-internal create_tradition_pack_release, unpaired-internal deprecate_tradition_pack_release, unpaired-internal expire_commerce_order, unpaired-internal get_tradition_pack_review_packet, unpaired-internal grant_commerce_entitlement, unpaired-internal grant_operator_role, unpaired-internal inspect_tradition_pack_release, unpaired-internal record_commerce_event, unpaired-internal revoke_commerce_entitlement, unpaired-internal revoke_operator_role, unpaired-internal submit_tradition_pack_review, unpaired-internal tradition_pack_catalog, unpaired-internal tradition_pack_retention_report, unpaired-internal update_draft_tradition_pack_release, unpaired-internal validate_tradition_pack_release'
+      'unpaired-internal approve_tradition_pack_release, unpaired-internal commerce_reconcile, unpaired-internal create_commerce_order, unpaired-internal create_tradition_pack, unpaired-internal create_tradition_pack_release, unpaired-internal deprecate_tradition_pack_release, unpaired-internal expire_commerce_order, unpaired-internal get_tradition_pack_review_packet, unpaired-internal grant_commerce_entitlement, unpaired-internal grant_operator_role, unpaired-internal inspect_tradition_pack_release, unpaired-internal operator_purge_publication_objects, unpaired-internal record_commerce_event, unpaired-internal revoke_commerce_entitlement, unpaired-internal revoke_operator_role, unpaired-internal submit_tradition_pack_review, unpaired-internal tradition_pack_catalog, unpaired-internal tradition_pack_retention_report, unpaired-internal update_draft_tradition_pack_release, unpaired-internal validate_tradition_pack_release'
     WHEN pg_temp.st3p_at_least('stage10') THEN
       -- Seventeen, measured on `q10-logs/live/s10-census-pairs-01.txt`. Six are new, and they are the
       -- six write-side commerce bodies: `commerce_reconcile`, `create_commerce_order`,
@@ -2022,21 +2082,41 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
   -- same construction as every stage since the closure repair — an invoker wrapper of one
   -- `SELECT internal_api.<name>(…)` over a definer body that holds the authorization.
     CASE WHEN pg_temp.st3p_at_least('stage11') THEN
-      -- Stage 11 slice 3's thirty-six pair lines, measured the same way. Slice 2 contributed ten new
+      -- Stage 11 slice 4's forty pair lines, measured the same way. Slice 2 contributed ten new
       -- names, each paired by exact name and argument types, and every verdict true for the ordinary
       -- reason this census has given since the closure repair: an invoker wrapper of one
       -- `SELECT internal_api.<name>(…)` over a definer body whose browser grants match its own.
       -- `impl_is_definer=true` on all ten is where the support workflow's authorization lives;
       -- `wrapper_is_invoker=true` is what keeps the wrapper from becoming a second place a decision
       -- could drift.
-      -- Slice 3 adds four more of exactly that construction — `create_privacy_request`,
-      -- `get_my_privacy_requests`, `operator_privacy_queue`, `operator_advance_privacy_request` — so the
-      -- census is thirty-six and every verdict is still true. Their `impl_is_definer=true` is where the
+      -- Slice 3 added four more of exactly that construction — `create_privacy_request`,
+      -- `get_my_privacy_requests`, `operator_privacy_queue`, `operator_advance_privacy_request` — which
+      -- made the census thirty-six and left every verdict true. Their `impl_is_definer=true` is where the
       -- privacy desk's authorization lives: those bodies read and write `private.privacy_requests`, whose
       -- measured grant table is false for `anon`, `authenticated` and `service_role` alike, so the
       -- authority to see or advance a request is re-derived inside the body rather than granted on the
       -- table. A privacy name that arrived as an `unpaired-api` row would already have failed G1g; these
-      -- four arrived as pairs, which is why G1g's nineteen-name census is unchanged by this slice.
+      -- four arrived as pairs, which is why slice 3 left G1g's nineteen-name census untouched. Slice 4 is
+      -- the slice that moves it, and it moves it to twenty — see below.
+      -- Slice 4 adds four pair lines, not five, and the missing fifth is the finding rather than an
+      -- oversight. The takedown-and-oversight desk ships five bodies: `operator_takedown_plan` and
+      -- `operator_takedown_publication` (the plan/write pair over one wedding's publication),
+      -- `operator_commerce_review_queue` and `operator_add_commerce_review_note` (the finance desk's
+      -- read/annotate pair), and `operator_purge_publication_objects`. Only the first four appear here,
+      -- because the purge deliberately has no `api` wrapper — §10 of the migration keeps the object-purge
+      -- step off the browser surface entirely, and the body plans rather than deletes (its row carries
+      -- `objects_deleted_by_this_call=false` and names the Storage API as the delete channel), so the only
+      -- caller it has is the object owner over the peer-authenticated `psql` channel. That is why this census and
+      -- G1g's must be read together: G1h alone would not notice a wrapper-less write, and the twentieth
+      -- `unpaired-internal` name in G1g is precisely the write that has no wrapper on purpose.
+      -- `no_service_role_on_either=true` holds on all forty, including the two new write pairs, which is
+      -- the property an oversight surface needs most: the trusted server key cannot take a publication
+      -- down or record an opinion about a completed refund through either half of either pair. The
+      -- review-note body takes no actor argument at all — `author_user_id` is re-derived from the caller's
+      -- own session inside the definer body — so a `private.commerce_review_notes` row always names the
+      -- browser session that authored it, and the purge's `p_actor_user_id`, which does name a human as
+      -- an argument, can only be supplied over the owner's own channel and is then checked for a live
+      -- `operations` grant held by that exact id.
       -- `no_service_role_on_either=true` is the verdict worth naming twice on an operations surface. The
       -- trusted server key cannot open, claim, note, reply to or transition a case through either half
       -- of these ten pairs, so every row in `private.support_case_events` traces to a session with an
@@ -2050,10 +2130,14 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
       -- `st11qual_iter`; the thirty-two lines it printed are `q11-logs/s11-s2-g1h-rows.txt` and are
       -- pasted here unchanged. `q11-logs/s11-s3-emit-g1h.sql` re-ran the same expression against
       -- `st11qual_it` after the privacy migration; its thirty-six lines are
-      -- `q11-logs/s11-s3-g1h-rows.txt`, and a diff of the old literal against that emit contained
-      -- exactly the four privacy names inserted above, each at its `COLLATE "C"` position, with every
-      -- verdict `true`. The two files were compared with CR stripped, because psql on Windows writes
-      -- the emit with CRLF while the suite stores LF.
+      -- `q11-logs/s11-s3-g1h-rows.txt`. Slice 4's forty lines came from `q11-logs/s11-s4-emit-matrices.sql`
+      -- against `st11qual_hc` — the chain `q11-logs/s11_s4_chain.sh` builds from Stage 2 through this
+      -- migration — were saved as `q11-logs/s11-s4-g1h-rows.txt`, and `q11-logs/s11-s4-apply-matrices.cjs`
+      -- replaced this literal with them whole rather than editing rows by hand. The splice was then read
+      -- back: `git diff` over this file showed exactly four added pair lines and no removed one, which is
+      -- the check that the literal is the measurement and not a paraphrase of the previous one. The files
+      -- were compared with CR stripped, because psql on Windows writes the emit with CRLF while the suite
+      -- stores LF.
       $pairs11$commerce_host_summary wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 create_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 create_privacy_request wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
@@ -2068,11 +2152,15 @@ issue_guest_invitations wrapper_is_invoker=true impl_is_definer=true anon_grants
 list_invitation_outputs wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 open_support_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_add_case_note wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+operator_add_commerce_review_note wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_advance_privacy_request wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_case_queue wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_claim_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+operator_commerce_review_queue wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_privacy_queue wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_release_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+operator_takedown_plan wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+operator_takedown_publication wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_transition_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 preview_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 preview_invitation_document wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true

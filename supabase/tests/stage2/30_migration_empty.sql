@@ -120,9 +120,14 @@ DECLARE
   -- Stage 11's tables are the third arrival and the same argument applies with more force: an
   -- operator credential in `public` would be readable by the role every browser request arrives
   -- as, and E02 then insists they are empty on a chain that ran nothing but the migrations. Slice 1
-  -- brought one (the grant table); slice 2 brought the support queue's two, which hold free-text
-  -- summaries of a couple's problems — the most PII-shaped rows in the product, and the reason the
-  -- stage-11 head has three names here rather than one.
+  -- brought one (the grant table), slice 2 the support queue's two — free-text summaries of a
+  -- couple's problems, the most PII-shaped rows in the product — slice 3 the privacy request that
+  -- carries a deletion or export instruction about a named household, and slice 4
+  -- `private.commerce_review_notes`, which is the first row in this schema that records a human's
+  -- *opinion about money that has already been taken*. Five names at this head, all five in
+  -- `private`, and the reason the sentence is worth re-taking at each slice rather than trusting is
+  -- that this list is the only place the stage's storage claims are checkable: a Stage 11 that
+  -- invented a sixth table in `public` would have to be edited past this line to pass.
   canonical text[] := ARRAY[
     'public.approval_feedback', 'public.approval_requests', 'public.design_templates',
     'public.entitlements', 'public.guest_households', 'public.household_event_scopes',
@@ -144,7 +149,8 @@ DECLARE
             ELSE ARRAY[]::text[] END
     || CASE WHEN pg_temp.st2_at_least('stage11')
             THEN ARRAY['private.operator_grants', 'private.support_cases',
-                       'private.support_case_events', 'private.privacy_requests']
+                       'private.support_case_events', 'private.privacy_requests',
+                       'private.commerce_review_notes']
             ELSE ARRAY[]::text[] END;
 BEGIN
 

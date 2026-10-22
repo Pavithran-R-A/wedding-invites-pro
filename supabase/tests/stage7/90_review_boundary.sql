@@ -1052,19 +1052,25 @@ BEGIN
     'head — thirteen at Stage 7, with Stage 7''s three added names and no fourteenth; nineteen from '
     'Stage 8, which adds the six household-invitation verbs; twenty-one from Stage 9, which adds the '
     'output manifest and one frozen version''s document, both reads; twenty-two from Stage 10, which '
-    'adds `commerce_host_summary` and nothing else a browser can call; thirty-six from Stage 11, whose '
+    'adds `commerce_host_summary` and nothing else a browser can call; forty from Stage 11, whose '
     'first ten are the support workflow''s doors: four a wedding host may knock on '
     '(`open_support_case`, `get_my_support_case`, `get_my_support_cases`, `reply_to_support_case`) and '
     'six that only an operator''s body lets through '
     '(`get_operator_case`, `operator_case_queue`, `operator_add_case_note`, `operator_claim_case`, '
     '`operator_release_case`, `operator_transition_case`); slice 3 adds four more on exactly the same '
     'ruling — `create_privacy_request` and `get_my_privacy_requests` for a host, '
-    '`operator_privacy_queue` and `operator_advance_privacy_request` for an operator. All fourteen are '
+    '`operator_privacy_queue` and `operator_advance_privacy_request` for an operator; slice 4 adds the '
+    'last four on the same ruling — `operator_commerce_review_queue` and '
+    '`operator_add_commerce_review_note` for the finance desk, `operator_takedown_plan` and '
+    '`operator_takedown_publication` for operations. All eighteen are '
     'EXECUTE-granted to `authenticated`, because on this surface the grant is not the authority: the '
-    'eight operator bodies re-read the caller''s `operator_grants` row and refuse anyone else with '
-    '`insufficient_privilege`, which is §4''s "not merely by hiding links" written as a grant list '
-    'rather than as a route table — and the refusal cells are `85_support_lifecycle.sql`''s and '
-    '`90_privacy_intake.sql`''s own, not this census. Named rather than counted, '
+    'twelve operator bodies re-read the caller''s `operator_grants` row and refuse anyone else with '
+    '`insufficient_privilege` — the six support doors and the takedown pair on the `operations` duty, '
+    'the two privacy doors likewise, the finance pair on `finance_review` — '
+    'which is §4''s "not merely by hiding links" written as a grant list '
+    'rather than as a route table — and the refusal cells are `85_support_lifecycle.sql`''s, '
+    '`90_privacy_intake.sql`''s and `92_takedown_and_oversight.sql`''s own, not this census. '
+    'Named rather than counted, '
     'because a checker that only counts would not notice a swapped-out name',
     api_names,
     CASE WHEN pg_temp.s7b_at_least('stage11')
@@ -1073,9 +1079,11 @@ BEGIN
            'get_invitation_publication_state', 'get_my_privacy_requests', 'get_my_support_case',
            'get_my_support_cases',
            'get_operator_case', 'issue_guest_invitations', 'list_invitation_outputs',
-           'open_support_case', 'operator_add_case_note', 'operator_advance_privacy_request',
+           'open_support_case', 'operator_add_case_note', 'operator_add_commerce_review_note',
+           'operator_advance_privacy_request',
            'operator_case_queue',
-           'operator_claim_case', 'operator_privacy_queue', 'operator_release_case',
+           'operator_claim_case', 'operator_commerce_review_queue', 'operator_privacy_queue',
+           'operator_release_case', 'operator_takedown_plan', 'operator_takedown_publication',
            'operator_transition_case',
            'preview_invitation', 'preview_invitation_document', 'publish_invitation_version',
            'render_invitation_document', 'reply_to_support_case',
@@ -1132,10 +1140,12 @@ BEGIN
     'same construction — `create_privacy_request` and `get_my_privacy_requests` behind the host''s '
     'privacy pair, `operator_privacy_queue` and `operator_advance_privacy_request` behind the '
     'operator''s — so both halves of G3 moved again to thirty-six while the uncallable nineteen stayed '
-    'nineteen. G3f below is the line that proves that nineteen is still the same nineteen rather than a '
-    'set quietly granted through',
+    'nineteen; and slice 4 adds five bodies, four of them mirrors of that slice''s four doors and the '
+    'fifth (`operator_purge_publication_objects`) deliberately left with no door at all, so the total '
+    'is sixty here while the uncallable half grows to twenty. G3f below is the line that proves that '
+    'twenty is the same nineteen plus that one purge rather than a set quietly granted through',
     cardinality(internal_names)::bigint,
-    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 55::bigint
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 60::bigint
          WHEN pg_temp.s7b_at_least('stage10') THEN 39::bigint
          WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
          WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
@@ -1144,8 +1154,9 @@ BEGIN
     'same number of `api` names — thirteen and thirteen at Stage 7, nineteen and nineteen from Stage '
     '8, twenty-one and twenty-one from Stage 9, twenty-two and twenty-two from Stage 10, thirty-two '
     'and thirty-two after Stage 11 slice 2, which grants its six operator doors to the same role as its '
-    'four host doors and puts the difference inside the body, and thirty-six and thirty-six at this '
-    'head because slice 3''s four repeat that construction — so the '
+    'four host doors and puts the difference inside the body, thirty-six and thirty-six at slice 3 '
+    'because its four repeat that construction, and forty and forty at this head because slice 4''s '
+    'four doors are granted the same way while that slice''s fifth body is granted to nobody — so the '
     'uncallable half is refused '
     'to a host by the absence of a grant, '
     'not by the size of the schema §7. The two halves must agree: a host granted an internal body '
@@ -1156,7 +1167,7 @@ BEGIN
           (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text]::text[],
-    CASE WHEN pg_temp.s7b_at_least('stage11') THEN ARRAY['36', '36']::text[]
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN ARRAY['40', '40']::text[]
          WHEN pg_temp.s7b_at_least('stage10') THEN ARRAY['22', '22']::text[]
          WHEN pg_temp.s7b_at_least('stage9') THEN ARRAY['21', '21']::text[]
          WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
@@ -1207,10 +1218,12 @@ BEGIN
   -- neither can be satisfied by a swapped-out body that happens to leave the arithmetic intact.
   -- The want-list here is `api_names`, the array G1 was just checked against, so this assertion
   -- follows the head automatically: thirteen against thirteen at Stage 7, nineteen against nineteen
-  -- from Stage 8, twenty-one against twenty-one from Stage 9, thirty-six against thirty-six at this
-  -- Stage 11 head, and in each case by name rather than by count. Slice 3's four are mirrors by the
+  -- from Stage 8, twenty-one against twenty-one from Stage 9, thirty-six against thirty-six at slice 3
+  -- and forty against forty at this Stage 11 head, and in each case by name rather than by count.
+  -- Slice 3's and slice 4's doors are mirrors by the
   -- same construction, so they move both sides of this assertion together and cannot be satisfied by
-  -- an extra body on either side alone.
+  -- an extra body on either side alone — except slice 4's purge body, which is granted to nobody and so
+  -- can only ever appear in G3f's list.
   PERFORM pg_temp.s7b_eq('G3e the internal bodies that `authenticated` may call are not merely '
     'counted: taken by name they are exactly the published `api` wrappers'' own names, one mirror '
     'per verb and no extra body opened to a host beyond the surface it is served',
@@ -1222,12 +1235,15 @@ BEGIN
 
   PERFORM pg_temp.s7b_eq('G3f and the complement is '
     || CASE WHEN pg_temp.s7b_at_least('stage11')
-              THEN 'nineteen bodies a host cannot call at all: the eleven cultural-authority names '
+              THEN 'twenty bodies a host cannot call at all: the eleven cultural-authority names '
                    || '§7 keeps on this side, plus the six money verbs Stage 10 put behind the server '
                    || '— open an order, record a payment event, grant a right, revoke a right, expire '
                    || 'an order, reconcile — plus the two operator-authority bodies Stage 11 slice 1 '
                    || 'added, '
-                   || 'grant and revoke. G3e proves the other thirty-six of the fifty-five are exactly '
+                   || 'grant and revoke, plus the one body slice 4 wrote with no door in front of it — '
+                   || '`operator_purge_publication_objects`, the plan that hands the actual object '
+                   || 'delete to the trusted CLI, which §10 keeps off the browser surface by ruling '
+                   || 'rather than by omission. G3e proves the other forty of the sixty are exactly '
                    || 'G1''s names, so growth in this file can only ever mean a body nobody opened to '
                    || 'a browser — including slice 2''s ten and slice 3''s four, every one of which is '
                    || 'a mirror and so leaves by definition for G3e''s list rather than this one. Listing them is the '
@@ -1252,7 +1268,8 @@ BEGIN
            'create_commerce_order', 'create_tradition_pack', 'create_tradition_pack_release',
            'deprecate_tradition_pack_release', 'expire_commerce_order',
            'get_tradition_pack_review_packet', 'grant_commerce_entitlement', 'grant_operator_role',
-           'inspect_tradition_pack_release', 'record_commerce_event',
+           'inspect_tradition_pack_release', 'operator_purge_publication_objects',
+           'record_commerce_event',
            'revoke_commerce_entitlement', 'revoke_operator_role',
            'submit_tradition_pack_review', 'tradition_pack_catalog',
            'tradition_pack_retention_report', 'update_draft_tradition_pack_release',
@@ -1297,7 +1314,7 @@ BEGIN
   PERFORM pg_temp.s7b_eq('G5 and `service_role` — the key a server integration would hold — has no '
     'path through either schema: zero EXECUTE grants across every name in both of them (thirty-seven '
     'at the Stage 7 head, forty-nine from Stage 8, fifty-three from Stage 9, sixty-one from Stage 10, '
-    'eighty-three at this head), '
+    'ninety-one at Stage 11 slice 3, one hundred at this head), '
     'so neither the review workflow nor the guest one nor the money model nor the support queue '
     'can be driven by a trusted key bypassing the caller checks §9',
     (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
