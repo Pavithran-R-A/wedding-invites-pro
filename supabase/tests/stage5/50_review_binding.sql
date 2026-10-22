@@ -1284,7 +1284,8 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the '
-    || CASE WHEN pg_temp.s5_at_least('stage10') THEN 'twenty-two names'
+    || CASE WHEN pg_temp.s5_at_least('stage11') THEN 'thirty-six names'
+            WHEN pg_temp.s5_at_least('stage10') THEN 'twenty-two names'
             WHEN pg_temp.s5_at_least('stage9') THEN 'twenty-one names'
             WHEN pg_temp.s5_at_least('stage8') THEN 'nineteen names'
             WHEN pg_temp.s5_at_least('stage7') THEN 'thirteen names' ELSE 'eight names' END
@@ -1300,7 +1301,23 @@ BEGIN
     -- Stage 9 appends two more on the same pair pattern, so nineteen becomes twenty-one and M5 is
     -- still empty: both new names are reads of already-frozen or already-recorded state, neither is
     -- a maintenance act, and neither has a twin-less body behind it.
-    || CASE WHEN pg_temp.s5_at_least('stage10') THEN
+    || CASE WHEN pg_temp.s5_at_least('stage11') THEN
+              ', from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
+              || 'read the link state — plus the two doors a guest walks through, to read its own '
+              || 'invitation and to answer it, add six more, from Stage 9 the two reads a render '
+              || 'worker and a host panel need — the output manifest and one frozen version''s own '
+              || 'document — add two more, from Stage 10 the one read a host needs to see the '
+              || 'quote it was given adds the twenty-second. Stage 10''s other six commerce names are '
+              || 'not on this list by design: an order, a payment event, an entitlement grant or a '
+              || 'reconciliation finding that a browser could call would be a customer deciding their '
+              || 'own paid status, which is the exact thing M5 and the Stage 2 attack battery exist to '
+              || 'refuse. Stage 11 slice 2 adds ten support doors on a different ruling — four a host '
+              || 'may knock on and six whose bodies re-read the caller''s `operator_grants` row and '
+              || 'refuse anyone else with `insufficient_privilege`, so the grant is deliberately not '
+              || 'the authority on that surface — and slice 3 adds four privacy names: the host''s '
+              || 'file-and-read pair and the operator desk''s queue-and-advance pair, all four as '
+              || 'wrappers over `internal_api` bodies'
+            WHEN pg_temp.s5_at_least('stage10') THEN
               ', from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
               || 'read the link state — plus the two doors a guest walks through, to read its own '
               || 'invitation and to answer it, add six more, from Stage 9 the two reads a render '
@@ -1326,7 +1343,24 @@ BEGIN
     || 'which is the shape §B asked for: '
     || 'the privileged half of the new pair is reachable by nested call and by nothing else',
     v_bad,
-    CASE WHEN pg_temp.s5_at_least('stage10') THEN
+    CASE WHEN pg_temp.s5_at_least('stage11') THEN
+      ARRAY['commerce_host_summary', 'create_invitation_version', 'create_privacy_request',
+            'get_approval_requests', 'get_guest_invitation_state',
+            'get_invitation_publication_state', 'get_my_privacy_requests',
+            'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
+            'issue_guest_invitations', 'list_invitation_outputs', 'open_support_case',
+            'operator_add_case_note', 'operator_advance_privacy_request',
+            'operator_case_queue', 'operator_claim_case', 'operator_privacy_queue',
+            'operator_release_case', 'operator_transition_case', 'preview_invitation',
+            'preview_invitation_document', 'publish_invitation_version',
+            'render_invitation_document', 'reply_to_support_case',
+            'request_family_review', 'resolve_family_review',
+            'resolve_guest_invitation', 'resolve_public_invitation',
+            'revoke_family_review', 'revoke_guest_invitation',
+            'revoke_invitation_publication', 'rotate_guest_invitation',
+            'rotate_invitation_token', 'submit_family_review',
+            'submit_guest_rsvp']::text[]
+    WHEN pg_temp.s5_at_least('stage10') THEN
       ARRAY['commerce_host_summary', 'create_invitation_version', 'get_approval_requests',
             'get_guest_invitation_state', 'get_invitation_publication_state',
             'issue_guest_invitations', 'list_invitation_outputs', 'preview_invitation',

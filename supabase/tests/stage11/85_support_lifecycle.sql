@@ -499,16 +499,17 @@ BEGIN
           OR has_table_privilege(r.oid,'private.support_case_events'::regclass,'DELETE')
           OR has_table_privilege(r.oid,'private.support_case_events'::regclass,'SELECT'))), 0);
 
-  PERFORM pg_temp.s11b_eq('S09 the declared api surface is 32 names at this head: the ten doors this '
-    || 'slice adds on top of slice 1''s two',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 32);
-  PERFORM pg_temp.s11b_eq('S10 internal_api is 51, and PRIVATE is 45 — two mint triggers, the state-machine '
+  PERFORM pg_temp.s11b_eq('S09 the declared api surface is 36 names at this head: the ten doors this '
+    || 'slice adds on top of slice 1''s two, and slice 3''s four privacy doors',
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 36);
+  PERFORM pg_temp.s11b_eq('S10 internal_api is 55, and PRIVATE is 48 — two mint triggers, the state-machine '
     || 'guard, and a specialised UPDATE/INSERT guard pair per trail, because a referential SET NULL has to be '
-    || 'distinguishable from a rewrite and the anti-forgery rule must not fire on that UPDATE at all',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 51);
+    || 'distinguishable from a rewrite and the anti-forgery rule must not fire on that UPDATE at all, plus '
+    || 'slice 3''s four privacy mirrors and the three private functions behind `private.privacy_requests`',
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 55);
   PERFORM pg_temp.s11b_eq('S10b measured as its own cell so a helper leaking into a privileged namespace '
     || 'moves one number and not the other',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'private'::regnamespace), 45);
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'private'::regnamespace), 48);
 
   PERFORM pg_temp.s11b_array('S11 the ten host- and operator-facing names, by name rather than by count: '
     || 'a door renamed is a door a screen stops calling',

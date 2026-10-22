@@ -1052,26 +1052,31 @@ BEGIN
     'head — thirteen at Stage 7, with Stage 7''s three added names and no fourteenth; nineteen from '
     'Stage 8, which adds the six household-invitation verbs; twenty-one from Stage 9, which adds the '
     'output manifest and one frozen version''s document, both reads; twenty-two from Stage 10, which '
-    'adds `commerce_host_summary` and nothing else a browser can call; thirty-two from Stage 11, whose '
-    'ten are the support workflow''s doors: four a wedding host may knock on '
+    'adds `commerce_host_summary` and nothing else a browser can call; thirty-six from Stage 11, whose '
+    'first ten are the support workflow''s doors: four a wedding host may knock on '
     '(`open_support_case`, `get_my_support_case`, `get_my_support_cases`, `reply_to_support_case`) and '
     'six that only an operator''s body lets through '
     '(`get_operator_case`, `operator_case_queue`, `operator_add_case_note`, `operator_claim_case`, '
-    '`operator_release_case`, `operator_transition_case`). All ten are EXECUTE-granted to '
-    '`authenticated`, because on this surface the grant is not the authority: the six operator bodies '
-    're-read the caller''s `operator_grants` row and refuse anyone else with `insufficient_privilege`, '
-    'which is §4''s "not merely by hiding links" written as a grant list rather than as a route '
-    'table — and the refusal cells are `85_support_lifecycle.sql`''s own, not this census. '
-    'Named rather than counted, '
+    '`operator_release_case`, `operator_transition_case`); slice 3 adds four more on exactly the same '
+    'ruling — `create_privacy_request` and `get_my_privacy_requests` for a host, '
+    '`operator_privacy_queue` and `operator_advance_privacy_request` for an operator. All fourteen are '
+    'EXECUTE-granted to `authenticated`, because on this surface the grant is not the authority: the '
+    'eight operator bodies re-read the caller''s `operator_grants` row and refuse anyone else with '
+    '`insufficient_privilege`, which is §4''s "not merely by hiding links" written as a grant list '
+    'rather than as a route table — and the refusal cells are `85_support_lifecycle.sql`''s and '
+    '`90_privacy_intake.sql`''s own, not this census. Named rather than counted, '
     'because a checker that only counts would not notice a swapped-out name',
     api_names,
     CASE WHEN pg_temp.s7b_at_least('stage11')
          THEN pg_temp.s7b_sorted(ARRAY['commerce_host_summary', 'create_invitation_version',
-           'get_approval_requests', 'get_guest_invitation_state',
-           'get_invitation_publication_state', 'get_my_support_case', 'get_my_support_cases',
+           'create_privacy_request', 'get_approval_requests', 'get_guest_invitation_state',
+           'get_invitation_publication_state', 'get_my_privacy_requests', 'get_my_support_case',
+           'get_my_support_cases',
            'get_operator_case', 'issue_guest_invitations', 'list_invitation_outputs',
-           'open_support_case', 'operator_add_case_note', 'operator_case_queue',
-           'operator_claim_case', 'operator_release_case', 'operator_transition_case',
+           'open_support_case', 'operator_add_case_note', 'operator_advance_privacy_request',
+           'operator_case_queue',
+           'operator_claim_case', 'operator_privacy_queue', 'operator_release_case',
+           'operator_transition_case',
            'preview_invitation', 'preview_invitation_document', 'publish_invitation_version',
            'render_invitation_document', 'reply_to_support_case',
            'request_family_review', 'resolve_family_review',
@@ -1120,13 +1125,17 @@ BEGIN
     'and six names no browser may call at all — the money verbs; forty-one at Stage 11 slice 1, whose '
     'two are neither mirrors nor money verbs but the operator-authority bodies — `grant_operator_role` '
     'and `revoke_operator_role` — that §13 keeps reachable only from the trusted owner role, which '
-    'is why that count moved while G3''s did not; fifty-one at this head, because slice 2''s ten are '
+    'is why that count moved while G3''s did not; fifty-five at this head, because slice 2''s ten are '
     'the exact mirrors of slice 2''s ten doors — one body per wrapper, no extra body opened to a host '
     'beyond the surface it is served, which is G3e''s claim by name — so both halves of G3 grew to '
-    'thirty-two while the uncallable nineteen stayed nineteen. G3f below is the line that proves that '
-    'nineteen is still the same nineteen rather than a set quietly granted through',
+    'thirty-two while the uncallable nineteen stayed nineteen; and slice 3''s four are mirrors by that '
+    'same construction — `create_privacy_request` and `get_my_privacy_requests` behind the host''s '
+    'privacy pair, `operator_privacy_queue` and `operator_advance_privacy_request` behind the '
+    'operator''s — so both halves of G3 moved again to thirty-six while the uncallable nineteen stayed '
+    'nineteen. G3f below is the line that proves that nineteen is still the same nineteen rather than a '
+    'set quietly granted through',
     cardinality(internal_names)::bigint,
-    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 51::bigint
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 55::bigint
          WHEN pg_temp.s7b_at_least('stage10') THEN 39::bigint
          WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
          WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
@@ -1134,8 +1143,9 @@ BEGIN
   PERFORM pg_temp.s7b_eq('G3 `authenticated` holds EXECUTE on the mirrored internal bodies and on the '
     'same number of `api` names — thirteen and thirteen at Stage 7, nineteen and nineteen from Stage '
     '8, twenty-one and twenty-one from Stage 9, twenty-two and twenty-two from Stage 10, thirty-two '
-    'and thirty-two at Stage 11 slice 2, which grants its six operator doors to the same role as its '
-    'four host doors and puts the difference inside the body — so the '
+    'and thirty-two after Stage 11 slice 2, which grants its six operator doors to the same role as its '
+    'four host doors and puts the difference inside the body, and thirty-six and thirty-six at this '
+    'head because slice 3''s four repeat that construction — so the '
     'uncallable half is refused '
     'to a host by the absence of a grant, '
     'not by the size of the schema §7. The two halves must agree: a host granted an internal body '
@@ -1146,7 +1156,7 @@ BEGIN
           (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text]::text[],
-    CASE WHEN pg_temp.s7b_at_least('stage11') THEN ARRAY['32', '32']::text[]
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN ARRAY['36', '36']::text[]
          WHEN pg_temp.s7b_at_least('stage10') THEN ARRAY['22', '22']::text[]
          WHEN pg_temp.s7b_at_least('stage9') THEN ARRAY['21', '21']::text[]
          WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
@@ -1197,8 +1207,10 @@ BEGIN
   -- neither can be satisfied by a swapped-out body that happens to leave the arithmetic intact.
   -- The want-list here is `api_names`, the array G1 was just checked against, so this assertion
   -- follows the head automatically: thirteen against thirteen at Stage 7, nineteen against nineteen
-  -- from Stage 8, twenty-one against twenty-one from Stage 9, thirty-two against thirty-two from
-  -- Stage 11 slice 2, and in each case by name rather than by count.
+  -- from Stage 8, twenty-one against twenty-one from Stage 9, thirty-six against thirty-six at this
+  -- Stage 11 head, and in each case by name rather than by count. Slice 3's four are mirrors by the
+  -- same construction, so they move both sides of this assertion together and cannot be satisfied by
+  -- an extra body on either side alone.
   PERFORM pg_temp.s7b_eq('G3e the internal bodies that `authenticated` may call are not merely '
     'counted: taken by name they are exactly the published `api` wrappers'' own names, one mirror '
     'per verb and no extra body opened to a host beyond the surface it is served',
@@ -1215,10 +1227,10 @@ BEGIN
                    || '— open an order, record a payment event, grant a right, revoke a right, expire '
                    || 'an order, reconcile — plus the two operator-authority bodies Stage 11 slice 1 '
                    || 'added, '
-                   || 'grant and revoke. G3e proves the other thirty-two of the fifty-one are exactly '
+                   || 'grant and revoke. G3e proves the other thirty-six of the fifty-five are exactly '
                    || 'G1''s names, so growth in this file can only ever mean a body nobody opened to '
-                   || 'a browser — including slice 2''s ten, every one of which is a mirror and so '
-                   || 'leaves by definition for G3e''s list rather than this one. Listing them is the '
+                   || 'a browser — including slice 2''s ten and slice 3''s four, every one of which is '
+                   || 'a mirror and so leaves by definition for G3e''s list rather than this one. Listing them is the '
                    || 'point either way: a body someone granted to '
                    || '`authenticated` would leave this list by moving to G3e''s, and one that '
                    || 'should have been a mirror but was not would show up here'

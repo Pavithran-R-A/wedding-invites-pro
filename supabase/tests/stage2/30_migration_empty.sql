@@ -144,7 +144,7 @@ DECLARE
             ELSE ARRAY[]::text[] END
     || CASE WHEN pg_temp.st2_at_least('stage11')
             THEN ARRAY['private.operator_grants', 'private.support_cases',
-                       'private.support_case_events']
+                       'private.support_case_events', 'private.privacy_requests']
             ELSE ARRAY[]::text[] END;
 BEGIN
 

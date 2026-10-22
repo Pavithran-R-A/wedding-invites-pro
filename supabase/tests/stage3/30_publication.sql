@@ -1416,15 +1416,34 @@ BEGIN
       -- grant lookup, not by a closed schema. What this literal does prove about that split is
       -- `service_role=n`: the server key has no path through an operator door either, so no case
       -- decision can be attributed to a caller that cannot be identified.
+      --
+      -- Slice 3's thirty-six: the thirty-two above plus the privacy desk's four — the host's
+      -- file/read pair (`create_privacy_request`, `get_my_privacy_requests`) and the operator's
+      -- queue/advance pair (`operator_privacy_queue`, `operator_advance_privacy_request`). Every row
+      -- is the same transport row as the thirty-two: `definer=n`, `lang=sql`, `search_path=""`,
+      -- `anon=n`, `service_role=n`, `public=n`, and `authenticated=y` for the reason just stated —
+      -- the door is open to a signed-in browser, and the refusal that matters ("you are not the
+      -- requester", "you are not an operator") is the body's, measured by `90_privacy_intake.sql`,
+      -- not a closed schema's. `vol=s` on the two reads and `vol=v` on the two writes, so a status
+      -- check routes on GET while the two verbs that carry a note body or a target status never put
+      -- either in a query string an access log keeps. `anon=n` on all four: a privacy request is
+      -- filed by a host with a session, and the desk is an operator screen.
+      --
       -- Provenance: `q11-logs/s11-s2-g1-emit.sql` runs the row expression above against
       -- `st11qual_iter`, the database `q11-logs/s11-iterate.sh` rebuilds from Stage 2 through slice 2,
       -- and the thirty-two lines it printed (`q11-logs/s11-s2-g1-rows.txt`) replaced this literal whole.
-      -- Nothing below was transcribed from the migration text.
+      -- Slice 3 then re-emitted all thirty-six from `q11-logs/s11-s3-emit-g1.sql` — the same
+      -- expression, run against `st11qual_s3b`, a database built from the slice-2 template plus
+      -- `20261020190300_stage11_privacy_intake.sql` and nothing else — and that output
+      -- (`q11-logs/s11-s3-g1-matrix-rows.txt`, thirty-six lines) replaced it whole again. Nothing
+      -- below was transcribed from the migration text.
       $matrix11$commerce_host_summary(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 create_invitation_version(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+create_privacy_request(p_wedding_id uuid, p_kind text, p_note text) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_approval_requests(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_guest_invitation_state(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_my_privacy_requests() -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_my_support_case(p_case_ref text) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_my_support_cases(p_status text, p_limit integer) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_operator_case(p_case_ref text) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1432,8 +1451,10 @@ issue_guest_invitations(p_wedding_id uuid, p_household_ids uuid[], p_expires_at 
 list_invitation_outputs(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 open_support_case(p_wedding_id uuid, p_category text, p_severity text, p_summary text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_add_case_note(p_case_ref text, p_kind text, p_body text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_advance_privacy_request(p_request_ref text, p_status text, p_note text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_case_queue(p_status text, p_category text, p_limit integer) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_claim_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_privacy_queue(p_status text) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_release_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_transition_case(p_case_ref text, p_to_status text, p_resolution_code text, p_body text, p_idempotency_key uuid) -> jsonb | definer=n | lang=sql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1628,18 +1649,21 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
   -- which has no USAGE on this schema at all (G6b) — so the privileged half of Stage 9 is a read
   -- surface, and the artefacts themselves are written by the backend over the table.
     CASE WHEN pg_temp.st3p_at_least('stage11') THEN
-      -- Stage 11 slice 2's fifty-one: slice 1's forty-one (the thirty-nine in the Stage 10 arm below,
-      -- plus the two grant bodies `grant_operator_role` and `revoke_operator_role`) and the ten bodies
+      -- Stage 11 slice 3's fifty-five: slice 1's forty-one (the thirty-nine in the Stage 10 arm below,
+      -- plus the two grant bodies `grant_operator_role` and `revoke_operator_role`), the ten bodies
       -- the support workflow adds — the four host doors `open_support_case`, `get_my_support_case`,
       -- `get_my_support_cases`, `reply_to_support_case`, the two operator reads `operator_case_queue`,
       -- `get_operator_case`, and the four operator writes `operator_add_case_note`,
-      -- `operator_claim_case`, `operator_release_case`, `operator_transition_case`. All ten are the
-      -- `definer=y` / `authenticated=y` half of the shape this head already carries, for one reason:
-      -- those bodies read and write `private.support_cases` and `private.support_case_events`, and the
-      -- measured grant table on both is false for `anon`, `authenticated` and `service_role` alike, so
-      -- authorization is the body re-deriving `auth.uid()` and matching it against the requester or the
-      -- holder edge — the same move as Stage 9's two render reads and Stage 10's
-      -- `commerce_host_summary`, not a new one. Reads are `vol=s`, writes `vol=v`; all ten keep
+      -- `operator_claim_case`, `operator_release_case`, `operator_transition_case` — and slice 3's four
+      -- privacy doors: `create_privacy_request` and `get_my_privacy_requests` (the host's file/read
+      -- pair), `operator_privacy_queue` and `operator_advance_privacy_request` (the desk's read/advance
+      -- pair). All ten support rows and all four privacy rows are the `definer=y` / `authenticated=y`
+      -- half of the shape this head already carries, for one reason: those bodies read and write
+      -- `private.support_cases`, `private.support_case_events` and `private.privacy_requests`, and the
+      -- measured grant table on all three is false for `anon`, `authenticated` and `service_role` alike,
+      -- so authorization is the body re-deriving `auth.uid()` and matching it against the requester, the
+      -- holder edge or an operator grant — the same move as Stage 9's two render reads and Stage 10's
+      -- `commerce_host_summary`, not a new one. Reads are `vol=s`, writes `vol=v`; all fourteen keep
       -- `search_path=""`, `owner=postgres`, `anon=n`, `service_role=n` and `public=n`.
       -- Slice 1's two rows keep the posture Stage 10's six write bodies established, which §3 now cites
       -- as the precedent this stage follows rather than the definer one it had assumed: `definer=n`,
@@ -1657,7 +1681,9 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=n | lang=sql | vol
       -- readout as an expectation. Slice 2's ten rows were measured first and pasted second:
       -- `q11-logs/s11-s2-g1f-emit.sql` ran this same row expression against `st11qual_iter`, the database
       -- `q11-logs/s11-iterate.sh` rebuilds from Stage 2 through this migration, and the 51 lines it
-      -- printed (`q11-logs/s11-s2-g1f-rows.txt`) replaced this literal whole. The order matters: the one
+      -- printed (`q11-logs/s11-s2-g1f-rows.txt`) replaced this literal whole. Slice 3's four rows were
+      -- emitted by the same expression and inserted at their `COLLATE "C"` positions; the 55-line
+      -- result is `q11-logs/s11-s3-g1f-rows.txt`. The order matters: the one
       -- place where §10's design disagreed with the census was `operator_assign_case`, which C29c has
       -- refused since Stage 2 because it names a person in an argument, and what settled it was the
       -- measurement — the migration changed to `operator_claim_case` / `operator_release_case`, and the
@@ -1667,6 +1693,7 @@ commerce_host_summary(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | v
 commerce_reconcile(p_order_id uuid, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
 create_commerce_order(p_wedding_id uuid, p_package_code text, p_actor_user_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
 create_invitation_version(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+create_privacy_request(p_wedding_id uuid, p_kind text, p_note text) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 create_tradition_pack(p_pack_key text, p_display_name text, p_scope_statement text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
 create_tradition_pack_release(p_pack_key text, p_definition jsonb, p_definition_schema_version integer, p_languages text[], p_author_label text, p_machine_assisted boolean, p_machine_assistance_notes text, p_source_reference text, p_changelog text) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
 deprecate_tradition_pack_release(p_release_id uuid) -> jsonb | definer=n | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=n | service_role=n | public=n
@@ -1674,6 +1701,7 @@ expire_commerce_order(p_order_id uuid, p_actor_user_id uuid) -> jsonb | definer=
 get_approval_requests(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_guest_invitation_state(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_invitation_publication_state(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+get_my_privacy_requests() -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_my_support_case(p_case_ref text) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_my_support_cases(p_status text, p_limit integer) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 get_operator_case(p_case_ref text) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1685,8 +1713,10 @@ issue_guest_invitations(p_wedding_id uuid, p_household_ids uuid[], p_expires_at 
 list_invitation_outputs(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 open_support_case(p_wedding_id uuid, p_category text, p_severity text, p_summary text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_add_case_note(p_case_ref text, p_kind text, p_body text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_advance_privacy_request(p_request_ref text, p_status text, p_note text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_case_queue(p_status text, p_category text, p_limit integer) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_claim_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
+operator_privacy_queue(p_status text) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_release_case(p_case_ref text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 operator_transition_case(p_case_ref text, p_to_status text, p_resolution_code text, p_body text, p_idempotency_key uuid) -> jsonb | definer=y | lang=plpgsql | vol=v | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
 preview_invitation(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql | vol=s | search_path=search_path="" | owner=postgres | anon=n | authenticated=y | service_role=n | public=n
@@ -1932,6 +1962,13 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
       -- the pair: adding a body *with* an `api` twin would leave this list untouched, so what grows it is
       -- a privileged-only implementation, and Stage 11 adds exactly two of those.
       --
+      -- Slice 3 adds four bodies and four wrappers, so it is a no-op here for the reason Stage 9 was: the
+      -- privacy names arrive paired, and a privacy body shipped without its wrapper would appear as a
+      -- twentieth name rather than passing silently. The `api` half is the other direction: if a privacy
+      -- wrapper ever arrived with no body behind it, it would appear as an `unpaired-api` row and this
+      -- literal would fail on the extra text, which is why the expectation below is the whole string and
+      -- not a count of internal names.
+      --
       -- The other half of the sentence is the absence: no `unpaired-api` row appeared. That is the only
       -- part of this census that would notice a new browser-facing callable with no privileged body behind
       -- it — a wrapper reading a table directly, or a name added to `api` and forgotten in `internal_api`.
@@ -1985,12 +2022,21 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
   -- same construction as every stage since the closure repair — an invoker wrapper of one
   -- `SELECT internal_api.<name>(…)` over a definer body that holds the authorization.
     CASE WHEN pg_temp.st3p_at_least('stage11') THEN
-      -- Stage 11 slice 2's thirty-two pair lines, measured the same way. Ten new names, each paired by
-      -- exact name and argument types, and every verdict true for the ordinary reason this census has
-      -- given since the closure repair: an invoker wrapper of one `SELECT internal_api.<name>(…)` over a
-      -- definer body whose browser grants match its own. `impl_is_definer=true` on all ten is where the
-      -- support workflow's authorization lives; `wrapper_is_invoker=true` is what keeps the wrapper from
-      -- becoming a second place a decision could drift.
+      -- Stage 11 slice 3's thirty-six pair lines, measured the same way. Slice 2 contributed ten new
+      -- names, each paired by exact name and argument types, and every verdict true for the ordinary
+      -- reason this census has given since the closure repair: an invoker wrapper of one
+      -- `SELECT internal_api.<name>(…)` over a definer body whose browser grants match its own.
+      -- `impl_is_definer=true` on all ten is where the support workflow's authorization lives;
+      -- `wrapper_is_invoker=true` is what keeps the wrapper from becoming a second place a decision
+      -- could drift.
+      -- Slice 3 adds four more of exactly that construction — `create_privacy_request`,
+      -- `get_my_privacy_requests`, `operator_privacy_queue`, `operator_advance_privacy_request` — so the
+      -- census is thirty-six and every verdict is still true. Their `impl_is_definer=true` is where the
+      -- privacy desk's authorization lives: those bodies read and write `private.privacy_requests`, whose
+      -- measured grant table is false for `anon`, `authenticated` and `service_role` alike, so the
+      -- authority to see or advance a request is re-derived inside the body rather than granted on the
+      -- table. A privacy name that arrived as an `unpaired-api` row would already have failed G1g; these
+      -- four arrived as pairs, which is why G1g's nineteen-name census is unchanged by this slice.
       -- `no_service_role_on_either=true` is the verdict worth naming twice on an operations surface. The
       -- trusted server key cannot open, claim, note, reply to or transition a case through either half
       -- of these ten pairs, so every row in `private.support_case_events` traces to a session with an
@@ -2002,12 +2048,19 @@ rotate_invitation_token(p_wedding_id uuid) -> jsonb | definer=y | lang=plpgsql |
       -- is where a broken grant lookup would show up as a failure rather than as a passing census.
       -- Provenance: `q11-logs/s11-s2-g1h-emit.sql` ran the expression directly above against
       -- `st11qual_iter`; the thirty-two lines it printed are `q11-logs/s11-s2-g1h-rows.txt` and are
-      -- pasted here unchanged.
+      -- pasted here unchanged. `q11-logs/s11-s3-emit-g1h.sql` re-ran the same expression against
+      -- `st11qual_it` after the privacy migration; its thirty-six lines are
+      -- `q11-logs/s11-s3-g1h-rows.txt`, and a diff of the old literal against that emit contained
+      -- exactly the four privacy names inserted above, each at its `COLLATE "C"` position, with every
+      -- verdict `true`. The two files were compared with CR stripped, because psql on Windows writes
+      -- the emit with CRLF while the suite stores LF.
       $pairs11$commerce_host_summary wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 create_invitation_version wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+create_privacy_request wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_approval_requests wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_guest_invitation_state wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_invitation_publication_state wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+get_my_privacy_requests wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_my_support_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_my_support_cases wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 get_operator_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
@@ -2015,8 +2068,10 @@ issue_guest_invitations wrapper_is_invoker=true impl_is_definer=true anon_grants
 list_invitation_outputs wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 open_support_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_add_case_note wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+operator_advance_privacy_request wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_case_queue wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_claim_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
+operator_privacy_queue wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_release_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 operator_transition_case wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
 preview_invitation wrapper_is_invoker=true impl_is_definer=true anon_grants_match=true authenticated_grants_match=true no_service_role_on_either=true
@@ -2186,11 +2241,23 @@ rotate_invitation_token wrapper_is_invoker=true impl_is_definer=true anon_grants
   -- census of signatures. What G4 really names is narrower: the exposed functions whose *only* input
   -- channel is the request. This line therefore grows when a new credential is given an entry point,
   -- which is the event worth failing on.
+  --
+  -- Stage 11 adds a fourth argument-free door, and it is the first that is *not* a bearer-secret
+  -- reader: `api.get_my_privacy_requests()` takes no argument because it lists the requests of
+  -- whoever the session says the caller is — it reads `auth.uid()`, not a secret carried in the URL
+  -- or body. It joins this list for the mechanical reason `submit_guest_rsvp` does not: `pronargs`
+  -- is 0, so the query sees it. The distinction is worth stating rather than flattening, because the
+  -- failure this line catches is a zero-argument function reading an input no signature admits; for
+  -- this one the input is the JWT that Supabase Auth already authenticated, and the refusal that
+  -- matters ("no session" ⇒ no rows) is measured in `90_privacy_intake.sql`. What the literal now
+  -- asserts is that Stage 11 added exactly one such signature and no other.
   PERFORM pg_temp.st3p_eq('G4 the argument-free api functions are exactly the doors that read a credential from the request',
     (SELECT coalesce(string_agg(p.proname, ', ' ORDER BY p.proname COLLATE "C"), '(none)')
        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'api' AND p.pronargs = 0),
-    CASE WHEN pg_temp.st3p_at_least('stage8')
+    CASE WHEN pg_temp.st3p_at_least('stage11')
+         THEN 'get_my_privacy_requests, resolve_family_review, resolve_guest_invitation, resolve_public_invitation'
+         WHEN pg_temp.st3p_at_least('stage8')
          THEN 'resolve_family_review, resolve_guest_invitation, resolve_public_invitation'
          WHEN pg_temp.st3p_at_least('stage7')
          THEN 'resolve_family_review, resolve_public_invitation'

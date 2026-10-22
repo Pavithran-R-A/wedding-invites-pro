@@ -409,23 +409,21 @@ BEGIN
 
   -- The declared surface for this head, counted from `pg_proc` rather than grepped from source, so a name
   -- declared twice with two argument lists counts twice here. Slice 1 moved these numbers by three names in
-  -- total and added no wrapper; slice 2 is the one that moves them again, and it moves all three: api 32
-  -- (Stage 10's 22 plus the ten support wrappers), internal_api 51 (39 plus slice 1's pair plus slice 2's
-  -- ten bodies) and private 45 (37 plus the predicate plus both slices' guard families). The step is worth
-  -- stating as a sum rather than as a number because the difference between the two slices is the finding
-  -- this file exists to make: slice 1's half of Stage 11 is reachable by no browser at all, and slice 2's
-  -- half is a surface, which is why it has a battery of its own.
-  PERFORM pg_temp.s11a_eq('A06a the declared api surface is 32 names: Stage 10''s twenty-two plus slice 2''s '
-    || 'ten wrappers, and slice 1 contributed none',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'api'::regnamespace), 32);
-  PERFORM pg_temp.s11a_eq('A06b internal_api is 51: thirty-nine at Stage 10, plus this slice''s pair, plus '
-    || 'slice 2''s ten bodies',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'internal_api'::regnamespace), 51);
-  PERFORM pg_temp.s11a_eq('A06c private is 45: thirty-seven at Stage 10, plus the predicate this slice '
-    || 'added, plus this slice''s audit pair — the UPDATE guard with its one referential hole and the INSERT '
-    || 'guard that names a human — plus slice 2''s five trigger functions: two minters, the state-machine '
-    || 'guard, and the case event''s own UPDATE/INSERT pair',
-    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'private'::regnamespace), 45);
+  -- total and added no wrapper; slice 2 moved all three; slice 3 moves all three again with its four
+  -- wrappers, four bodies and three private trigger functions: api 36, internal_api 55 and private 48. The
+  -- step is worth stating as a sum rather than as a number because the difference between the slices is the
+  -- finding this file exists to make: slice 1's half of Stage 11 is reachable by no browser at all, slice
+  -- 2's half is a support surface, and slice 3's is a privacy surface with a state machine behind it.
+  PERFORM pg_temp.s11a_eq('A06a the declared api surface is 36 names: Stage 10''s twenty-two plus slice '
+    || '2''s ten support wrappers plus slice 3''s four privacy wrappers',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'api'::regnamespace), 36);
+  PERFORM pg_temp.s11a_eq('A06b internal_api is 55: thirty-nine at Stage 10, plus slice 1''s pair, plus '
+    || 'slice 2''s ten support bodies, plus slice 3''s four privacy bodies',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'internal_api'::regnamespace), 55);
+  PERFORM pg_temp.s11a_eq('A06c private is 48: thirty-seven at Stage 10, plus the predicate slice 1 '
+    || 'added and its audit pair, plus slice 2''s five trigger functions, plus slice 3''s three — the ref '
+    || 'minter, the insert-time requester guard, and the state-machine guard',
+    (SELECT count(*)::int FROM pg_proc p WHERE p.pronamespace = 'private'::regnamespace), 48);
 
   PERFORM pg_temp.s11a_array('A07 the audit trail gained exactly the five columns §4 names, and no existing '
     || 'column was repurposed: the new half of the row is named, not counted',
@@ -1275,12 +1273,12 @@ BEGIN
   -- its own, all in `pg_temp`, and the claim a reader needs is that none of them reached a published
   -- namespace. `'pg_temp'::regnamespace` cannot express that — the alias resolves only through the search
   -- path, and the cast raises — so each namespace is named directly instead.
-  PERFORM pg_temp.s11a_eq('Z07 the declared api surface is still the 32 names this file found at A06a, '
+  PERFORM pg_temp.s11a_eq('Z07 the declared api surface is still the 36 names this file found at A06a, '
     || 'measured after every group has run',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 32);
-  PERFORM pg_temp.s11a_eq('Z07b and internal_api is still 51: a battery that leaked a helper into a '
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 36);
+  PERFORM pg_temp.s11a_eq('Z07b and internal_api is still 55: a battery that leaked a helper into a '
     || 'privileged namespace would move this number and nothing else here would notice',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 51);
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 55);
 
   -- The floor counts this cell too, so the number it compares against is the number the file prints and
   -- not one less than it: a floor a reader has to adjust mentally is a floor that gets mis-set at its next

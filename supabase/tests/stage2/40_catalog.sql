@@ -171,7 +171,7 @@ DECLARE
                        'commerce_payment_attempts','commerce_payment_events',
                        'commerce_refunds','commerce_policy']
             ELSE ARRAY[]::text[] END
-    -- Stage 11's three tables, and their arrival here is the assertion that matters more than the count
+    -- Stage 11's tables, and their arrival here is the assertion that matters more than the count
     -- they move: operational authority is a credential, and C06 is the line that says a credential lives
     -- in the schema no browser role can even name. `20_attacks.sql` group 4 and C11/C14 prove the reach
     -- half; this inventory proves the location half, and a Stage 11 that had put `operator_grants` in
@@ -179,11 +179,14 @@ DECLARE
     -- for the same reason and not a different one: a ticket carries a host's own words about a wedding,
     -- so `private.support_cases` and `private.support_case_events` are reachable only through the paired
     -- wrapper/body boundary, and the measured grant posture on both is false for `anon`,
-    -- `authenticated` and `service_role` alike. Measured on a chain that applied Stage 2 through Stage 11
-    -- — eleven names, the eight above plus these three — in `q11-logs/s11-s2-readout-2.txt` section 6;
-    -- slice 1's nine-name readout is in `q11-logs/s11-catalog-readout-1.txt`.
+    -- `authenticated` and `service_role` alike. Slice 3 adds `privacy_requests` on the same terms — a
+    -- request names an account and the wedding it is about, and §10 gives it four paired doors and no
+    -- table privilege for any client role. Measured on a chain that applied Stage 2 through Stage 11
+    -- — twelve names, the eight above plus these four — in `q11-logs/s11-s2-readout-2.txt` section 6
+    -- for the eleven-name head; slice 3's arrival is measured in `q11-logs/s11-s3-readout-1.txt`.
+    -- Slice 1's nine-name readout is in `q11-logs/s11-catalog-readout-1.txt`.
     || CASE WHEN pg_temp.st2_at_least('stage11')
-            THEN ARRAY['operator_grants','support_cases','support_case_events']
+            THEN ARRAY['operator_grants','support_cases','support_case_events','privacy_requests']
             ELSE ARRAY[]::text[] END;
   legacy_tbls     text[] := ARRAY[
     'projects','templates','guests','orders','payments','printers','activity_logs',
@@ -367,7 +370,18 @@ DECLARE
                        'support_cases(assigned_operator_user_id)->auth.users=SETNULL',
                        'support_cases(opened_by_user_id)->auth.users=SETNULL',
                        'support_cases(requester_user_id)->auth.users=SETNULL',
-                       'support_cases(wedding_id)->weddings=NOACTION']
+                       'support_cases(wedding_id)->weddings=NOACTION',
+                       -- Slice 3's two, and each is the choice its question forces. The wedding edge is
+                       -- NO ACTION for the reason every request-like row above it is: the request is the
+                       -- record of something a person asked for, and it must outlive the data it asks
+                       -- about rather than being deleted by it or blocking the owner's own delete. The
+                       -- requester edge is SET NULL, the opposite of `operator_grants`'s cascade and for
+                       -- the complementary reason: a live credential must not outlive its subject, but
+                       -- the request *is evidence* that a person asked, so erasing the account releases
+                       -- the link and leaves the row standing (D13–D14, D21). Stated as SQL rather than
+                       -- as prose the migration's COMMENT could carry and no assertion could check.
+                       'privacy_requests(requester_user_id)->auth.users=SETNULL',
+                       'privacy_requests(wedding_id)->weddings=NOACTION']
             ELSE ARRAY[]::text[] END;
   -- Foreign keys whose referencing columns have no index that starts with them.
   -- Accepted, each for a stated reason, and asserted as a closed set so that a new
@@ -447,7 +461,16 @@ DECLARE
                        'support_case_events->auth.users',
                        'support_cases->auth.users',
                        'support_cases->auth.users',
-                       'support_cases->weddings']
+                       'support_cases->weddings',
+                       -- Slice 3's one: `requester_user_id` is the leading column of
+                       -- `privacy_requests_requester_requested_idx`, so the SET NULL that erases an
+                       -- account is an index probe and the edge is absent from this list. The wedding
+                       -- edge is here because no index leads with `wedding_id` — the two indexes that
+                       -- exist lead with the requester and with the status — and it is unindexed for
+                       -- the same reason as `support_cases->weddings`: a wedding with a standing request
+                       -- is not deletable by design, so the FK check is a rare refusal rather than a
+                       -- customer path.
+                       'privacy_requests->weddings']
             ELSE ARRAY[]::text[] END;
   t text;
 BEGIN
@@ -904,9 +927,24 @@ BEGIN
         -- definer `private.actor_is_operator` above, reached now by exactly the nested callers whose
         -- absence slice 1 could only predict. Nothing here is a definer that writes money, a credential
         -- or a cultural approval: the ten are the support queue and no other table.
-        -- All thirty-six, listed rather than counted, is what C26 asserts; `api` still holds none (C26b).
+        -- All thirty-six at slice 2, listed rather than counted, is what C26 asserts; `api` still holds
+        -- none (C26b).
+        --
+        -- Slice 3 brings the count to forty with the four privacy bodies, and the reason is the standing
+        -- one: `create_privacy_request` and `get_my_privacy_requests` read and write
+        -- `private.privacy_requests`, on which no browser role holds a single table privilege (C06, C11,
+        -- C12), so an INVOKER door answering a host's "where is my request" would raise `permission
+        -- denied for table privacy_requests` instead of returning the row the host owns. The two desk
+        -- doors are definers for the slice-2 reason: the predicate that decides whether the caller is an
+        -- operator is `private.actor_is_operator`, itself a definer over `private.operator_grants`. All
+        -- four are paired with wrappers (C26e), and nothing here writes money, a credential or a cultural
+        -- approval: the four are the request queue and no other table.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY['private.actor_is_operator',
+                           'internal_api.create_privacy_request',
+                           'internal_api.get_my_privacy_requests',
+                           'internal_api.operator_advance_privacy_request',
+                           'internal_api.operator_privacy_queue',
                            'internal_api.get_my_support_case',
                            'internal_api.get_my_support_cases',
                            'internal_api.get_operator_case',
@@ -950,8 +988,10 @@ BEGIN
   -- preview, thirteen from Stage 7, which added the five family-review verbs, nineteen from
   -- Stage 8, which added the six household-invitation verbs, twenty-one from Stage 9, which added
   -- the two read doors over the render contract and its manifest, twenty-two from Stage 10, which
-  -- added one door over the purchase state, and thirty-two from Stage 11 slice 2, which added the
-  -- support queue's ten. Only one door, because the commerce write verbs stay
+  -- added one door over the purchase state, thirty-two from Stage 11 slice 2, which added the
+  -- support queue's ten, and thirty-six from slice 3, which added the privacy desk's four — the
+  -- host's file/read pair and the operator's queue/advance pair, every one paired. Only one door was
+  -- added by Stage 10's commerce slice, because the commerce write verbs stay
   -- server-side: a browser that could place an order could choose its own price, and the whole point of
   -- the quote is that it cannot. So the exposed surface grows by a read, and the six service-only
   -- implementations beside it are reachable from no wrapper at all.
@@ -963,7 +1003,7 @@ BEGIN
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 32
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 36
                                        WHEN pg_temp.st2_at_least('stage10') THEN 22
                                        WHEN pg_temp.st2_at_least('stage9') THEN 21
                                        WHEN pg_temp.st2_at_least('stage8') THEN 19
@@ -1100,7 +1140,13 @@ BEGIN
                            'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
                            'open_support_case', 'operator_add_case_note', 'operator_case_queue',
                            'operator_claim_case', 'operator_release_case',
-                           'operator_transition_case', 'reply_to_support_case']
+                           'operator_transition_case', 'reply_to_support_case',
+                           -- Slice 3's four are the paired case again: two host doors to file and read
+                           -- back a request, two desk doors to work the queue. C26d/C26f move with them
+                           -- by exactly four, and no unpaired privacy body exists — a body sitting in the
+                           -- unexposed schema with no wrapper would be a door no request can reach.
+                           'create_privacy_request', 'get_my_privacy_requests',
+                           'operator_advance_privacy_request', 'operator_privacy_queue']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -1113,7 +1159,7 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 32
+      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 36
               WHEN pg_temp.st2_at_least('stage10') THEN 22
               WHEN pg_temp.st2_at_least('stage9') THEN 21
               WHEN pg_temp.st2_at_least('stage8') THEN 19
@@ -1299,24 +1345,38 @@ BEGIN
         -- links"), stated here so that a reviewer comparing this line with C26e can see the four
         -- host doors and the six operator doors are the same grant, and can then go and read the
         -- refusals rather than take the grant list on faith.
+        -- Slice 3's eight are the same grant with the same reasoning one level down: the four privacy
+        -- pairs are `authenticated`-granted on both halves, because the grant is what lets a request
+        -- reach the body and the body is what decides. The two host doors are scoped by `auth.uid()`
+        -- to the caller's own requests; the two desk doors answer a non-operator inside the body with
+        -- `private.actor_is_operator`, exactly as the six support operator doors do. C28a does not move
+        -- for them, because none of the four is an anonymous door.
         || CASE WHEN pg_temp.st2_at_least('stage11')
-                THEN ARRAY['api.get_my_support_case',
+                THEN ARRAY['api.create_privacy_request',
+                           'api.get_my_privacy_requests',
+                           'api.get_my_support_case',
                            'api.get_my_support_cases',
                            'api.get_operator_case',
                            'api.open_support_case',
                            'api.operator_add_case_note',
+                           'api.operator_advance_privacy_request',
                            'api.operator_case_queue',
                            'api.operator_claim_case',
+                           'api.operator_privacy_queue',
                            'api.operator_release_case',
                            'api.operator_transition_case',
                            'api.reply_to_support_case',
+                           'internal_api.create_privacy_request',
+                           'internal_api.get_my_privacy_requests',
                            'internal_api.get_my_support_case',
                            'internal_api.get_my_support_cases',
                            'internal_api.get_operator_case',
                            'internal_api.open_support_case',
                            'internal_api.operator_add_case_note',
+                           'internal_api.operator_advance_privacy_request',
                            'internal_api.operator_case_queue',
                            'internal_api.operator_claim_case',
+                           'internal_api.operator_privacy_queue',
                            'internal_api.operator_release_case',
                            'internal_api.operator_transition_case',
                            'internal_api.reply_to_support_case']
@@ -1395,10 +1455,17 @@ BEGIN
         -- `85_support_lifecycle.sql` measures name by name. Naming all ten here is what makes "the
         -- admin surface is six verbs, not a hidden route" a checkable claim rather than a design
         -- assertion — an eleventh door has to be written into this file first.
+        -- Slice 3's four are the same boundary one queue over: two host doors to file and read back
+        -- their own request, two desk doors to list and advance the queue. They are named here for the
+        -- same reason the support ten are — so that "the privacy surface is four verbs, and every one
+        -- of them re-authorizes inside its body" is a checked claim; an unlisted fifth door would have
+        -- to be written into this file before it could ship.
         || CASE WHEN pg_temp.st2_at_least('stage11')
-                THEN ARRAY['get_my_support_case', 'get_my_support_cases', 'get_operator_case',
-                           'open_support_case', 'operator_add_case_note', 'operator_case_queue',
-                           'operator_claim_case', 'operator_release_case',
+                THEN ARRAY['create_privacy_request', 'get_my_privacy_requests',
+                           'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
+                           'open_support_case', 'operator_add_case_note',
+                           'operator_advance_privacy_request', 'operator_case_queue',
+                           'operator_claim_case', 'operator_privacy_queue', 'operator_release_case',
                            'operator_transition_case', 'reply_to_support_case']
                 ELSE ARRAY[]::text[] END) x));
   -- Zero arguments is not a style preference. It is the mechanism behind
@@ -1696,7 +1763,21 @@ BEGIN
                   'private.support_cases.support_cases_guard_update=guard_support_case_update',
                   'private.support_cases.support_cases_mint_ref=mint_support_case_ref',
                   'private.support_cases.support_cases_no_client_delete=reject_client_delete',
-                  'private.support_cases.support_cases_no_client_write=reject_client_write']
+                  'private.support_cases.support_cases_no_client_write=reject_client_write',
+                  -- Slice 3's six on the request row, in the order that explains them: the ref minter and
+                  -- the insert-time requester guard are this table's two invariants a CHECK cannot carry
+                  -- (a caller-chosen ref, and a row born without an account); the UPDATE guard is the
+                  -- five-state machine; and the last three are the house pattern every server-authored
+                  -- table carries. All six are INVOKER, so C32's pair of definer triggers on canonical
+                  -- tables does not move, and the insert guards are ordered by name exactly as the
+                  -- support table's are: `mint_ref` before `require_requester` is not a dependency, only
+                  -- a stable order for the catalogue.
+                  'private.privacy_requests.privacy_requests_guard_update=guard_privacy_request_update',
+                  'private.privacy_requests.privacy_requests_mint_ref=mint_privacy_request_ref',
+                  'private.privacy_requests.privacy_requests_no_client_delete=reject_client_delete',
+                  'private.privacy_requests.privacy_requests_no_client_write=reject_client_write',
+                  'private.privacy_requests.privacy_requests_require_requester=reject_privacy_request_without_requester',
+                  'private.privacy_requests.set_updated_at=touch_updated_at']
                 ELSE ARRAY[]::text[] END) x));
   -- The guards are INVOKER by design (they must report the role that issued the
   -- statement), so a DEFINER guard would mean the guard had a privilege of its own to
