@@ -500,8 +500,9 @@ export const RULES = [
     // live only in the fixtures below and in `docs/architecture/`, which is outside this rule's scope.
     //
     // Measured before writing, because a rule that fires on the shipped surface is a rule that gets
-    // switched off: the twenty-two functions this build exposes in `api` (every
-    // `CREATE FUNCTION api.…` across `supabase/migrations/`) contain none of `initiate`, `checkout`,
+    // switched off: the forty-one functions this build exposes in `api` (the distinct
+    // `CREATE FUNCTION api.…` names across `supabase/migrations/` — Stage 11's nineteen are in that
+    // count, and this sentence read twenty-two until they were) contain none of `initiate`, `checkout`,
     // `capture`, `refund` or `dispute`, so the first alternative matches nothing today by construction,
     // not by exemption. And no `src/` file names a provider SDK — `Razorpay` appears only in the cookie
     // policy's denial, which the noun rule deliberately does not read.

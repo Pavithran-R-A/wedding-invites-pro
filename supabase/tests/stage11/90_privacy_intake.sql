@@ -347,15 +347,15 @@ BEGIN
 
   -- The surface counts this head declares. Each is a pg_proc count, not a grep: a name declared twice with
   -- two argument lists counts twice here and once in a text search.
-  PERFORM pg_temp.s11q_eq('S10 the stage''s declared surface at this file: 40 api wrappers, 60 internal '
+  PERFORM pg_temp.s11q_eq('S10 the stage''s declared surface at this file: 41 api wrappers, 61 internal '
     || 'bodies, 52 private names',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'api'),
-    40);
+    41);
   PERFORM pg_temp.s11q_eq('S10b and the twelve names this file adds are the only movement: four pairs, on '
-    || 'top of slice 4''s four wrappers and five bodies',
+    || 'top of slice 4''s four wrappers and five bodies and slice 5''s one pair',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'internal_api'), 60);
+      WHERE n.nspname = 'internal_api'), 61);
   PERFORM pg_temp.s11q_eq('S10c and three private helpers join the schema, plus slice 4''s four on the '
     || 'review-note trail',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

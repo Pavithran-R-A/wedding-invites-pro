@@ -1284,7 +1284,7 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'api';
   PERFORM pg_temp.s5_eq('M5b and the customer surface at this head is exactly the '
-    || CASE WHEN pg_temp.s5_at_least('stage11') THEN 'forty names'
+    || CASE WHEN pg_temp.s5_at_least('stage11') THEN 'forty-one names'
             WHEN pg_temp.s5_at_least('stage10') THEN 'twenty-two names'
             WHEN pg_temp.s5_at_least('stage9') THEN 'twenty-one names'
             WHEN pg_temp.s5_at_least('stage8') THEN 'nineteen names'
@@ -1323,7 +1323,10 @@ BEGIN
               || 'the rendered objects behind a publication (the body deletes nothing; §6 hands the delete '
               || 'to the CLI''s Storage call), §10 keeps that step off the browser surface entirely, and '
               || 'this assertion enumerates the surface by name rather than by count, so a wrapper added '
-              || 'for it later fails here rather than passing a total'
+              || 'for it later fails here rather than passing a total. Slice 5 adds the forty-first and '
+              || 'last name — `operator_operations_summary`, the health read a console points at over '
+              || 'HTTP — and it is an ordinary wrapper over a body, so this surface moves by one and '
+              || 'M5''s twin-less half stays as §B left it'
             WHEN pg_temp.s5_at_least('stage10') THEN
               ', from Stage 8 the four household verbs a host calls — issue, revoke, rotate, '
               || 'read the link state — plus the two doors a guest walks through, to read its own '
@@ -1359,6 +1362,7 @@ BEGIN
             'operator_add_case_note', 'operator_add_commerce_review_note',
             'operator_advance_privacy_request',
             'operator_case_queue', 'operator_claim_case', 'operator_commerce_review_queue',
+            'operator_operations_summary',
             'operator_privacy_queue', 'operator_release_case', 'operator_takedown_plan',
             'operator_takedown_publication', 'operator_transition_case', 'preview_invitation',
             'preview_invitation_document', 'publish_invitation_version',

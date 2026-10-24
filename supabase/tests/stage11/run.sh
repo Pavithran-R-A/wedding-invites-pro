@@ -40,9 +40,9 @@
 #
 # `app.stage_head=stage11` travels to the head-aware assertions for the reason every runner since Stage 5
 # gives: an expectation that only holds at one head has to be duplicated, and one that names the head it is
-# measuring is a stronger claim. What this head moves is inventories, not behaviour: across slices 1–4
-# `private` gains five tables and fifteen functions, `internal_api` gains twenty-one bodies, `api` gains
-# eighteen wrappers, and
+# measuring is a stronger claim. What this head moves is inventories, not behaviour: across slices 1–5
+# `private` gains five tables and fifteen functions, `internal_api` gains twenty-two bodies, `api` gains
+# nineteen wrappers, and
 # `service_role` *loses* UPDATE and DELETE on `private.audit_events`. The Stage 10 publish gate ships
 # permissive and stays permissive, so every historical publication suite must still pass unmodified — if
 # one of them refuses, that is a Stage 11 defect and not a stale expectation.
@@ -61,7 +61,13 @@
 # across the three schemas. The fifth body is the one with no wrapper: `operator_purge_publication_objects`
 # plans the removal of a revoked publication's rendered objects and hands the delete itself to the trusted
 # CLI's Storage call, so `stage4/50_pack_release.sql`'s I2 names it among the twin-less maintenance bodies
-# and the customer surface does not carry it at all. `PUBLIC_TABLES` and
+# and the customer surface does not carry it at all. Slice 5 adds one `api` wrapper and one `internal_api`
+# body — `operator_operations_summary`, the health projection behind its one-line door — and no `private`
+# function, making 41 / 61 / 52 and 154 functions across the three schemas. The asymmetry is the point of
+# naming it: the twin-less half stays at twenty because slice 5's body is *paired*, unlike slice 4's purge,
+# and the reason is the one this stage keeps giving — a health read is the single operational thing a
+# signed-in operator's browser has to be able to ask for, so it needs a door, while a delete does not.
+# `PUBLIC_TABLES` and
 # `STORAGE_BUCKETS` must not move: a head that changes the customer-facing inventory while claiming to add
 # only a server-side credential store has put its tables where an API role can see them. Slice 2 adds no
 # bucket and no `public` table; its two new tables are in `private` for the same reason the grant table is,
@@ -69,7 +75,10 @@
 # rule — its one new table is `private.commerce_review_notes`, and the chain probe at
 # `q11-logs/s11-s4-header-probe-1.txt` prints `PUBLIC_TABLES=20` and `STORAGE_BUCKETS=3` over
 # `invitation-outputs, invitation-previews, wedding-assets`, the same twenty and the same three that every
-# earlier head this runner logged. Every number
+# earlier head this runner logged. Slice 5 adds no table in any schema, and its own readout at
+# `q11-logs/s11-s5-readout-1.txt` prints `PUBLIC_TABLES=20`, `PRIVATE_TABLES=13` and
+# `STORAGE_BUCKETS=3: invitation-outputs,invitation-previews,wedding-assets` — the same twenty, thirteen and
+# three that slice 4 logged, which is what a head that adds only a read should look like. Every number
 # below is printed from `pg_proc` and `pg_class`, never grepped out of source, because a name declared
 # twice with two argument lists counts twice here and once in a grep.
 #
@@ -245,10 +254,14 @@ build_chain() { # build_chain <authority|historic|commerce|render|guest|family>
 run_stage11_batteries() {
   local found=0 f
   # `[89]*` is the shape every runner since Stage 7 uses, and the fail-if-zero guard below it is the reason
-  # that shape is safe. Slices 2, 3 and 4 have since arrived here as `85_`, `90_` and `92_` — slice 4 took
-  # `92_`, not the `95_` this comment planned, because `90_` already belonged to slice 3's privacy battery —
-  # and only slice 5's `95_` is still a plan. Either way the guard is a glob and not a filename: a stage whose
-  # own assertions are missing has not been qualified, whatever the historic suites say about it.
+  # that shape is safe. All four later slices have since arrived here as `85_`, `90_`, `92_` and `95_` — slice 4
+  # took `92_`, not the `95_` this comment planned, because `90_` already belonged to slice 3's privacy battery,
+  # and slice 5 then landed on the `95_` that plan named. Nothing here was edited to receive it: the glob matched
+  # the new file on its first run, which is the property this shape is chosen for. What the glob cannot see is a
+  # battery that runs but reports no total, so each of these five files also prints `PASSED (n)` and the
+  # `lines` style below compares that number with the `PASS` lines it counted. Either way the guard is a glob
+  # and not a filename: a stage whose own assertions are missing has not been qualified, whatever the historic
+  # suites say about it.
   for f in $(ls supabase/tests/stage11/[89]*.sql 2>/dev/null | sort); do
     found=1
     suite "stage 11 $(basename "$f" .sql)" "$f" tx lines

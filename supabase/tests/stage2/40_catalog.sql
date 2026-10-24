@@ -1002,7 +1002,18 @@ BEGIN
         -- caller. The UPDATE guard has one further context, and it is the reason it exists in two
         -- halves: the `author_user_id` SET NULL cascade rewrites a note when its author's account is
         -- erased, and that rewrite is not issued by any body on this list. Measured as 46 definers at
-        -- slice 4 — the 40 above plus these six.
+        -- slice 4 — the 40 above plus these six — and 47 at slice 5, which adds one paired body over the
+        -- health projection and no `private` definer. That body's own `FROM` clauses name twelve stores,
+        -- read out of `prosrc` rather than from this comment: eleven that resolve — nine `private` ones
+        -- that `authenticated` holds no SELECT on at all (and `anon` on none, and `service_role` on only
+        -- `access_tokens` and `audit_events`) plus `public.publications` and `public.invitation_outputs`,
+        -- which do grant SELECT to a signed-in caller but only through one RLS policy each, and a queue
+        -- census has to count every operator's rows rather than the reader's — and a twelfth,
+        -- `supabase_migrations.schema_migrations`, which does not resolve on this chain at all and is
+        -- therefore the block the projection answers `not_measured`. So it must be a definer for the same
+        -- forced reason every other paired body is.
+        -- `q11-logs/s11-s5-doc-figures-2.txt` sections 5 and 8 are the per-name and per-store readings,
+        -- and section 6 the absent migration store.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY['private.actor_is_operator',
                            'internal_api.create_privacy_request',
@@ -1026,6 +1037,13 @@ BEGIN
                            'internal_api.operator_purge_publication_objects',
                            'internal_api.operator_takedown_plan',
                            'internal_api.operator_takedown_publication',
+                           -- Slice 5's one: the health projection. It is a definer for the same reason the
+                           -- eighteen paired bodies above are — it reads `private.access_tokens`,
+                           -- `private.audit_events`, the three commerce tables and both queue tables on
+                           -- behalf of a caller holding no grant on any of them — and it is the only name
+                           -- this slice adds anywhere, so `private` stays at 52 and `api`/`internal_api`
+                           -- each move by one.
+                           'internal_api.operator_operations_summary',
                            'private.operator_authorising_case']
                 ELSE ARRAY[]::text[] END) x));
   PERFORM pg_temp.st2_ok('C27 every SECURITY DEFINER function pins its search_path',
@@ -1065,7 +1083,9 @@ BEGIN
   -- host's file/read pair and the operator's queue/advance pair, every one paired. Slice 4 makes it
   -- forty with the takedown plan, the takedown itself, the review queue and the review note — four of
   -- its five bodies paired, the fifth (`operator_purge_publication_objects`) deliberately left behind
-  -- in the unexposed schema, which is why this count and C26e's differ by exactly one at this head. Only one door was
+  -- in the unexposed schema, which is why this count and C26e's differ by exactly one at this head.
+  -- Slice 5 makes it forty-one with the health projection, whose body is the second half of that pair
+  -- and adds no third name anywhere. Only one door was
   -- added by Stage 10's commerce slice, because the commerce write verbs stay
   -- server-side: a browser that could place an order could choose its own price, and the whole point of
   -- the quote is that it cannot. So the exposed surface grows by a read, and the six service-only
@@ -1078,7 +1098,7 @@ BEGIN
   PERFORM pg_temp.st2_ok('C26d each wrapper is one fully-qualified delegation to its own implementation',
     (SELECT count(*) FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 40
+       WHERE n.nspname = 'api') = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 41
                                        WHEN pg_temp.st2_at_least('stage10') THEN 22
                                        WHEN pg_temp.st2_at_least('stage9') THEN 21
                                        WHEN pg_temp.st2_at_least('stage8') THEN 19
@@ -1231,7 +1251,13 @@ BEGIN
                            -- the assertion rather than an accident of arithmetic.
                            'operator_add_commerce_review_note', 'operator_commerce_review_queue',
                            'operator_purge_publication_objects', 'operator_takedown_plan',
-                           'operator_takedown_publication']
+                           'operator_takedown_publication',
+                           -- Slice 5's one, and it is a paired body: the health projection has a
+                           -- wrapper, so C26e, C26d and C26f all move by exactly one here rather than
+                           -- one of them moving alone. The asymmetry slice 4 left (five bodies, four
+                           -- doors) does not widen — the purge stays the only Stage 11 body a request
+                           -- cannot name.
+                           'operator_operations_summary']
                 ELSE ARRAY[]::text[] END) x));
   -- Posture and caller matrix, paired by name. The wrappers are definers' delegates, so
   -- two things must hold: every implementation is a pinned definer, and a role that can
@@ -1244,7 +1270,7 @@ BEGIN
         JOIN pg_proc wrap ON wrap.proname = impl.proname
         JOIN pg_namespace wn ON wn.oid = wrap.pronamespace
        WHERE n.nspname = 'internal_api' AND wn.nspname = 'api')
-      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 40
+      = (CASE WHEN pg_temp.st2_at_least('stage11') THEN 41
               WHEN pg_temp.st2_at_least('stage10') THEN 22
               WHEN pg_temp.st2_at_least('stage9') THEN 21
               WHEN pg_temp.st2_at_least('stage8') THEN 19
@@ -1340,7 +1366,10 @@ BEGIN
     -- paired one of the seven commerce bodies it added and left six ungrantable, and sixty-four from
     -- Stage 11 slice 2, which paired all ten of its support doors. Slice 3 makes seventy-two and slice 4
     -- eighty, each by four pairs, and slice 4's five-body/four-pair split is the reason the two numbers
-    -- do not move together with C26e's census. The pack-maintenance
+    -- do not move together with C26e's census. Slice 5 makes eighty-two with one pair — the health
+    -- projection — which is the smallest movement a Stage 11 slice has ever made on this line, and the
+    -- reason it is worth stating: five new `private` names plus one body plus one wrapper would have been
+    -- a plausible shape for a read-side projection, and this slice deliberately ships two of the three.
     -- bodies are absent from every version of this list because they are granted to nobody a
     -- browser can be — that is C26e's asymmetry, checked here from the other side: an EXECUTE that
     -- appeared for one of them would show up as a diff in this set.
@@ -1486,7 +1515,15 @@ BEGIN
                            'internal_api.operator_add_commerce_review_note',
                            'internal_api.operator_commerce_review_queue',
                            'internal_api.operator_takedown_plan',
-                           'internal_api.operator_takedown_publication']
+                           'internal_api.operator_takedown_publication',
+                           -- Slice 5's pair, and it enters this set for the same reason the twenty-six
+                           -- above it do: `authenticated` holds EXECUTE on both halves so that a signed-in
+                           -- operator's request can reach the body, and the body's own
+                           -- `private.actor_is_operator('operations')` read is what refuses everybody else.
+                           -- Unlike slice 4's purge, this one has no unpaired half — a read-only health
+                           -- projection needs no irreversible step to be kept out of the boundary.
+                           'api.operator_operations_summary',
+                           'internal_api.operator_operations_summary']
                 ELSE ARRAY[]::text[] END) x));
   -- Stage 2 asserted "no function at all lives in public", and said why in its own
   -- comment: a function in `public` is reachable by name through the data API, so an
@@ -1576,6 +1613,10 @@ BEGIN
         -- owner-only EXECUTE, measured false for `anon`, `authenticated` and `service_role` in
         -- `q11-logs/s11-s4-purge-probe-1.txt`. A fifth name on this list would be a browser able to
         -- delete a served artefact, and that is exactly what this cell is here to notice.
+        -- Slice 5's one is the operations desk's read: a window-parameterised health projection whose
+        -- answer is counts and timestamps only. It joins the boundary because a console must be able to
+        -- ask it over HTTP; it is the *only* name slice 5 adds, which is what keeps `private` at 52
+        -- while this list and C26d/C26e/C26f each move by one.
         || CASE WHEN pg_temp.st2_at_least('stage11')
                 THEN ARRAY['create_privacy_request', 'get_my_privacy_requests',
                            'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
@@ -1583,6 +1624,7 @@ BEGIN
                            'operator_add_commerce_review_note',
                            'operator_advance_privacy_request', 'operator_case_queue',
                            'operator_claim_case', 'operator_commerce_review_queue',
+                           'operator_operations_summary',
                            'operator_privacy_queue', 'operator_release_case',
                            'operator_takedown_plan', 'operator_takedown_publication',
                            'operator_transition_case', 'reply_to_support_case']

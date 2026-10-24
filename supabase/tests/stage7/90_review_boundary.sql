@@ -1052,20 +1052,22 @@ BEGIN
     'head — thirteen at Stage 7, with Stage 7''s three added names and no fourteenth; nineteen from '
     'Stage 8, which adds the six household-invitation verbs; twenty-one from Stage 9, which adds the '
     'output manifest and one frozen version''s document, both reads; twenty-two from Stage 10, which '
-    'adds `commerce_host_summary` and nothing else a browser can call; forty from Stage 11, whose '
+    'adds `commerce_host_summary` and nothing else a browser can call; forty-one from Stage 11, whose '
     'first ten are the support workflow''s doors: four a wedding host may knock on '
     '(`open_support_case`, `get_my_support_case`, `get_my_support_cases`, `reply_to_support_case`) and '
     'six that only an operator''s body lets through '
     '(`get_operator_case`, `operator_case_queue`, `operator_add_case_note`, `operator_claim_case`, '
     '`operator_release_case`, `operator_transition_case`); slice 3 adds four more on exactly the same '
     'ruling — `create_privacy_request` and `get_my_privacy_requests` for a host, '
-    '`operator_privacy_queue` and `operator_advance_privacy_request` for an operator; slice 4 adds the '
-    'last four on the same ruling — `operator_commerce_review_queue` and '
+    '`operator_privacy_queue` and `operator_advance_privacy_request` for an operator; slice 4 adds '
+    'four — `operator_commerce_review_queue` and '
     '`operator_add_commerce_review_note` for the finance desk, `operator_takedown_plan` and '
-    '`operator_takedown_publication` for operations. All eighteen are '
+    '`operator_takedown_publication` for operations — and slice 5 adds the nineteenth and last, '
+    '`operator_operations_summary`, the health read. All nineteen are '
     'EXECUTE-granted to `authenticated`, because on this surface the grant is not the authority: the '
-    'twelve operator bodies re-read the caller''s `operator_grants` row and refuse anyone else with '
-    '`insufficient_privilege` — the six support doors and the takedown pair on the `operations` duty, '
+    'thirteen operator bodies re-read the caller''s `operator_grants` row and refuse anyone else with '
+    '`insufficient_privilege` — the six support doors and the takedown pair and the health read on the '
+    '`operations` duty, '
     'the two privacy doors likewise, the finance pair on `finance_review` — '
     'which is §4''s "not merely by hiding links" written as a grant list '
     'rather than as a route table — and the refusal cells are `85_support_lifecycle.sql`''s, '
@@ -1082,7 +1084,8 @@ BEGIN
            'open_support_case', 'operator_add_case_note', 'operator_add_commerce_review_note',
            'operator_advance_privacy_request',
            'operator_case_queue',
-           'operator_claim_case', 'operator_commerce_review_queue', 'operator_privacy_queue',
+           'operator_claim_case', 'operator_commerce_review_queue',
+           'operator_operations_summary', 'operator_privacy_queue',
            'operator_release_case', 'operator_takedown_plan', 'operator_takedown_publication',
            'operator_transition_case',
            'preview_invitation', 'preview_invitation_document', 'publish_invitation_version',
@@ -1142,10 +1145,13 @@ BEGIN
     'operator''s — so both halves of G3 moved again to thirty-six while the uncallable nineteen stayed '
     'nineteen; and slice 4 adds five bodies, four of them mirrors of that slice''s four doors and the '
     'fifth (`operator_purge_publication_objects`) deliberately left with no door at all, so the total '
-    'is sixty here while the uncallable half grows to twenty. G3f below is the line that proves that '
-    'twenty is the same nineteen plus that one purge rather than a set quietly granted through',
+    'is sixty here while the uncallable half grows to twenty; and slice 5 adds exactly one body — '
+    '`operator_operations_summary`, the health projection — and it is a mirror, so the total is '
+    'sixty-one at this head and the uncallable half stays at twenty. G3f below is the line that proves '
+    'that twenty is the same nineteen plus that one purge, unchanged by slice 5, rather than a set '
+    'quietly granted through',
     cardinality(internal_names)::bigint,
-    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 60::bigint
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN 61::bigint
          WHEN pg_temp.s7b_at_least('stage10') THEN 39::bigint
          WHEN pg_temp.s7b_at_least('stage9') THEN 32::bigint
          WHEN pg_temp.s7b_at_least('stage8') THEN 30::bigint ELSE 24::bigint END);
@@ -1155,8 +1161,10 @@ BEGIN
     '8, twenty-one and twenty-one from Stage 9, twenty-two and twenty-two from Stage 10, thirty-two '
     'and thirty-two after Stage 11 slice 2, which grants its six operator doors to the same role as its '
     'four host doors and puts the difference inside the body, thirty-six and thirty-six at slice 3 '
-    'because its four repeat that construction, and forty and forty at this head because slice 4''s '
-    'four doors are granted the same way while that slice''s fifth body is granted to nobody — so the '
+    'because its four repeat that construction, and forty and forty at slice 4 because slice 4''s '
+    'four doors are granted the same way while that slice''s fifth body is granted to nobody, and '
+    'forty-one and forty-one at this head because slice 5''s one door and one body are the health '
+    'projection and its wrapper and both are granted — so the '
     'uncallable half is refused '
     'to a host by the absence of a grant, '
     'not by the size of the schema §7. The two halves must agree: a host granted an internal body '
@@ -1167,7 +1175,7 @@ BEGIN
           (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
              WHERE n.nspname = 'api'
                AND has_function_privilege('authenticated', p.oid, 'execute'))::text]::text[],
-    CASE WHEN pg_temp.s7b_at_least('stage11') THEN ARRAY['40', '40']::text[]
+    CASE WHEN pg_temp.s7b_at_least('stage11') THEN ARRAY['41', '41']::text[]
          WHEN pg_temp.s7b_at_least('stage10') THEN ARRAY['22', '22']::text[]
          WHEN pg_temp.s7b_at_least('stage9') THEN ARRAY['21', '21']::text[]
          WHEN pg_temp.s7b_at_least('stage8') THEN ARRAY['19', '19']::text[]
@@ -1218,12 +1226,14 @@ BEGIN
   -- neither can be satisfied by a swapped-out body that happens to leave the arithmetic intact.
   -- The want-list here is `api_names`, the array G1 was just checked against, so this assertion
   -- follows the head automatically: thirteen against thirteen at Stage 7, nineteen against nineteen
-  -- from Stage 8, twenty-one against twenty-one from Stage 9, thirty-six against thirty-six at slice 3
-  -- and forty against forty at this Stage 11 head, and in each case by name rather than by count.
+  -- from Stage 8, twenty-one against twenty-one from Stage 9, thirty-six against thirty-six at slice 3,
+  -- forty against forty at slice 4 and forty-one against forty-one at this Stage 11 head, and in each
+  -- case by name rather than by count.
   -- Slice 3's and slice 4's doors are mirrors by the
   -- same construction, so they move both sides of this assertion together and cannot be satisfied by
   -- an extra body on either side alone — except slice 4's purge body, which is granted to nobody and so
-  -- can only ever appear in G3f's list.
+  -- can only ever appear in G3f's list. Slice 5 cannot disturb that: it is one door and one body with
+  -- the same name, so both sides of this equality move by one and G3f's list is untouched.
   PERFORM pg_temp.s7b_eq('G3e the internal bodies that `authenticated` may call are not merely '
     'counted: taken by name they are exactly the published `api` wrappers'' own names, one mirror '
     'per verb and no extra body opened to a host beyond the surface it is served',
@@ -1243,7 +1253,8 @@ BEGIN
                    || 'grant and revoke, plus the one body slice 4 wrote with no door in front of it — '
                    || '`operator_purge_publication_objects`, the plan that hands the actual object '
                    || 'delete to the trusted CLI, which §10 keeps off the browser surface by ruling '
-                   || 'rather than by omission. G3e proves the other forty of the sixty are exactly '
+                   || 'rather than by omission. G3e proves the other forty-one of the sixty-one are '
+                   || 'exactly '
                    || 'G1''s names, so growth in this file can only ever mean a body nobody opened to '
                    || 'a browser — including slice 2''s ten and slice 3''s four, every one of which is '
                    || 'a mirror and so leaves by definition for G3e''s list rather than this one. Listing them is the '

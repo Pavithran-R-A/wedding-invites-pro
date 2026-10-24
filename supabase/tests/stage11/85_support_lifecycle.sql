@@ -499,17 +499,18 @@ BEGIN
           OR has_table_privilege(r.oid,'private.support_case_events'::regclass,'DELETE')
           OR has_table_privilege(r.oid,'private.support_case_events'::regclass,'SELECT'))), 0);
 
-  PERFORM pg_temp.s11b_eq('S09 the declared api surface is 40 names at this head: the ten doors this '
-    || 'slice adds on top of slice 1''s two, slice 3''s four privacy doors and slice 4''s four takedown and '
-    || 'oversight doors',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 40);
-  PERFORM pg_temp.s11b_eq('S10 internal_api is 60, and PRIVATE is 52 — two mint triggers, the state-machine '
+  PERFORM pg_temp.s11b_eq('S09 the declared api surface is 41 names at this head: the ten doors this '
+    || 'slice adds on top of slice 1''s two, slice 3''s four privacy doors, slice 4''s four takedown and '
+    || 'oversight doors and slice 5''s one health read',
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'api'::regnamespace), 41);
+  PERFORM pg_temp.s11b_eq('S10 internal_api is 61, and PRIVATE is 52 — two mint triggers, the state-machine '
     || 'guard, and a specialised UPDATE/INSERT guard pair per trail, because a referential SET NULL has to be '
     || 'distinguishable from a rewrite and the anti-forgery rule must not fire on that UPDATE at all, plus '
     || 'slice 3''s four privacy mirrors and the three private functions behind `private.privacy_requests`, '
     || 'plus slice 4''s five bodies and four private functions — and note that slice 4 adds five bodies but '
-    || 'only four wrappers, because the purge step has no door',
-    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 60);
+    || 'only four wrappers, because the purge step has no door — plus slice 5''s one body and no `private` '
+    || 'name at all, which is the fifth number staying at 52 while the fourth moves',
+    (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'internal_api'::regnamespace), 61);
   PERFORM pg_temp.s11b_eq('S10b measured as its own cell so a helper leaking into a privileged namespace '
     || 'moves one number and not the other',
     (SELECT count(*)::int FROM pg_proc WHERE pronamespace = 'private'::regnamespace), 52);

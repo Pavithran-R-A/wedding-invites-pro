@@ -812,13 +812,14 @@ BEGIN
 
   -- The surface this head declares, counted from pg_proc and pg_class rather than grepped: a name declared
   -- twice with two argument lists counts twice here and once in a text search.
-  PERFORM pg_temp.s11t_eq('T13 this head ships 40 api wrappers: slice 3''s 36 plus this file''s four, and '
-    || 'the purge is not among them',
+  PERFORM pg_temp.s11t_eq('T13 this head ships 41 api wrappers: slice 3''s 36 plus this file''s four plus '
+    || 'slice 5''s health read, and the purge is not among them',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'api'), 40);
-  PERFORM pg_temp.s11t_eq('T14 60 internal_api bodies (55 plus five: plan, takedown, purge, queue, note)',
+      WHERE n.nspname = 'api'), 41);
+  PERFORM pg_temp.s11t_eq('T14 61 internal_api bodies (55 plus this file''s five: plan, takedown, purge, '
+    || 'queue, note — plus slice 5''s one paired summary body)',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'internal_api'), 60);
+      WHERE n.nspname = 'internal_api'), 61);
   PERFORM pg_temp.s11t_eq('T15 52 private functions (48 plus four: the authorising-case reader and the '
     || 'three note guards)',
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -831,10 +832,11 @@ BEGIN
     || 'role can see it',
     (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relkind = 'r'), 20);
-  PERFORM pg_temp.s11t_eq('T17 46 SECURITY DEFINER functions at this head — five more than slice 3''s 41, '
-    || 'and all five are here: four bodies and one helper. The three note guards are INVOKER, which is why '
-    || 'the definers grew by five and not by eight',
-    (SELECT count(*)::int FROM pg_proc WHERE prosecdef), 46);
+  PERFORM pg_temp.s11t_eq('T17 47 SECURITY DEFINER functions at this head — slice 4''s 46 plus slice 5''s '
+    || 'one paired summary body. The three note guards are INVOKER, which is why the definers grew by five '
+    || 'and not by eight at slice 4, and slice 5''s wrapper is INVOKER too, which is why the count grows by '
+    || 'one and not by two here',
+    (SELECT count(*)::int FROM pg_proc WHERE prosecdef), 47);
 
   PERFORM pg_temp.s11t_array('T18 the five bodies are definers with a pinned path, owned by postgres',
     ARRAY(SELECT p.proname::text || '=' || p.prosecdef::text || '/' ||
