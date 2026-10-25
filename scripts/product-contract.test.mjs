@@ -71,6 +71,11 @@ describe("product contract checker", () => {
         // rather than a word: this build exposes no function that starts a payment, so a line like this
         // can only be a second door. The sentences it must *not* eat are pinned cell by cell below.
         `const { data } = await supabase.schema('api').rpc('commerce_initiate_payment', { p_wedding_id: id });`,
+        // `operator-rpc-referenced-outside-cli` — Stage 11's operator channel, and the reason this list is
+        // the one that has to grow with the checker: §15 refuses an admin console outright, so a bundle
+        // that could call a door would be a grant check with a URL in front of it. The compound name is
+        // the shape the bare prefix would have missed, which is why the pattern carries `get_`.
+        `const { data } = await supabase.schema('api').rpc('get_operator_case', { p_case_ref: ref });`,
       ].join("\n"),
     );
     expect([...new Set(detected.map((v) => v.rule))].sort()).toEqual([...ruleIds].sort());

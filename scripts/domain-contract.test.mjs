@@ -60,7 +60,12 @@ describe("domain contract", () => {
     expect(publicKeys).toContain("public.invitation_outputs");
     // Eight since Stage 10 added the commerce ledger; two before that. Nothing here reached `public`,
     // which is why the count of public tables did not move with it, and the client-type comparison below
-    // is what turns "private" from a name into a claim.
+    // is what turns "private" from a name into a claim. Stage 11 moved this list, and the move is the
+    // finding: five tables — `operator_grants`, `support_cases`, `support_case_events`,
+    // `privacy_requests`, `commerce_review_notes` — arrived in the six `202610201900*`–`202610201905*`
+    // migrations and this inventory was never widened, so the tripwire fired instead of the change going
+    // unrecorded. All five stay out of the generated types for the reason the ledger does: Stage 11's
+    // surface is function doors over this substrate, never a table a browser reads.
     expect(privateKeys.sort()).toEqual([
       "private.access_tokens",
       "private.audit_events",
@@ -70,6 +75,11 @@ describe("domain contract", () => {
       "private.commerce_payment_events",
       "private.commerce_policy",
       "private.commerce_refunds",
+      "private.commerce_review_notes",
+      "private.operator_grants",
+      "private.privacy_requests",
+      "private.support_case_events",
+      "private.support_cases",
     ]);
     expect(legacyKeys.length).toBe(8);
   });
