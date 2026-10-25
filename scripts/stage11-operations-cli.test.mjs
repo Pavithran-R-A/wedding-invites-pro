@@ -944,7 +944,12 @@ describe('OD argv and plan: the run is decided before the first byte leaves', ()
     // — a second `encode(convert_to( … ))` around the same expression is invisible to a reader and fatal to the
     // run, because `parseConsoleAnswer` decodes one layer and then tries to read the other as JSON. This cell
     // caught one such wrap, which had made every act on the console channel an instrument failure.
-    expect(statement).toContain('INSERT INTO pg_temp.s11cli_answer SELECT encode(convert_to((internal_api.grant_operator_role(');
+    // The `chr(10)` strip is the other half of that sentence being true: Postgres's base64 encoder is RFC 2045
+    // multi-line and breaks after 76 characters (measured on the running stack), so an encoded answer arrives as
+    // several lines unless the wrapper removes them — which is how `purge` and `revoke` came to write their acts
+    // and then report them unread at 4ea2a97.
+    expect(statement).toContain('INSERT INTO pg_temp.s11cli_answer SELECT replace(encode(convert_to((internal_api.grant_operator_role(');
+    expect(statement).toContain("::text, 'utf8'), 'base64'), chr(10), '');");
     expect((statement.match(/encode\(convert_to\(/g) ?? []).length).toBe(1);
     expect((statement.match(/SELECT payload FROM pg_temp\.s11cli_answer;/g) ?? []).length).toBe(1);
 
@@ -1031,15 +1036,34 @@ describe('OD argv and plan: the run is decided before the first byte leaves', ()
     // The round trip, measured against a session that encodes exactly as many times as its own statement asks
     // for. A fake that hands back one prepared line cannot notice a second wrap; a fake that reads the
     // statement's bytes can, and this is the cell that fails if the encoder and its caller both wrap.
+    //
+    // It also answers the way Postgres does rather than the way `Buffer` does, because that is where the second
+    // console defect came from: SQL's base64 is the multi-line MIME variant of RFC 2045, broken after every 76
+    // characters. Measured on the running stack, `encode(convert_to(…,'utf8'),'base64')` of a 908-byte value
+    // came back 1,227 characters long with 15 newlines, the first at position 77, none trailing, no line longer
+    // than 76. `runPsql` accepts exactly one line and its `DO` block commits before that is checked, so at
+    // 4ea2a97 `purge` and `revoke` wrote their acts and then reported them unread. The one-line rule lives in
+    // `runPsql`, which no injection reaches; what this cell measures is the same quantity the rule reads.
     const payload = { ok: true, audit_id: 'b1c2d3e4-0000-4000-8000-000000000009', replayed: false };
+    const mimeBreak = (value) => value.replace(/(.{76})(?=.)/gs, '$1\n');
     const encodeAsWritten = (text) => {
       let answer = JSON.stringify(payload);
       for (let i = 0; i < (text.match(/encode\(convert_to\(/g) ?? []).length; i += 1) {
-        answer = Buffer.from(answer, 'utf8').toString('base64');
+        answer = mimeBreak(Buffer.from(answer, 'utf8').toString('base64'));
       }
       return answer;
     };
-    const emulate = (container, text) => (/standard_conforming_strings/.test(text) ? 'on' : encodeAsWritten(text));
+    /** The statement's own instruction, applied: `chr(10)` removed is what hands `psql` one line. */
+    const consoleAnswer = (text) => (/\breplace\(encode\(convert_to\(/.test(text)
+      ? encodeAsWritten(text).replace(/\n/g, '')
+      : encodeAsWritten(text));
+    const shape = [];
+    const emulate = (container, text) => {
+      if (/standard_conforming_strings/.test(text)) return 'on';
+      const line = consoleAnswer(text);
+      shape.push({ lines: line.split('\n').length, width: line.length });
+      return line;
+    };
     const trip = recorder();
     const roundTrip = await runCli({ argv: lineFor('grant', [...FULL.grant, '--yes']), env: {}, psql: emulate,
       fetchImpl: unreachable('the operator channel'), write: trip.write });
@@ -1047,14 +1071,19 @@ describe('OD argv and plan: the run is decided before the first byte leaves', ()
     expect(trip.printed()).toContain(JSON.stringify(payload));
     expect(roundTrip.record.audit_id).toBe(payload.audit_id);
     expect(roundTrip.record.executed).toBe(true);
+    expect(shape).toEqual([{ lines: 1, width: Buffer.from(JSON.stringify(payload), 'utf8').toString('base64').length }]);
+    // The teeth behind that one line: the same answer with the statement's `chr(10)` strip left out is two
+    // lines, so `lines: 1` above is the strip working, not a payload that was never wide enough to break.
+    expect(mimeBreak(Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')).split('\n')).toHaveLength(2);
 
     // The control for that control: the same fake, answering one layer deeper than the statement asks, is read
     // back as an unreadable answer rather than as half a payload — so the cell above measures the decode and is
-    // not a tautology. What no fake can settle is Postgres's own `encode(convert_to( … ))`; that is the SQL
-    // tier's, and this file only pins that the tool writes one wrap and decodes one.
+    // not a tautology. What this file cannot settle is the encoder's own behaviour; the fake only reproduces
+    // what was measured on the running stack. The live console run of `grant`, `revoke` and `purge` is the SQL
+    // tier's half, and this file pins that the tool writes one wrap, decodes one and asks for one line.
     const doubleEncoded = (container, text) => (/standard_conforming_strings/.test(text)
       ? 'on'
-      : Buffer.from(encodeAsWritten(text), 'utf8').toString('base64'));
+      : Buffer.from(consoleAnswer(text), 'utf8').toString('base64'));
     const poisoned = await runCli({ argv: lineFor('grant', [...FULL.grant, '--yes']), env: {},
       psql: doubleEncoded, fetchImpl: unreachable('the operator channel'), write: () => {} });
     expect(poisoned.exit).toBe(1);
@@ -1714,6 +1743,13 @@ describe('OD printing: nothing that leaves this process may be a credential', ()
     expect(refused.printed).not.toContain('SEVERE');
     expect(refused.record.executed).toBe(false);
     expect(refused.record.exit).toBe(1);
+    // `executed: false` alone would be read as "nothing was written", and on this channel that is not what a
+    // lost answer proves: the console's `DO` block commits before the client ever looks at the reply. Measured
+    // live against the stack, `runPsql` wrapped a wide answer into 11 lines, refused to read it, and had
+    // already written the act it then reported as unread.
+    expect(refused.record.answer_unreadable_after_send).toBe(true);
+    expect(refused.printed).toContain('the statement was already sent when this run lost its answer');
+    expect(refused.printed).toContain('do not treat this line as a refusal that wrote nothing');
 
     // Base64 that decodes to something that is not JSON is refused the same way, whether it names a word or
     // nothing at all: the tool never treats an answer it cannot parse as an empty success.

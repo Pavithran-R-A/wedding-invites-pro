@@ -334,8 +334,16 @@ const sqlTimestamp = (value) => (value === null || value === undefined ? 'NULL::
   : `${sqlLiteral(value)}::timestamptz`);
 
 /** A jsonb answer leaves the console session base64-encoded, so this file's parsing is total rather than
- *  best-effort and no quote, newline or arrow in the database's own sentence reaches the terminal raw. */
-const b64Out = (expr) => `encode(convert_to((${expr})::text, 'utf8'), 'base64')`;
+ *  best-effort and no quote, newline or arrow in the database's own sentence reaches the terminal raw.
+ *
+ *  The `replace` is load-bearing, not tidiness. Postgres 17.11's base64 encoder is the multi-line MIME
+ *  variant of RFC 2045: measured on the running stack, `encode(convert_to(…,'utf8'),'base64')` of a
+ *  908-byte value came back 1,227 characters long with 15 newlines, the first at position 77, no trailing
+ *  newline and no line longer than 76. `psql` prints such a value verbatim in unaligned mode — a 20,000
+ *  character single-line value arrives as one line — so without this strip the console's answer is
+ *  fourteen lines wide, this tool's one-line rule fails, and the act the `DO` block had *already committed*
+ *  is reported as unread. That is exactly how a live run of `purge` and `revoke` behaved at 4ea2a97. */
+const b64Out = (expr) => `replace(encode(convert_to((${expr})::text, 'utf8'), 'base64'), chr(10), '')`;
 
 /** The one call form this tool renders: named notation, one argument per line, every value cast. Named
  *  notation is not decoration — it is what makes a swapped `p_user_id`/`p_actor_user_id` impossible rather
@@ -377,14 +385,24 @@ function runPsql(container, text) {
     const lines = `${res.stderr ?? ''}${res.stdout ?? ''}`.split('\n')
       .map((line) => line.trim()).filter((line) => line.length > 0);
     const seen = lines.find((line) => /^ERROR:/.test(line)) ?? lines[0] ?? 'the statement failed';
-    throw new Refusal(`refused: the console session ended at ${seen.slice(0, 300)}`, INSTRUMENT_FAILURE);
+    throw afterSend(new Refusal(`refused: the console session ended at ${seen.slice(0, 300)}`,
+      INSTRUMENT_FAILURE));
   }
   const out = String(res.stdout ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
   if (out.length !== 1) {
-    throw new Refusal(`refused: the console answered ${out.length} line(s) where this tool expects exactly `
-      + 'one, so there is no answer to read.', INSTRUMENT_FAILURE);
+    throw afterSend(new Refusal(`refused: the console answered ${out.length} line(s) where this tool expects `
+      + 'exactly one, so there is no answer to read.', INSTRUMENT_FAILURE));
   }
   return out[0];
+}
+
+/** Tags a refusal raised after `docker` had already run the statement. On this channel the write happens
+ *  inside the `DO` block, which commits before the answer is read, so a failure to *read* is not evidence
+ *  that nothing was written — and `executed: false` alone would send an operator off to repeat an act that
+ *  may already be in the audit trail. Only the "docker could not be run" arm provably wrote nothing. */
+function afterSend(error) {
+  error.afterSend = true;
+  return error;
 }
 
 function ensureSafeEncoding(session) {
@@ -412,8 +430,8 @@ function parseConsoleAnswer(line) {
   try {
     return { refused: false, value: JSON.parse(Buffer.from(line, 'base64').toString('utf8')) };
   } catch {
-    throw new Refusal('refused: the console answered with something that is not the JSON it was asked to '
-      + 'build, so this run cannot trust what it read.', INSTRUMENT_FAILURE);
+    throw afterSend(new Refusal('refused: the console answered with something that is not the JSON it was '
+      + 'asked to build, so this run cannot trust what it read.', INSTRUMENT_FAILURE));
   }
 }
 
@@ -1119,6 +1137,14 @@ export async function runCli({
       return { exit: INSTRUMENT_FAILURE, lines: printer.lines, refusal: 'unprintable explanation' };
     }
     record.exit = exitOf(error);
+    if (error?.afterSend === true) {
+      // The session had already run the statement, so `executed: false` must not be readable as "nothing
+      // was written": on the console channel a write commits before the answer is ever looked at.
+      record.answer_unreadable_after_send = true;
+      printer.print('note: the statement was already sent when this run lost its answer, so this act may '
+        + 'be written even though it cannot be confirmed here. Read the row back before sending it again; '
+        + 'do not treat this line as a refusal that wrote nothing.');
+    }
     try {
       printer.print(`refused: ${firstSentence(error)}`);
       printer.print(`run record: ${JSON.stringify(record)}`);
