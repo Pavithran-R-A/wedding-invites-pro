@@ -447,7 +447,7 @@ and no others.
 | `api.get_my_support_cases(p_status text, p_limit integer)` / `api.get_my_support_case(p_case_ref text)` | `authenticated` | rows whose `requester_user_id = auth.uid()`; host-facing projection only (§5) |
 | `api.reply_to_support_case(p_case_ref, p_body, p_idempotency_key)` | `authenticated` | requester of that case, `message_host` arm only |
 | `api.create_privacy_request(p_wedding_id, p_kind, p_note)` / `api.get_my_privacy_requests()` | `authenticated` | owner, requester is `auth.uid()` |
-| `api.operator_case_queue(p_status, p_scope, p_limit)` / `api.get_operator_case(p_case_ref)` | `authenticated` | `actor_is_operator(auth.uid(),'support')`; operator projection including internal notes |
+| `api.operator_case_queue(p_status, p_category, p_limit)` / `api.get_operator_case(p_case_ref)` | `authenticated` | `actor_is_operator(auth.uid(),'support')`; operator projection including internal notes |
 | `api.operator_claim_case(p_case_ref, p_idempotency_key)` / `api.operator_release_case(p_case_ref, p_idempotency_key)` | `authenticated` | `support`; the holder is `auth.uid()`, never an argument. The design's `operator_assign_case` was refused by `C29c` — no callable may name a person in its signature since Stage 2 — so the shipped pair claims and releases the *calling* operator |
 | `api.operator_transition_case(p_case_ref, p_to_status, p_resolution_code, p_body, p_idempotency_key)` | `authenticated` | `support`, edge table in a trigger |
 | `api.operator_takedown_plan(p_wedding_id)` | `authenticated` | `operations`; read-only, returns the key list §6 step 2 would need |
@@ -495,9 +495,38 @@ maintenance tools already use.
 ## 11. The trusted operations tool
 
 `scripts/stage11-operations-cli.mjs`, import-safe and unit-tested like the other three drivers, with
-`--secret-env` for the operator account's password, strict argv, a banned-flag list (no `--service-key`,
-no `--token`, no `--price`, no `--sql`, no `--url`, no `--email`), `assertSecretFree` on every line it
-prints and on its own run record, and a redactor in front of the rest.
+`--secret-env` and `--account-env` for the operator's password and address — both name *variables*, never
+values — strict argv (a flag the verb does not take is refused rather than ignored, and `--yes` together with
+`--dry-run` is a refusal: a run that both writes and does not is not a plan), and a nineteen-entry banned-flag
+list. `OD-40` pins that list at nineteen names and measures each of them refused before any transport exists:
+`service-key`, `token`, `price`, `sql`, `url`, `email`, `account`, `secret`, `password`, `apikey`, `anon-key`,
+`anonkey`, `publishable-key`, `amount`, `db-url`, `api-origin`, `origin`, `host`, `webhook-secret`.
+
+What stands between this run and a log line is one printer — `makePrinter`, `stage11-operations-cli.mjs:934`,
+which is what this section's original `assertSecretFree` sentence should have named — and it has two value
+lists and one pattern. Three values may not appear in a printed line at all: the operator password, the bearer
+token and the refresh token (`:993-994`). A line that carries one raises a `Refusal` naming the *slot* and
+prints nothing, because showing the line is the leak. Two are redacted instead: the operator's own address and
+the publishable key (`:995`). And a `postgres://user:pass@` shape is refused on sight (`CONNECTION_STRING`,
+`:925`). Both lists are read at print time rather than armed once (`:991-996`), because the bearer token does
+not exist until the sign-in returns and a printer built with that slot empty would be guarding nothing for the
+only answer that ever carries it.
+
+Two boundaries fall out of that shape, and this stage records them rather than repairing them. The first is
+the console channel's: credentials are read only when the verb's channel is `http` (`:1006`), so for `grant`,
+`revoke` and `purge` both lists are empty and the act's answer is printed under the connection-string guard
+alone (`:1061`) — a body that echoed a credential as *data* would be printed. Those three verbs cannot even
+name the secret flags: `--account-env` or `--secret-env` on a `psql` verb is refused as a run that has
+confused the two channels (`:873-879`, `OD-17`). The second is argv echo: a refusal raised *before* the
+credentials are read is printed by a process that cannot yet tell which of those bytes is the secret, so the
+two flag sentences describe a value instead of repeating it — `shapeOfValue` (`:664-672`) gives a length and
+the class of the first character, `describeContainerName` (`:679-688`) adds whether a dot dragged a hostname
+in. What counts as "a name, safe to quote" is one rule, `ENV_NAME = /^[A-Z][A-Z0-9_]*$/` (`:279`, applied at
+`:702`), and its boundary is honest: a password that happens to be identifier-shaped, typed where its name
+belongs, survives into the "variable … is unset or blank" sentence (`:721-727`) as a variable name the printer
+has no slot for. `OD-43` pins the three arms of that rule — absent, bare, misshapen — and the half that never
+repeats the value; the exposure is bounded by the fact that the only flags that reach it are the two whose
+whole job is to point at a secret.
 
 Two channels, and the split is the security design:
 
@@ -508,15 +537,94 @@ Two channels, and the split is the security design:
   the *identical* RPCs with a non-operator token and asserts the refusal. No service-role key is present
   in this path, in its environment, in a log, or in a captured artifact.
 - **Granting authority, and the purge:** peer-authenticated in-container `psql` as `postgres`, the
-  `tradition-pack-admin.mjs` channel (`stage10-commerce-driver.mjs:423` names the reason: no password,
-  no key). Granting cannot depend on already having a grant, and the purge has no HTTP surface by §10's
-  choice. Both plan first and require `--yes`; `--dry-run` is the default for every mutating verb, and
-  `grant`/`revoke` print the exact statement they will run.
+  `tradition-pack-admin.mjs` channel. `stage10-commerce-driver.mjs:423-424` is the comment above that
+  driver's `runPsql` and names the reason in one clause — peer-authenticated, so no password is in this
+  process, its environment or argv — and the channel holds no key either, because §10 gave the purge no HTTP
+  surface and `--via-docker` accepts only `supabase_db_[A-Za-z0-9_-]+` (`stage11-operations-cli.mjs:889-891`),
+  a class that has no dot in it, so no value that passes it can spell a hosted target. Granting cannot depend
+  on already having a grant. Both plan first and require `--yes`; `--dry-run` is the default for every
+  mutating verb, and `grant`/`revoke` print the exact statement they will run.
 
-Every mutating verb takes a case ref where §5 requires one, generates an idempotency key unless given
-one, and prints the returned audit id so a run is answerable afterwards. Exit codes follow the existing
-convention: 0 success, 2 refusal that is the designed answer (a denial, a held state), 1 instrument or
-transport failure.
+Every mutating verb takes a case ref where §5 requires one, generates an idempotency key unless the operator
+named one (`OD-14`), and then prints the two facts §11 owes an operator afterwards — which audit row this act
+is, and whether the body answered a replay instead of doing the work twice — out of the body's own answer and
+from no other place (`auditFacts` at `stage11-operations-cli.mjs:970-976`, the sentence at `:1103-1106`). How
+often that sentence has both halves is a property of the shipped bodies, and the honest measure is the keys
+each body hands back, read out of its own `jsonb_build_object`, not the strings its text happens to contain.
+Measured that way across the ten mutating verbs: six name `audit_id` (`case-transition`, `commerce-note`,
+`grant`, `privacy-advance`, `purge`, `takedown`); four do not (`case-claim`, `case-note`, `case-release`,
+`revoke`); of those four, three *do* insert a `private.audit_events` row and simply never say which
+(`case-claim`, `case-release`, `revoke`), and one writes no trail row at all (`case-note`, which appends a
+case event); and only two answer a replay in the payload (`case-note`, `case-transition`) even though several
+of the others take an idempotency key. The ten mutating verbs are ten of this tool's sixteen; the other six are
+read doors (`case-queue`, `case-get`, `privacy-queue`, `takedown-plan`, `commerce-queue`, `health`), they write
+nothing, and the audit sentence is not printed for them at all (`OD-24` keeps both the audit sentence and the
+purge sentence off a read run). The twenty-second body count closes on the other side: sixteen names held by a
+verb, and exactly six not held — `open_support_case`, `reply_to_support_case`, `create_privacy_request`,
+`get_my_support_cases`, `get_my_support_case`, `get_my_privacy_requests` — which is `HOST_INTAKE_DOORS` printed
+as a set and re-measured as a difference (`OD-01` pins those six onto the schema and off this tool). For the
+four, the tool prints `audit_id (the answer named none)` and records nothing it did not receive: the print is
+reachable, measured and pinned (`OD-20` asserts all five lists against the bodies, `OD-21` asserts the tool
+never goes looking for a key it was not given), and the three-verb half is a migration-side fact rather than a
+tool defect — closing it means a forward migration, which needs the running stack, so it is recorded here and
+not repaired.
+
+One number in that paragraph was wrong in an earlier draft of this section, and the way it was wrong is worth
+keeping. The weaker measure — *does the string `'audit_id'` appear anywhere in the body?* — scores nine of the
+twenty-two `internal_api` bodies yes, including `operator_claim_case`, `operator_release_case` and
+`revoke_operator_role`, whose payloads do not carry the key. Both readings are on file
+(`q11-logs/s11-door-auditid-census.txt` for the text, `q11-logs/s11-door-payload-census.txt` for the payload,
+which reproduces `OD-20`'s five lists line for line), because the disagreement *is* the finding: a body that
+mentions an audit id without returning one is precisely the run an operator cannot follow up, and a section
+that published the text count would have said the promise was kept nine times rather than six. The same file
+records that these six migrations hold 58 declaration sites over 56 distinct names — 19 `api`, 22
+`internal_api`, 15 `private` — the two extras being `internal_api.operator_release_case` and
+`private.guard_support_case_update`, each re-declared by slice 2's own forward repair.
+
+Exit codes follow the existing convention: 0 answered, 2 a refusal that *is* the designed answer — a denial, a
+held state, or one of the seven SQLSTATEs this build ships with (`:399`: `42501`, `23503`, `23505`, `23514`,
+`P0001`, `22001`, `22023`; anything outside that list is an instrument failure, and the run says so), and 1 an
+instrument or transport failure. Two catch shapes implement it, and the difference is what a reader can rely
+on: a plan-stage failure prints one line and no run record (`:1012-1015`), because there is no plan to record
+yet, while a target-stage failure prints the refusal *and* the record (`:1114-1129`), with an inner catch that
+prints only that the failure could not be reported without a credential when the record itself would be the
+leak. `health` is the one verb that carries a second read, and it is where this stage's own honesty rule lives:
+the tool prints the census as two figures — files on disk under `supabase/migrations` against the versions the
+database names — and the shipped `migrations` block answers `not_measured` on this stack, because
+`supabase_migrations.schema_migrations` resolves on no qualified chain this tool is entitled to read.
+`describeCensus` (`:1140-1166`) then says which figure it does not have rather than implying the pair matched;
+measured at this head, the one it has is 37 files, highest version `20261020190500`, none of them unversioned
+(`OD-50` counts, `OD-51` prints the five arms, `OD-52` runs both verdicts against this repository's real
+directory). No cell in this tier therefore claims a migration was applied: a static read of the directory and a
+run against the stack are two different answers, and this section says so in the tool's own words.
+
+Three reading behaviours are kept exactly as they ship, and all three are sentence-quality rather than
+security-quality. `assertLoopback` (`:422-438`) tests the hosted mark before it tests the host: `:430` runs
+`/supabase\.co|supabase\.io/i` over the whole origin string while `:434` compares the parsed `hostname`, so
+`http://127.0.0.1:54321/supabase.co`, `http://127.0.0.1:54321?target=supabase.io` and
+`http://supabase.co.localhost:54321` are each refused with the hosted sentence although their hostnames are
+loopback, loopback, and a loopback-suffixed name. `OD-44` measures all three at `:2166-2175` — exit 2, zero
+requests, `HOSTED_MSG` — and its own comment records the ruling: the run refuses either way and prints the
+stronger of the two sentences. The direction is the safe one, and the escaped dots in that pattern are why a
+value like `supabaseXco` is not this case. `readEnvFile` (`:443-454`) folds a repeated key by taking the last
+line, and a last line that is blank yields a blank value, so a `.env.local` naming `SUPABASE_LOCAL_URL` twice
+never says "you have this key twice"; the run dies at the loopback refusal or the no-key refusal instead. That
+fold is pinned rather than assumed — `OD-41` asserts both halves at `:1908-1909` and names the row in `OD-44`
+it explains — which is why it is a wording note here and not a boundary.
+
+The third behaviour has no cell behind it, and is recorded as unproven-by-test rather than as a defect.
+`classifyHttp` (`:534-555`) reads the database's sentence with `body?.message ?? …` at four points (`:537`,
+`:545`, `:549`, `:553`), and `??` makes an explicit `"message": null` and an absent `message` key the same
+shape: both fall through to the arm's own wording — "(the database gave no sentence)", the no-credential
+sentence, or the body printed as JSON. What that function *is* built to keep apart is measured, at the eleven
+`classifyHttp` sites inside `OD-53` (`:2432-2525`, the calls running `:2446` to `:2507`): a missing door in both
+of its arrivals, each of the seven designed states with the database's words carried through, `401` and `403`
+both with and without a body, the residue, the 200- and 300-character caps, a `body` that is `null`, and a
+`PGRST202` that arrived with a 200 — and the verdict's text then goes to the printer unchanged, where the
+connection-string guard throws before a byte is written (`:2507-2513`). None of the eleven passes a body whose
+`message` is present and null. The exit code does not move in that case either — `42501` with
+`message: null` is still exit 2, because the classification reads `code` and never the message — and the
+fallback sentence is honest about a body that carried no words, so no repair is proposed and none is claimed.
 
 ## 12. Invariants each table carries in the DDL
 
@@ -722,7 +830,7 @@ file emitted 626 cells *and* its floor expected 626, which neither instrument as
 | Cross-wedding leak through a support note, or a credential/PII surfacing in an operator projection | host/operator message kinds are separate arms; projections are field-built and each field list is named by a `keys` cell; and the batteries scan for the **absence** of what must not appear — a value planted where only the other side may read it, then looked for in the answer text | `M:` shape first: `80_operator_authority.sql` `W01` (a grant answer is seven named fields, not the row), `W11` (six), `W06`, `W06b`, `W07`, `W07b` (the payload is built field by field), and `s11a_gstate`/`s11a_adigest` proving a refused path left nothing. Then the absence scans, which are the half that can actually fail: `85_support_lifecycle.sql` `X03`-`X06` (three operator-arm rows planted by hand into a thread a host cannot see, the host's payload byte-identical after the plants, and none of the three arm names appearing anywhere in it — the filter is a `WHERE`, not a label the client hides), `X07` (the internal note's own sentence is absent, and that note names the host's address), `X30`/`X31` (an address appears exactly once where it belongs and the thread of that ticket holds none), and `92_takedown_and_oversight.sql` `U14`/`U15` (the three object keys go to the caller and *only* to the caller: none appears in the stored trail payload, and neither key shape appears there even as a pattern — `p/<43>` and `outputs/` both scanned) and `Q10`/`Q11` (the order half is six named fields; no `entitlement_id`, no `owner_user_id` at any level, and neither order owner's account uuid appears anywhere in the answer text). What is **not** shipped is a sweep of every returned value of every door for every PII class; the scans above are per-arm and named, and an unmeasured projection would be caught by the field lists rather than by a pattern. `p:` HTTP `C-10`, `R-08`, `H-03`, unit `OD-30`-`OD-34` |
 | Erasure request silently deleting data | no Stage 11 body contains a DELETE; every FK this stage adds to `public.weddings` is NO ACTION, and the eight it adds to `auth.users` are SET NULL except the credential subject, which cascades so a duty cannot outlive its holder (`q11-logs/s11-s4-doc-probe-1.txt` sections D and E name all eight edges and their delete rules; `private.audit_events.actor_user_id` and Stage 10's `commerce_orders.owner_user_id` sit in the same catalog listing but are not counted, because those tables predate the stage); a cell performs each attempt and counts rows, threads and trail bytes before and after | `M:` `85_support_lifecycle.sql` T-RI1/T-RI2 (erasing an account nulls the ticket's attribution links and every trail row's actor, and deletes no ticket, thread row or trail row), T72 (a wedding a ticket names refuses deletion on `support_cases_wedding_id_fkey`, with the corrected control in `q11-logs/s11-probe-fk-null-control.txt`), T45-T47 (only a ticket with no history at all is deletable, by the trusted channel, and the deletion is measured as one row), T65-T70 (the credential cascades with its subject while her acts are nulled rather than removed), Z06-Z08 (the census after two erasures). `90_privacy_intake.sql` is slice 3's half: `S14` scans all four bodies for a DELETE, `D01`–`D10` refuse the hand plants and both client DELETEs, `D11`–`D12` refuse the parent delete on `privacy_requests_wedding_id_fkey`, `D13`–`D15` erase the requester and read the surviving request back from a new physical tuple, `D17`–`D21` erase the operator and read the intact requests, trail and cascaded credential back, and `Z01`–`Z12` close on thirteen requests with exactly one NULL requester. `40_catalog.sql` `C46` re-measures the ON-DELETE inventory at the head; `AI12` records that a trusted role can still prune the trail. Slice 4's half is the note and its author: `92_takedown_and_oversight.sql` `O11` (the author's account can still be erased — the require-an-author rule is an INSERT trigger, not a CHECK, so deleting a reviewer never makes the record impossible to delete), `O11b` (and the erasure is not cost-free: `operator_grants.user_id` is ON DELETE CASCADE, so removing a person removes their duties with them, measured rather than assumed), `O12`-`O14` (the note survives with every other byte identical, its trail row and its event row survive too, and the note is still readable and still attributed to its ticket and its kind), `O15`/`O16` (nothing else disappeared in that group — the ledger, the artefacts, the credentials — and the erasure did not touch the money) and `T05` + `O08`-`O10` (three of the note's four parents refuse their own delete, and only the author's link goes NULL). The no-DELETE claim is now read from the catalog rather than inferred from four bodies: `q11-logs/s11-s4-doc-probe4-1.txt` section S6 scanned the seven privileged bodies then written and found none, and at this head `q11-logs/s11-s5-doc-probe-2.txt` P5 scans all eight — `operator_operations_summary` included, all eight `f` — beside P5b, which shows the same predicate lighting on the one body that does contain the clause. `p:` HTTP `V-04`-`V-07` |
 | Health numbers that are decoration | every block carries `status: measured\|not_measured` and its own newest-row timestamp; four blocks answer `not_measured` at this head — three because no such store exists, and `migrations` because `supabase_migrations.schema_migrations` resolves on none of the qualified chains | `M:` `95_operations_health.sql`. The shape is asserted as field lists, not as a paragraph: `C1` (the answer carries exactly the eight fields §9 describes), one `keys` cell per block and per sub-object through `C21`, `C2` naming the ten blocks and `C9` giving the migrations block presence, reason and note with no invented timestamp, `C17` making the case-link count an object so it can carry a reason later. The absence is derived rather than typed: `V11` requires `blocks_not_measured` to be exactly the set of blocks whose own status says so, `V12` requires that derived list to be `auth_failures`, `migrations`, `rate_limits`, `token_abuse` by name and in order, and `V18` that no measured block borrows the absence vocabulary — so a fifth silence cannot appear and one cannot disappear. `V13` reads `block_count` from the blocks object rather than trusting a hand-written ten, and `V19`-`V21` make `writes_anything` and `identifiers_included` JSON booleans rather than the strings `"false"`. Every counted vocabulary is compared with the constraint that enforces it, not with a list (`V1`-`V8`, and `V9a`/`V9c` over the open `hold_reason` rule — the latter paired with the cell that shows the same scan finding values in a closed column, which is what makes the zero a measurement). The arithmetic has to close: group `M` requires each partition to sum to its own total (`M1`, `M2`, `M10`-`M21`) and bounds each sub-count against its parent. The timestamps are fenced: `W4` makes `as_of` this transaction, `W6` refuses any `newest_at` in a future `as_of` does not share, `I11` scans every string leaf for a timestamp later than the answer. The body cannot write, read from its own `prosrc`: `R8` finds no DML verb as a word, `R9` opens the word boundaries on the same bytes and gets 47 hits so the instrument is provably not inert, `R11`/`R12` glue one `INSERT` clause onto those very bytes and the scanner lights up on the verb that clause added, and `R13`/`R14` run the same instrument over slice 4's publication body, which really does write eight times. `R3`-`R6` add that the STABLE half is refused by the executor rather than by a rule this file wrote — and that a write attempted inside an aborted subtransaction moves the store digest and then moves it back. `R16`-`R19` count the body's call-shaped tokens and follow the one hop it makes, to a helper that is itself STABLE and verb-clean, so the closure is two deep and stops there; `R20`-`R24` show the two disclaimer fields are literal `false` and are the last thing the body does; and `R25`-`R38` run the door inside a read-only fence that bites before the function is reached and cannot be lowered from inside, then require the fenced answer to be the *whole* answer, byte-identical to the one the same account read one statement earlier, across an eighteen-store digest set of which every member is a real relation — `R38` naming the empty set of disagreements rather than implying it. `L0` proves the answer is non-vacuous leaf by leaf before any of the above, and `B0`-`B0c` read the door before this file plants a row, so each figure below is a measured delta. Group `N` builds the migrations branch as a fixture in one transaction, reads the block as `measured` twice, drops it and re-reads the original answer unchanged — with `N5` quoting the shipped body's own column references out of `pg_proc.prosrc` instead of trusting the fixture, and `N42` returning the summary line to the four names `V12` pinned. The `Z` floor prints the total and refuses any other. `p:` HTTP `H-01`-`H-06` |
-| A service-role key in the tool, a log, or a bundle | CLI takes an account password through `--secret-env` only; `assertSecretFree`; `service-role-key-in-browser-code` unchanged in `src/`; a new product-contract rule (`operator-rpc-referenced-outside-cli`) refuses any `src/` mention of an `operator_*` name, self-tested | `M:` `80_operator_authority.sql` `A05b` and `A13`-`A16` are the SQL half of the same promise — there is no `api` wrapper to call and the server key can neither read who holds authority nor write, resurrect or erase a credential, four refusals all named `permission denied for table operator_grants`. Slice 4 measured the harder version of the same boundary on the one body this stage could have handed to the server key and deliberately did not: `92_takedown_and_oversight.sql` `U03` stops `service_role` at `permission denied for schema internal_api`, `U03b` reads why the two refusals differ — `internal_api` USAGE is `true`/`true`/`false` for anon/authenticated/service_role, so the browser roles reach the function and are refused there while the server key never reaches it — `U04` counts zero `api` wrappers for the purge, and `U05` asks the database rather than this file and gets three `false`, with the measured ACL literally `{postgres=X/postgres}`: owner only, no PUBLIC half at all. Neither a browser session nor the server key has a wire path to the irreversible act; the tool half can only be measured once §11's CLI exists. `p:` unit `OD-40`-`OD-46`, `npm run product:check`, `npm run bundle:check`, HTTP `A-06` |
+| A service-role key in the tool, a log, or a bundle | The CLI takes the operator's password and address only as the *names* of environment variables (`--secret-env` / `--account-env`), refuses all nineteen flags that could carry a secret, an amount or a server before any transport exists, describes a mis-typed value by its length and the class of its first character instead of quoting it, and prints through one gatekeeper (`makePrinter`) that will not print a line carrying the password, the bearer token or the refresh token — it raises a refusal naming the slot and prints nothing — softens the operator's own address and the publishable key, and stops a `postgres://user:pass@` shape on sight; the recorded boundary is that the three `psql` acts read no credential at all, so their answer prints under the connection-string guard alone. `service-role-key-in-browser-code` unchanged in `src/`; and the product-contract rule `operator-rpc-referenced-outside-cli` (pattern `\b(?:get_\|grant_\|revoke_)?operator_[a-z0-9_]+\b`, global, `scope: ["src/"]`, `exclude: ["src/integrations/supabase/types.ts"]`) refuses any `src/` mention of an operator door name, while the checker's own `docs/audits/` + `scripts/` exclusions keep this instrument outside the scanned set on purpose | `M:` `80_operator_authority.sql` `A05b` and `A13`-`A16` are the SQL half of the same promise — there is no `api` wrapper to call and the server key can neither read who holds authority nor write, resurrect or erase a credential, four refusals all named `permission denied for table operator_grants`. Slice 4 measured the harder version of the same boundary on the one body this stage could have handed to the server key and deliberately did not: `92_takedown_and_oversight.sql` `U03` stops `service_role` at `permission denied for schema internal_api`, `U03b` reads why the two refusals differ — `internal_api` USAGE is `true`/`true`/`false` for anon/authenticated/service_role, so the browser roles reach the function and are refused there while the server key never reaches it — `U04` counts zero `api` wrappers for the purge, and `U05` asks the database rather than this file and gets three `false`, with the measured ACL literally `{postgres=X/postgres}`: owner only, no PUBLIC half at all. Neither a browser session nor the server key has a wire path to the irreversible act. The tool half is now measured, and only at the unit tier: forty cells green in `scripts/stage11-operations-cli.test.mjs`, of which `OD-17` keeps the two channels apart (`--secret-env` on a `psql` verb is itself a refusal), `OD-30`-`OD-34` sweep every chunk all sixteen verbs print and prove the sweep can fire, `OD-40`-`OD-46` measure the flag ban, the two-name `.env.local` allowlist, the loopback address, the checker rule against this repository's real tree, and the absence of any product path to the CLI, and `OD-50`-`OD-54` the migration census. `OD-45` is this row's own pair: each of the sixteen door names lights the rule under `src/`, and the same sixteen are silent in the CLI file and in the generated `types.ts`, with `isScannedPath` proving one is outside the scanned tree and the other inside it — so the silence is a scope decision, not a blind spot. No cell here has run against a stack, which is what `p:` HTTP `A-06` still owes. `p:` unit `OD-17`, `OD-30`-`OD-34`, `OD-40`-`OD-46`, `OD-50`-`OD-54`; `npm run product:check` (262 active files, 0 violations, exit 0) beside its `--self-test` (34 rules verified, exit 0); `npm run bundle:check`; HTTP `A-06` |
 | A new migration quietly exposing a `private` operational table | `40_catalog.sql` inventories widened behind a stage11 branch, `check-db-contract.mjs` `NON_CLIENT_SCHEMAS`, `API33`/`API34` name lists | `M:` `C06` names `commerce_review_notes` among the five `private` tables this stage declares, inside a thirteen-table inventory that `92_takedown_and_oversight.sql` T16 measures independently; `C15` still measures reach; `C26` pins the definer set by name, and the count that set now carries is 47 — one more than the 46 slice 4's census logged, and the figure `92_takedown_and_oversight.sql` T17 measures from `pg_proc` at this head; `C26d`/`C26f` read 41 paired wrappers, one more than the 40 slice 4 logged, and `C26e` names `internal_api.operator_operations_summary` among the bodies that may be definers without a door; `C29a`'s stage11 arm names all nineteen of the stage's exposed RPCs (ten from slice 2, four from slice 3, four from slice 4, one from slice 5) and `C28b` pins the eighty-two-name wrapper-plus-implementation set that goes with them — 41 `api` plus 41 `internal_api`, counted out of the cell's own literal — while `internal_api.operator_purge_publication_objects` stays *absent* from both, which is the unexposed body showing up in the catalogue as a measured absence; `C29c-b` holds the identity-taking set closed at nine names; `C31` carries the stage's twenty-six triggers — slice 5 adds no table and no trigger, so the inventory is the twenty-four over the five stage tables plus the two on the shared trail, read row by row in `q11-logs/s11-s5-doc-figures-2.txt` section 9 — of which slice 4's five on the review-note row are the newest and all INVOKER; `C46` and `C48` carry the new edges; and the file closes at 106 assertions at this head — `q11-logs/s11-s5-all-1526.txt` prints `STAGE2 CATALOG TESTS PASSED (106)` twice, once per historic chain, beside the census `API_NAMES=41 INTERNAL_NAMES=61 PRIVATE_FUNCS=52` on all seven chains it builds. That total did not move, and the reason is worth stating: the slice's whole catalogue edit widens names and counts *inside* cells that already existed — `C26`, `C26d`, `C26e`, `C26f`, `C28b` and `C29a`, with `C26c` carrying only the comment that explains the new count — and adds no assertion, so a green 106 here is the same 106 read against a larger schema, which is what a tripwire is for. `A06a`-`A06c` prove the *declared* surface did not move. `p:` `API33`/`API34` |
 | Privilege granted by hiding links rather than by the database | §10: no admin route, no admin component, and the denial matrix is run at the wire for all four caller classes | `M:` `80_operator_authority.sql` `A05b` — slice 1's three names have no `api` wrapper at all, so for the authority surface there is no URL to hide behind and the claim is purely a grant claim, which `A13`-`A16` then test against the server key as well. The stage has since chosen to ship a browser-reachable surface, so this row can no longer rest on absence: `40_catalog.sql` `C29a` names nineteen exposed `api` RPCs at this head (ten from slice 2, four from slice 3, four from slice 4, one from slice 5) and `C28b` pins the eighty-two-name wrapper-plus-implementation set beside them, which means an exposure is a decision with a name in the catalogue rather than a link that was never clicked. Slice 5 adds the nineteenth name, and refuses it from every side the row cares about: `95_operations_health.sql` `A1`/`A2`/`A3` (anon refused at the wrapper and at the body, in one sentence), `A6` (an anon token that *claims* a live operator is still refused), `A4`/`A5` (`service_role` cannot even name the schema the wrapper lives in, nor the body), `A12` (a signed-in host is refused the cluster-wide screen), `A13`/`A14` (the superuser is refused by the body's own sentence rather than by its privilege, and a stranger and an owner carrying a stranger's uid hear one sentence), `A8`/`A9`/`A10`/`A11` (an account holding no grant, a support-scoped operator, a revoked grant and an expired live grant all refused, because a scope is not a seniority), and `A20` (the scope test runs before the window test, so a caller who is not an operator cannot probe the bounds). What holds the line is refusal at the door, measured per battery: `92_takedown_and_oversight.sql` `K01`, `Q01`, `N01` run each of its three doors as anon, `U01`/`U02` add the purge and refuse it even to the operator holding a live `operations` grant once that operator is on a session, `85_support_lifecycle.sql` `P01`-`P03` and `90_privacy_intake.sql` `P01`/`P02`/`Q11` run their own anon arms — the letter `P` is one of the collided ones, which is why the file rides the id — and `80_operator_authority.sql` `A09`/`A10` refuse an anonymous read and an anonymous write of the grant table itself at the schema layer. `p:` every HTTP `A-*`, `C-*`, `T-*`, `R-*`, `V-*` refusal paired with the operator's success control |
 
@@ -1070,13 +1178,24 @@ row print **13** `api` and **24** `internal_api` as a live-stack read at Stage 7
 counted in migration source are **22** and **39** at `c9eb27a` against **41** and **61** here: two instruments,
 which is why the pair is recorded as a comparison and not as a correction. `product:check` scans **262** files
 in this tree, **260** of them tracked here and **258** at `c9eb27a`, and the two this stage added are its own
-design note and its kickoff spec; the "Product-contract checker" row's **250** is pinned to `f7096ef`, whose
+design note and its kickoff spec; the "Product-contract checker" row now leads with that **262**, and the
+**250** it used to lead with stays pinned to `f7096ef`, whose
 tracked tree scans **248** while the log that row cites printed **250**, the row itself disclosing that its
 figure came from a working tree — this tree's own gap is the same shape, `pnpm-lock.yaml` and
 `pnpm-workspace.yaml`; and its **32** rules were true at `f7096ef`, where the checker's own id list ends at
 `qr-encoder-imported-outside-its-owner`, but not at `c9eb27a`, which prints **33** because Stage 10's `7a2eeb6`
-added `client-side-checkout-affordance` — `git rev-list c9eb27a..HEAD -- scripts/check-product-contract.mjs`
-prints nothing, so this stage moved no rule. Five cells, then, every one of them false before this stage
+added `client-side-checkout-affordance` — and `git rev-list c9eb27a..HEAD -- scripts/check-product-contract.mjs`
+prints exactly one commit, `c898cbb`, whose diff against this file is three added and two removed lines, every
+one of them inside a `//` comment, so *at HEAD* this stage moved no rule. That last clause was wrong as written
+when this section first said it, and the truth needs both halves. The rev-list is not empty: it names the
+comment-only commit that corrected the surface count described two sentences below. And the stage did add a
+rule — `operator-rpc-referenced-outside-cli`, the one §13's tool row rests on — but it has lived in the working
+tree only: `git show HEAD:scripts/check-product-contract.mjs` counts **33** rule ids and carries zero
+occurrences of that name, while this tree's file counts **34** and carries three, `git diff --stat` printing
++73 lines against the checker. So §13 was describing a guard that existed in bytes nobody had committed, and
+the **33**-rule self-test logs cited further down were correct for the trees they ran on; the commit this pass
+makes is the one where the rule, the CLI, its unit battery and this document finally agree. Five cells, then,
+every one of them false before this stage
 opened, and recorded here rather than repaired here, because a documentation fix that is not this stage's defect
 is a second piece of work wearing this one's label. One sentence this stage *did* falsify lives in
 `scripts/check-product-contract.mjs`, whose checkout rule explains itself by naming the exposed surface as
@@ -1123,6 +1242,24 @@ are byte-identical, `-6.txt` is the run written after the final byte of this par
 what turns "the prose pass moved no figure" from an assumption into a measurement — the same four numbers the
 stale-cell list above reads, unchanged.
 
+Those figures moved afterwards, by exactly one rule, and the move is the arrival of the guard §13's tool row
+rests on. The checker was re-taken after the last markdown byte of this section and prints `Product contract
+self-test OK — 34 rule(s) verified.` beside `self-test code=0` — one id more than the four `-3` … `-6` logs
+above, and the extra one is `operator-rpc-referenced-outside-cli` — while `product:check code=0` still scans
+**262** active files with 0 violations, so the new rule fires on nothing in the shipped tree. That absence is
+measured rather than assumed: `OD-45` writes each of the sixteen operator door names into a file under `src/`
+and shows the rule lighting on all sixteen, then shows the same sixteen silent in the CLI itself and in the
+generated `src/integrations/supabase/types.ts`, with `isScannedPath` proving one of those two paths is outside
+the scanned tree and the other inside it — which is what makes the second silence a decision about a generated
+catalogue instead of a hole in the scanner. §11's own battery stands at forty cells with `vitest_exit=0`
+(`q11-logs/s11-final-cli-battery.txt`; `q11-logs/od-group6-run2.txt` prints the same `Tests 40 passed (40)`
+line but no adjacent exit code, so the forty is cited from the capture that carries one), and its before-half
+is `q11-logs/od-group6-run.txt`: `1 failed | 39 passed
+(40)`, because `OD-51` had demanded that two of the tool's sentences appear as contiguous substrings of source
+literals the tool itself writes across a line break. The cell now pins the six fragments exactly as the source
+spells them and keeps the joined runtime sentences as their own `toBe` assertions, so what moved was the guard's
+reading of the bytes, not the promise those bytes make.
+
 Two refusals were the sweep's own, and both were the instrument being stale rather than the schema being
 wrong — `q11-logs/s11-regress-1.txt` printed `N04b` refusing a revocation Stage 11 made on purpose, and
 `q11-logs/s11-regress-2.txt` printed `G2` with `got [41] want [39]`. After the six cells above moved,
@@ -1133,6 +1270,23 @@ Stage 7's family review 255 and review boundary 116 (`q11-logs/s11-regress-3.txt
 `q11-logs/s11-authority-3.txt`. Every one of those is a `sweep_exit=` line read out of the log it belongs
 to. The slice-3 head repeats the measurement rather than inheriting it: the runs and totals are the block
 above, each read from its own log, and the 134 is not carried forward as a current figure.
+
+Two historical instruments caught this stage, and in both cases the instrument was working rather than
+drifting. `scripts/domain-contract.test.mjs:69` pins the `private` table inventory name by name, and the head
+this pass opened held eight names while the committed Stage 11 migrations create thirteen, so `npm test` was
+red before a byte of prose moved here: `2 failed | 1413 passed (1415)` at `vitest_exit=1`
+(`q11-logs/s11-final-npm-test.txt`, the second failure being the checker's own fixture cell below). The two
+cells that walk that same set at the *column* level passed over the five new tables untouched — no retired
+scaffold name appears in any of them, and none holds an amount outside the ledger — which is what makes this
+widening an inventory move rather than a rule move, and the repair is the five names with their reason written
+beside them. The second finding is this section's own rule: the cell at `scripts/product-contract.test.mjs:22`
+builds one synthetic file and asserts every rule id the checker carries fires somewhere in it, and
+`operator-rpc-referenced-outside-cli` had no shape in that file, so the guard §13's tool row rests on could
+not fire in the one battery whose job is to prove the rules can. The repair is a `get_operator_case` call in
+the fixture, not a relaxed assertion, and both files re-taken green print `28 passed (28)` at `vitest_exit=0`
+(`q11-logs/s11-final-two-repaired-cells.txt`). Neither move changes what Stage 11 refuses to build; both are
+why the two readiness rows for these checkers now carry the repair in their own words rather than leaving it
+in a commit message nobody reads with the row.
 
 ## 16. Migration slices
 
