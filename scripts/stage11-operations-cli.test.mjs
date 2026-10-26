@@ -692,14 +692,52 @@ function argumentLines(statement) {
   return match[1].split(',\n  ');
 }
 
-/** The keys one body puts in the jsonb it hands back, read from its own `jsonb_build_object( … );` blocks.
- *  Scoped to those blocks because a vocabulary guard is a list of quoted lowercase words too, and a reader that
- *  did not care which parentheses they sat inside would call `'billing_refund_inquiry'` a payload field. */
+/** The top-level arguments of the call whose `(` sits at `openIdx`, counted with string contents held out of
+ *  the tally, so neither a comma nor a paren inside a literal can end the scan one argument early. */
+function topLevelArgs(src, openIdx) {
+  const args = [];
+  let depth = 0, current = '', inString = false;
+  for (let i = openIdx; i < src.length; i++) {
+    const ch = src[i];
+    if (inString) {
+      current += ch;
+      if (ch === "'") {
+        if (src[i + 1] === "'") { current += "'"; i++; } else inString = false;
+      }
+      continue;
+    }
+    if (ch === "'") { inString = true; current += ch; continue; }
+    if (ch === '(') { depth += 1; if (depth === 1) continue; }
+    else if (ch === ')') { depth -= 1; if (depth === 0) { args.push(current); return args; } }
+    else if (ch === ',' && depth === 1) { args.push(current); current = ''; continue; }
+    current += ch;
+  }
+  throw new Error('a jsonb_build_object call never closed');
+}
+
+/** The keys one body puts in the jsonb it hands back, read by *argument position* inside a balanced
+ *  `jsonb_build_object( … )` call. Position, not line position: these bodies wrap their calls across lines,
+ *  and the line-anchored rule this cell used to carry saw `'case_ref'` at a line start while `audit_id` sat
+ *  three arguments later on the same line — so `operator_claim_case`, `operator_release_case`, `revoke_operator_role`
+ *  and `grant_operator_role` were read as naming no audit id, and the census below asserted that reading.
+ *  Scoped to the three shapes that actually reach the caller — `RETURN jsonb_build_object( … )`, the
+ *  `RETURN v_payload || jsonb_build_object( … )` merge, and the `v_payload := jsonb_build_object( … )` that
+ *  merge reads — because a vocabulary guard is a list of quoted lowercase words too, and a reader that did
+ *  not care which parentheses they sat inside would call `'billing_refund_inquiry'` a payload field. */
 function payloadKeys(schema, fn) {
   const body = bodyOf(schema, fn).text;
-  const blocks = [...body.matchAll(/jsonb_build_object\(([\s\S]*?)\)\s*;/g)].map((m) => m[1]);
-  if (blocks.length === 0) throw new Error(`${schema}.${fn} builds no jsonb payload`);
-  return [...blocks.join('\n').matchAll(/^[ \t]*'([a-z0-9_]+)',/gm)].map((m) => m[1]);
+  const calls = [...body.matchAll(
+    /(?:\bRETURN\s+v_payload\s*\|\|\s*|\bRETURN\s+|\bv_payload\s*:=\s*)jsonb_build_object\s*\(/g)];
+  if (calls.length === 0) throw new Error(`${schema}.${fn} builds no jsonb payload`);
+  const keys = [];
+  for (const call of calls) {
+    const args = topLevelArgs(body, call.index + call[0].length - 1);
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      const key = /^'([a-z0-9_]+)'$/.exec(args[i].trim());
+      if (key) keys.push(key[1]);
+    }
+  }
+  return [...new Set(keys)];
 }
 
 /** A console session that answers the encoding probe with a chosen word and every statement with the same
@@ -1259,23 +1297,45 @@ describe('OD answers: what the body handed back is the only thing the operator i
     const census = auditCensus();
     expect(census.length).toBe(10);
 
-    // The list behind the count, in three parts. The second and third rows are the recorded Stage 11 finding:
-    // `revoke_operator_role`, `operator_claim_case` and `operator_release_case` insert an audit row and then
-    // answer with a payload that does not name it, so §11's "which audit row is this" cannot be answered for
-    // them from the stack's own words; and `operator_add_case_note` writes no audit row at all, only a case
-    // event. Both are migration-side facts, not tool bugs: the tool refuses to invent an id. Repairing them
-    // means a forward migration, which needs the running stack, so they are recorded here and not repaired.
+    // The list behind the count. Measured at this head, nine of the ten mutating verbs name the audit row they
+    // wrote in the very payload that reports the act, and the tenth — `case-note` — writes no `audit_events`
+    // row at all (it appends a case event, and the body says the omission is deliberate), so there is no id
+    // for it to name and no silent trail anywhere in the set. `grant` and `revoke` are the two verbs that take
+    // no `p_idempotency_key` at all — measured as the statement each one prints (`q11-logs/s11-grant-revoke-key-probe-1.txt`)
+    // and as the absence of the parameter in their own signatures (`q11-logs/s11-idempotency-param-probe-1.txt`) —
+    // so they cannot answer a replay and the replay half of the sentence is off by design, not by omission.
+    //
+    // The four lists this cell carried before measured something else: this file's `payloadKeys` read a payload
+    // key only when it began a line, and these bodies wrap their calls, so it missed the `audit_id` sitting
+    // mid-line in `operator_claim_case` and `operator_release_case` and reported six verbs instead of nine. Both
+    // the instrument and the lists are repaired here; before/after captures are
+    // `q11-logs/s11-od20-before.txt`, `q11-logs/s11-payloadkeys-diagnostic-1.txt` (the old rule, replayed on the
+    // current bytes) and `q11-logs/s11-body-arm-probe-1.txt` (the independent extraction the new lists match).
     expect(census.filter((row) => row.namesAuditId).map((row) => row.verb).sort())
-      .toEqual(['case-transition', 'commerce-note', 'grant', 'privacy-advance', 'purge', 'takedown']);
+      .toEqual(['case-claim', 'case-release', 'case-transition', 'commerce-note', 'grant',
+        'privacy-advance', 'purge', 'revoke', 'takedown']);
     expect(census.filter((row) => !row.namesAuditId).map((row) => row.verb).sort())
-      .toEqual(['case-claim', 'case-note', 'case-release', 'revoke']);
+      .toEqual(['case-note']);
     expect(census.filter((row) => !row.writesAuditRow).map((row) => row.verb))
       .toEqual(['case-note']);
     expect(census.filter((row) => row.writesAuditRow && !row.namesAuditId).map((row) => row.verb).sort())
-      .toEqual(['case-claim', 'case-release', 'revoke']);
+      .toEqual([]);
     expect(census.filter((row) => row.namesReplayed).map((row) => row.verb).sort())
-      .toEqual(['case-note', 'case-transition']);
+      .toEqual(['case-claim', 'case-note', 'case-release', 'case-transition', 'commerce-note',
+        'privacy-advance', 'purge', 'takedown']);
 
+    // Two controls on the instrument itself, because a census that can only read what the old rule happened
+    // to see would pass on a wrong reading in both directions. The first is the exact projection of one verb,
+    // the verb whose `audit_id` the line-anchored rule dropped: if extraction under-reads, this fails. The
+    // second is that a body's own vocabulary guard is never mistaken for a payload field — those quoted words
+    // sit in the same body, and the merge arm of this very cell would light up if the reader stopped caring
+    // which parentheses a quoted word sat inside.
+    const claim = census.find((row) => row.verb === 'case-claim');
+    expect([...claim.keys].sort()).toEqual(['assigned_operator_user_id', 'audit_id', 'case_ref', 'replayed', 'seq']);
+    const kindWords = guardWords('internal_api', 'operator_add_commerce_review_note', 'p_kind').lists.flat();
+    expect(kindWords.length).toBeGreaterThan(0);
+    const commerceRow = census.find((row) => row.verb === 'commerce-note');
+    expect(commerceRow.keys.filter((key) => kindWords.includes(key))).toEqual([]);
     for (const row of census) {
       const answer = {};
       for (const key of row.keys) {
