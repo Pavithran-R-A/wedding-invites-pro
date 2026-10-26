@@ -110,6 +110,44 @@ psql_q "select '  db: ' || version()"
 # that deleted it and did not restore it would leave the product unable to refuse anything. The policy
 # posture is additionally checked by name below, because a count of 1 says nothing about which posture
 # that one row carries.
+# Stage 11 adds the five stores an operational act writes — the grant table the authority lives in, the
+# ticket and its event thread, the privacy request register, and the refund-oversight note — and one
+# kind-filtered read of `private.audit_events`, in the shape `guest_invitation_tokens` above already
+# uses. The filter is not decoration. The trail is append-only by design, so a *successful* operator act
+# leaves a row behind even when every state table has been torn down, and a raw count over
+# `private.audit_events` would therefore refuse any run that did its job. The rows already sitting there are
+# not few: twenty-nine real `INSERT INTO private.audit_events` statements live in the five
+# `*_stage10_*.sql` migrations (counted by stripping comments first, so the prose mention of that phrase in
+# slice 1's own header is not read as a statement — `q11-logs/s11-audit-site-count.cjs`, capture
+# `s11-audit-site-count-1.txt`), and one Stage 10 battery's own census accounts for `policy_changed=7` from a
+# single file on its own (`q10-logs/s10r-nested-run-4.txt:35`, re-measured at
+# `q11-logs/s11-s3-st11qual_g10-80_commerce_ledger.txt:428`). What the live total on this stack is, the
+# baseline line printed three paragraphs below names it for the run that has to be judged, instead of this
+# comment remembering a number nobody re-read — which an earlier draft of this note did, with a count of
+# thirty-four that no capture in `q10-logs` or `q11-logs` supports.
+# Filtering by action *name* alone would have been the obvious move and is wrong, which the line below
+# records rather than hides: Stage 10 writes an audit action called `revoked` when it pulls an
+# entitlement, and Stage 11 writes an action called `revoked` when it pulls an operator grant. Those are
+# different acts on different rows with different owners, and an action-only filter would have read a
+# Stage 10 suite's normal ledger as Stage 11 residue — failing this tier for a reason that has nothing to
+# do with the surface being qualified. So the predicate is the (action, subject_type) pair, which is the
+# shape the ten `INSERT INTO private.audit_events` sites in the six `*_stage11_*.sql` migrations write
+# (two in slice 1's authority file, three in slice 2's cases, one each in the closed-is-terminal repair
+# and slice 3's privacy intake, three in slice 4's takedown and oversight, none in slice 5's health read —
+# all six files named with their count in `q11-logs/s11-audit-site-count-stage11-only-1.txt`, so the zero
+# is a measurement and not an absence in a list that only prints non-empty rows),
+# and it is why `guest_invitation_tokens` above filters a *kind* and not just a table. The pair list itself is
+# read rather than remembered: a sweep of those ten sites takes each one's `action` and `subject_type` literal
+# out of its `VALUES` list, resolves them to nine distinct pairs — `case_released` is written by two of the
+# ten, slice 2's release and the closed-is-terminal repair — and diffs them against the predicate below,
+# finding nothing written-but-uncounted and nothing counted-but-never-written
+# (`q11-logs/s11-census-pair-sweep.cjs`, capture `s11-census-pair-1.txt`).
+# Because the comparison is an equality, a row left by an earlier run that died is already in the baseline
+# and does not fail the next run; what fails it is a row this run wrote and did not account for. The
+# Stage 11 battery prunes exactly the audit ids its own answers named, through the container's `postgres`
+# channel, because `service_role` holds neither UPDATE nor DELETE there — that is slice 1's repair, not a
+# hole, and `AI12`/`AI12b` in `supabase/tests/stage11/80_operator_authority.sql` measures the pruning path
+# this census depends on existing.
 # Add a store by adding one `select` line; the comparison below reads whatever names come back.
 leak_census() {
   psql_q "select 'weddings='||count(*) from public.weddings
@@ -135,7 +173,17 @@ leak_census() {
     union all select 'commerce_payment_events='||count(*) from private.commerce_payment_events
     union all select 'commerce_refunds='||count(*) from private.commerce_refunds
     union all select 'commerce_policy='||count(*) from private.commerce_policy
-    union all select 'entitlements='||count(*) from public.entitlements"
+    union all select 'entitlements='||count(*) from public.entitlements
+    union all select 'operator_grants='||count(*) from private.operator_grants
+    union all select 'support_cases='||count(*) from private.support_cases
+    union all select 'support_case_events='||count(*) from private.support_case_events
+    union all select 'privacy_requests='||count(*) from private.privacy_requests
+    union all select 'commerce_review_notes='||count(*) from private.commerce_review_notes
+    union all select 'stage11_audit_rows='||count(*) from private.audit_events where
+      (action, subject_type) in (('granted','operator_grant'), ('revoked','operator_grant'),
+        ('case_claimed','support_case'), ('case_released','support_case'), ('status_changed','support_case'),
+        ('privacy_status_changed','privacy_request'), ('publication_takedown','publication'),
+        ('publication_objects_purge_planned','publication'), ('commerce_review_note_added','commerce_refund'))"
 }
 BASE_CENSUS=$(leak_census)
 printf '%s\n' "$BASE_CENSUS" | sed 's/^/  ..  baseline /'
@@ -144,6 +192,11 @@ printf '%s\n' "$BASE_CENSUS" | sed 's/^/  ..  baseline /'
 # Several tests below assert that a table is *not reachable* over REST. That assertion
 # is worthless if the table simply was never created, so its existence is checked here,
 # in SQL, against the same database the suite is about to hit.
+# Stage 11's five operational stores join the list for that same reason and with a sharper edge than the
+# rows above it: `supabase/tests/api/stage11_operations_http.test.mjs` refuses a browser-shaped write to
+# each of them, and a grant table that was never created would answer every one of those refusals with
+# the right sentence for the wrong reason. The list is the pair to the census above — the census asks
+# whether a run left rows behind, this asks whether there is a table for the run to have left them in.
 echo "==> Preconditions"
 MISSING=$(psql_q "
   select coalesce(string_agg(t, ', '), '')
@@ -154,6 +207,8 @@ MISSING=$(psql_q "
       'private.commerce_payment_events', 'private.commerce_refunds',
       'private.commerce_packages', 'private.commerce_policy',
       'public.entitlements', 'public.publications',
+      'private.operator_grants', 'private.support_cases', 'private.support_case_events',
+      'private.privacy_requests', 'private.commerce_review_notes',
       'legacy.projects', 'legacy.guests', 'legacy.payments', 'legacy.templates'
     ]) x
     where position('.' in x) > 0
