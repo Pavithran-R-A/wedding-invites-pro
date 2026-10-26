@@ -792,8 +792,12 @@ function coerce(specArg, options) {
     case 'word': {
       const list = VOCAB[specArg.vocab];
       if (!list.includes(value)) {
+        // Measured, not assumed: the body's own unknown-scope sentence (`unknown operator scope %: the four
+        // duties are …`, authority:429) is not this one's words, so this refusal claims only what it knows —
+        // that its own check ran, and ran before anything was sent.
         throw new Refusal(`refused: ${JSON.stringify(value)} is not one of the ${list.length} ${specArg.vocab} `
-          + `words this build ships (${list.join(', ')}). The body would answer the same sentence.`);
+          + `words this build ships (${list.join(', ')}). This check is the tool's own and it runs before `
+          + 'anything is sent.');
       }
       return { name: param, js: value, sql: sqlText(value), display: value };
     }
