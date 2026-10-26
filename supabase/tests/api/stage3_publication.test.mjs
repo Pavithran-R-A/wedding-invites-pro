@@ -1057,8 +1057,9 @@ describe('§6.5 taking a link down', () => {
 // `api`, which PostgREST serves and which now holds only one-line SECURITY INVOKER
 // wrappers, and `internal_api`, which it does not serve and which holds the privileged
 // SECURITY DEFINER bodies those wrappers name. Asserting them in one pass is what makes
-// the split a fact rather than a claim: the same twenty-two names, in two postures, with the
-// same twenty-two caller sets.
+// the split a fact rather than a claim: the same names, in two postures, with the same
+// caller sets — forty-one names on the reachable half at this head, and sixty-one on the
+// inner half, the twenty extra being the doorless bodies the three lists below enumerate.
 describe('§6.6 the callable catalogue is closed', () => {
   /** `grantees` lists the roles this build intends to reach the function. The owner is
    *  always allowed and is not a caller; nothing else may appear. */
@@ -1143,6 +1144,63 @@ describe('§6.6 the callable catalogue is closed', () => {
     // head with this file's own `readSurface` projection, not transcribed from
     // `20261017120000_stage10_commerce_foundations.sql:1646-1652`.
     ['commerce_host_summary', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    // Stage 11's nineteen operational doors: thirteen that only a granted operator may open, and six
+    // intake doors a signed-in host may open on its own wedding. They are nineteen and not twenty-two
+    // because three of this stage's bodies are deliberately given no door at all — the grant pair and
+    // the object purge plan are reached only from a trusted connection, and that absence is inventoried
+    // by name in `OPERATOR_SERVICE_ONLY` below rather than left to this map's silence. Every one of the
+    // nineteen is `authenticated`-only: a door an anonymous caller could open would be a way to read
+    // somebody else's support queue without a session, which is the opposite of what a queue is for.
+    // The signatures, postures and caller sets are read from the deployed stack's catalog, not
+    // transcribed from the six `202610*_*_stage11_*.sql` files and not predicted from what the design
+    // said would ship. The record is `q11-logs/s11-http-surface-readout-1.txt`: section A the 41 names
+    // in `api` with args, acl, definer, language, config and owner, section B the 41 `authenticated`
+    // -executable bodies in `internal_api` — those same columns, which are this file's `readSurface`
+    // projection — and `api_count=41` / `authenticated_execute_count=41` printed as the section totals.
+    // Two things about that capture are stated rather than glossed. It prints `HEAD:
+    // 4ea2a9787d9105b128d0af822aeb26f35115b141`, one commit behind this one, so it is evidence about the
+    // stack at that head; the commit in between touched `scripts/stage11-operations-cli.mjs` and its
+    // unit test and no file under `supabase/migrations/`, which is why the surface cannot have moved
+    // between the two — measured, not assumed. And the catalog query that emitted the capture was run
+    // out-of-band: only its output is saved in the evidence directory, so the numbers in it are the
+    // record of one measurement rather than a re-runnable instrument. `readSurface` re-measures the
+    // same catalog facts every time this suite runs against a live stack, and the Stage 11 doors are
+    // asserted name-by-name in `stage11_operations_http.test.mjs`'s `before()` hook.
+    ['create_privacy_request', { args: 'p_wedding_id uuid, p_kind text, p_note text', grantees: ['authenticated'] }],
+    ['get_my_privacy_requests', { args: '', grantees: ['authenticated'] }],
+    ['get_my_support_case', { args: 'p_case_ref text', grantees: ['authenticated'] }],
+    ['get_my_support_cases', { args: 'p_status text, p_limit integer', grantees: ['authenticated'] }],
+    ['get_operator_case', { args: 'p_case_ref text', grantees: ['authenticated'] }],
+    ['open_support_case', {
+      args: 'p_wedding_id uuid, p_category text, p_severity text, p_summary text, p_idempotency_key uuid',
+      grantees: ['authenticated'],
+    }],
+    ['operator_add_case_note', {
+      args: 'p_case_ref text, p_kind text, p_body text, p_idempotency_key uuid', grantees: ['authenticated'],
+    }],
+    ['operator_add_commerce_review_note', {
+      args: 'p_refund_id uuid, p_case_ref text, p_kind text, p_note text, p_idempotency_key uuid',
+      grantees: ['authenticated'],
+    }],
+    ['operator_advance_privacy_request', {
+      args: 'p_request_ref text, p_status text, p_note text, p_idempotency_key uuid', grantees: ['authenticated'],
+    }],
+    ['operator_case_queue', { args: 'p_status text, p_category text, p_limit integer', grantees: ['authenticated'] }],
+    ['operator_claim_case', { args: 'p_case_ref text, p_idempotency_key uuid', grantees: ['authenticated'] }],
+    ['operator_commerce_review_queue', { args: 'p_status text, p_limit integer', grantees: ['authenticated'] }],
+    ['operator_operations_summary', { args: 'p_window_hours integer', grantees: ['authenticated'] }],
+    ['operator_privacy_queue', { args: 'p_status text', grantees: ['authenticated'] }],
+    ['operator_release_case', { args: 'p_case_ref text, p_idempotency_key uuid', grantees: ['authenticated'] }],
+    ['operator_takedown_plan', { args: 'p_wedding_id uuid', grantees: ['authenticated'] }],
+    ['operator_takedown_publication', {
+      args: 'p_wedding_id uuid, p_case_ref text, p_reason text, p_idempotency_key uuid',
+      grantees: ['authenticated'],
+    }],
+    ['operator_transition_case', {
+      args: 'p_case_ref text, p_to_status text, p_resolution_code text, p_body text, p_idempotency_key uuid',
+      grantees: ['authenticated'],
+    }],
+    ['reply_to_support_case', { args: 'p_case_ref text, p_body text, p_idempotency_key uuid', grantees: ['authenticated'] }],
   ]);
 
   // The maintenance surface Stage 5 added, named here rather than left to be discovered: the
@@ -1183,6 +1241,30 @@ describe('§6.6 the callable catalogue is closed', () => {
     'grant_commerce_entitlement',
     'record_commerce_event',
     'revoke_commerce_entitlement',
+  ].sort();
+
+  // Stage 11's three bodies without a door, listed because the nineteen above are the whole of this
+  // stage's HTTP surface and an operator who mints a grant over REST would be granting themselves the
+  // product. Two postures, and the difference is the reason this list does not copy the sentence from
+  // either of the two above it: `grant_operator_role` and `revoke_operator_role` are SECURITY INVOKER,
+  // like Stage 5's review acts and Stage 10's money verbs, while `operator_purge_publication_objects`
+  // is SECURITY DEFINER, because planning a purge has to read `private` and `storage` on behalf of a
+  // caller that holds neither. The three clauses are read off the migration text where each is created —
+  // `20261020190000_stage11_operator_authority.sql:416` and `:527` both say `LANGUAGE plpgsql SECURITY
+  // INVOKER SET search_path = ''`, `20261020190400_stage11_takedown_and_oversight.sql:499` says the same
+  // with `DEFINER` — and `q11-logs/s11-http-surface-readout-1.txt` section C prints the deployed
+  // catalog's own `false` / `false` / `true` beside the three names.
+  // What this file does NOT check for them, stated because the list above it checks more: API33's
+  // posture loop skips any name with no `INTENDED` entry, and API38/API39 are scoped to the maintenance
+  // and money lists, so no case here asserts an operator body's `prosecdef`. Three facts are asserted,
+  // all by `stage11_operations_http.test.mjs`: the trio exists in `internal_api` and has no twin in
+  // `api` (its `before()` hook, from the catalog), and no client role holds EXECUTE (twice — the hook,
+  // and A-05's `has_function_privilege` census across `anon`, `authenticated` and `service_role`). The
+  // posture is inventoried here so a fourth fact cannot arrive uncounted; asserting it needs the stack.
+  const OPERATOR_SERVICE_ONLY = [
+    'grant_operator_role',
+    'operator_purge_publication_objects',
+    'revoke_operator_role',
   ].sort();
 
   // The two halves of the boundary and what each is allowed to be. `definer` and
@@ -1226,11 +1308,15 @@ describe('§6.6 the callable catalogue is closed', () => {
     const surfaces = SURFACES.map(({ schema }) => ({ schema, rows: readSurface(schema) }));
 
     for (const { schema, rows } of surfaces) {
-      // `internal_api` is allowed the maintenance names, the money bodies and nothing else; `api` is
-      // allowed the paired wrappers and nothing else. Separating the two is what keeps a *new*
-      // privileged function from passing by having been added to the wrong list.
+      // `internal_api` is allowed the maintenance names, the money bodies, the three doorless operator
+      // bodies and nothing else; `api` is allowed the paired wrappers and nothing else. Separating the
+      // two is what keeps a *new* privileged function from passing by having been added to the wrong
+      // list. At this head the two intended sets are 41 and 61, and the difference between them is the
+      // twenty twin-less names the three lists above enumerate — a twenty-first appearing in
+      // `internal_api` without a twin, or a name appearing on both sides with only one of the two
+      // postures, is what these three lines refuse.
       const intended = schema === 'internal_api'
-        ? new Set([...INTENDED.keys(), ...MAINTENANCE_ONLY, ...COMMERCE_SERVICE_ONLY])
+        ? new Set([...INTENDED.keys(), ...MAINTENANCE_ONLY, ...COMMERCE_SERVICE_ONLY, ...OPERATOR_SERVICE_ONLY])
         : INTENDED;
       const extra = rows.filter(row => !intended.has(row.name));
       assert.deepEqual(extra.map(row => row.name), [],
@@ -1382,13 +1468,24 @@ describe('§6.6 the callable catalogue is closed', () => {
         `${row.name} has a wrapper in api, which would put a money act behind an HTTP door`);
     }
 
-    // The other direction, and the one the six-name list cannot see: no *seventh* commerce name grew
-    // a door. `create_commerce_order` and `record_commerce_event` are the two verbs a front end could
+    // The other direction, and the one the six-name list cannot see: no *seventh* commerce verb grew a
+    // door. `create_commerce_order` and `record_commerce_event` are the two verbs a front end could
     // most plausibly be handed by mistake, so the exposed half is censused by substring rather than
     // left to the paired list above.
-    assert.deepEqual(exposed.filter(r => r.name.includes('commerce')).map(r => r.name),
-      ['commerce_host_summary'],
-      'the exposed RPC schema holds a commerce name other than the host read');
+    //
+    // Stage 11 is the first head that makes the substring wider than the money model, because its two
+    // refund-oversight doors carry `commerce` in their names: `operator_commerce_review_queue` reads the
+    // ledger and `operator_add_commerce_review_note` appends a note to a refund row. Neither is a money
+    // verb, and that is not assumed here — it is measured one case at a time in
+    // `supabase/tests/api/stage11_operations_http.test.mjs`'s refund-queue group (`R-01`–`R-07`), which
+    // reads the ledger's digests and the policy singleton before and after every call through these two
+    // doors. What this line keeps holding is the claim it was written for: no name from
+    // `COMMERCE_SERVICE_ONLY` has an HTTP door, and a third commerce-shaped door appearing here without
+    // being one of these three is still a failure.
+    assert.deepEqual(exposed.filter(r => r.name.includes('commerce')).map(r => r.name).sort(),
+      ['commerce_host_summary', 'operator_add_commerce_review_note', 'operator_commerce_review_queue'],
+      'the exposed RPC schema holds a commerce name outside the host read and Stage 11\'s two '
+      + 'refund-oversight doors');
 
     // The same facts as a client experiences them. Two spelling per name, three credential shapes,
     // and the same refusal the maintenance surface gets: PostgREST resolves the name inside the

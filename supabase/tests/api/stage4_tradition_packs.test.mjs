@@ -613,15 +613,33 @@ describe('§17 CATALOGUE', () => {
     // ruled in §5 and §9-§10 of `20261017120000_stage10_commerce_foundations.sql`, and the six money
     // bodies that could write the ledger are deliberately absent from this list — their absence from
     // the exposed schema is `stage3_publication.test.mjs` API39's job, not this line's silence.
+    // Stage 11's nineteen operational doors are the second such addition, for the same reason: the pack
+    // design owns none of them, and none is pack-shaped. They belong on this pin because this pin is the
+    // one that refuses a *forty-second* name, which is the failure the list exists for — a door that
+    // moves money, mints a grant or purges an object would arrive here as a name nobody ruled, not as a
+    // count that still reads plausible. The order below is the deployed stack's own `order by 1`, read
+    // from `q11-logs/s11-http-surface-readout-1.txt` section A and cross-checked against the
+    // same statement over `information_schema.routines`, because this collation does not order names the
+    // way a client-side sort would. That capture prints `HEAD: 4ea2a9787d9105b128d0af822aeb26f35115b141`,
+    // one commit behind this one; the commit in between touched `scripts/stage11-operations-cli.mjs` and
+    // its unit test and nothing under `supabase/migrations/`, so the catalogue it measured is this
+    // head's catalogue.
     const exposed = sqlRows(`select routine_name from information_schema.routines
                                where routine_schema = 'api' order by 1`).join(',');
     assert.deepEqual(exposed.split(','), [
       'commerce_host_summary',
-      'create_invitation_version', 'get_approval_requests', 'get_guest_invitation_state',
-      'get_invitation_publication_state', 'issue_guest_invitations', 'list_invitation_outputs',
+      'create_invitation_version', 'create_privacy_request', 'get_approval_requests',
+      'get_guest_invitation_state', 'get_invitation_publication_state', 'get_my_privacy_requests',
+      'get_my_support_case', 'get_my_support_cases', 'get_operator_case',
+      'issue_guest_invitations', 'list_invitation_outputs',
+      'open_support_case', 'operator_add_case_note', 'operator_add_commerce_review_note',
+      'operator_advance_privacy_request', 'operator_case_queue', 'operator_claim_case',
+      'operator_commerce_review_queue', 'operator_operations_summary', 'operator_privacy_queue',
+      'operator_release_case', 'operator_takedown_plan', 'operator_takedown_publication',
+      'operator_transition_case',
       'preview_invitation',
       'preview_invitation_document', 'publish_invitation_version', 'render_invitation_document',
-      'request_family_review',
+      'reply_to_support_case', 'request_family_review',
       'resolve_family_review', 'resolve_guest_invitation', 'resolve_public_invitation',
       'revoke_family_review', 'revoke_guest_invitation', 'revoke_invitation_publication',
       'rotate_guest_invitation', 'rotate_invitation_token',

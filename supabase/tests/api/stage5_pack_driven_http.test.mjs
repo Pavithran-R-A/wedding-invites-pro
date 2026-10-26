@@ -811,22 +811,44 @@ describe('§23 BROWSER WRITE SECURITY', () => {
     // as every other wrapper's caller, while the six bodies that write the ledger hold no grant at all
     // and are inventoried by name in `stage3_publication.test.mjs` API39 instead. Measured from
     // `readSurface` against the deployed stack at this head.
-    // Which of the twenty-two anon may also reach is the other half: the
+    // Stage 11 adds nineteen more, and they are the largest single addition to this mirror since the
+    // closure repair: thirteen doors that only a granted operator may open and six intake doors a
+    // signed-in host may open on its own wedding. The rule they are on this list for has not changed —
+    // an `api` wrapper is SECURITY INVOKER, so its caller must hold EXECUTE on the body beside it, and
+    // an operator door whose body held no such grant would be a 42501 at every attempt rather than a
+    // refusal the design wrote. The other direction is the one worth naming here: three of this stage's
+    // bodies are deliberately *not* on this mirror (`grant_operator_role`, `revoke_operator_role` and
+    // `operator_purge_publication_objects`), and a twenty-fourth name appearing on it would mean the
+    // grant authority or the object purge had been given a transport, which is the exact act Stage 11
+    // exists to refuse. Recorded in `q11-logs/s11-http-surface-readout-1.txt` section B — the deployed
+    // stack's own `order by 1` over the 41 `authenticated`-executable bodies, printed with
+    // `authenticated_execute_count=41` — taken at the head that capture names, `4ea2a9787d9105b128d0af822aeb26f35115b141`,
+    // one behind this one across a commit that touched no migration file.
+    // Which of the forty-one anon may also reach is the other half: the
     // five header-credential doors, three of which take no argument at all, are pinned per name in
     // `stage3_publication.test.mjs` §6.6, so this case pins only the half that is common to all
-    // twenty-two.
+    // forty-one.
     const direct = sqlRows(`select n.nspname || '.' || p.proname from pg_proc p
                               join pg_namespace n on n.oid = p.pronamespace
                              where n.nspname = 'internal_api'
                                and has_function_privilege('authenticated', p.oid, 'EXECUTE')
                              order by 1`);
     assert.deepEqual(direct, ['internal_api.commerce_host_summary', 'internal_api.create_invitation_version',
-      'internal_api.get_approval_requests', 'internal_api.get_guest_invitation_state',
-      'internal_api.get_invitation_publication_state', 'internal_api.issue_guest_invitations',
+      'internal_api.create_privacy_request', 'internal_api.get_approval_requests',
+      'internal_api.get_guest_invitation_state', 'internal_api.get_invitation_publication_state',
+      'internal_api.get_my_privacy_requests', 'internal_api.get_my_support_case', 'internal_api.get_my_support_cases',
+      'internal_api.get_operator_case', 'internal_api.issue_guest_invitations',
       'internal_api.list_invitation_outputs',
+      'internal_api.open_support_case', 'internal_api.operator_add_case_note',
+      'internal_api.operator_add_commerce_review_note', 'internal_api.operator_advance_privacy_request',
+      'internal_api.operator_case_queue', 'internal_api.operator_claim_case',
+      'internal_api.operator_commerce_review_queue', 'internal_api.operator_operations_summary',
+      'internal_api.operator_privacy_queue', 'internal_api.operator_release_case',
+      'internal_api.operator_takedown_plan', 'internal_api.operator_takedown_publication',
+      'internal_api.operator_transition_case',
       'internal_api.preview_invitation', 'internal_api.preview_invitation_document',
       'internal_api.publish_invitation_version', 'internal_api.render_invitation_document',
-      'internal_api.request_family_review',
+      'internal_api.reply_to_support_case', 'internal_api.request_family_review',
       'internal_api.resolve_family_review', 'internal_api.resolve_guest_invitation',
       'internal_api.resolve_public_invitation', 'internal_api.revoke_family_review',
       'internal_api.revoke_guest_invitation', 'internal_api.revoke_invitation_publication',
