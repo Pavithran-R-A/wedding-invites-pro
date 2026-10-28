@@ -6,8 +6,11 @@
 #   bash supabase/tests/stage11/run.sh authority          # Stage 11's own batteries, alone
 #   bash supabase/tests/stage11/run.sh historic           # Stage 2-6 suites at the Stage 11 head
 #   bash supabase/tests/stage11/run.sh regress            # Stage 7, 8, 9 and 10's own pairs at this head
+#   bash supabase/tests/stage11/run.sh race               # the two-operator concurrency tier, at head
 #   STAGE11_LOCAL=1 PGHOST=127.0.0.1 PGPORT=55441 PGUSER=postgres \
 #     bash supabase/tests/stage11/run.sh authority        # an already-running cluster
+#   STAGE11_LOCAL=1 PGHOST=127.0.0.1 PGPORT=55441 PGUSER=postgres \
+#     bash supabase/tests/stage11/run.sh race             # the concurrency tier on that cluster
 #
 # The shape of this file is Stage 10's, deliberately: a new head gets a new runner whose chain reaches the
 # new head, and every suite below it is re-measured against it. Each runner applies
@@ -29,11 +32,31 @@
 # rather than cluster totals.
 #
 #   authority  bootstrap -> storage fixture -> published -> stage2..stage11 -> Stage 11's [89]*
+#   race       bootstrap -> storage fixture -> published -> stage2..stage11 -> race fixtures, then five
+#              arms of live concurrent sessions with their three assert files
 #   historic   TWO chains, same stage loop: `clean` (no legacy seed) runs Stage 2's empty-chain outcome
 #              suite, `legacy` (seeded) runs its historical-rows sibling. Both then run Stage 2's draft,
 #              publication, attack and catalog suites -> Stage 4's two suites -> Stage 5's suites ->
 #              Stage 6's suites
 #   regress    four separate chains, each running exactly one older stage's own pair at the Stage 11 head
+#
+# Why `race` is a chain of its own rather than another file in `authority`: the five arms *commit*. A takedown
+# that is refused leaves nothing, but a takedown that is serialised leaves a revoked publication, an
+# invalidated artefact and a trail row, and battery 1's closing census counts grant and trail rows
+# cluster-wide. The same reasoning is why Stage 10 gave its race tier an empty chain. What the race chain
+# owns is `st11qual_race`, and the last line of the mode drops it, so nothing outlives the run — which is
+# also why this tier never runs against `localvivaahvarnam`: §1 of the Stage 11 brief forbids concurrency
+# against customer data, and these files could not run there without writing a real revocation.
+#
+# What the tier adds over the batteries, in one sentence each, because `run_tx` cannot express it: the
+# batteries are one session and the threat rows in `docs/architecture/operations-admin-security.md` §13 that
+# this tier exists for are about *two* sessions reaching the same row. So the shape is: a fixture chain, then
+# `start_session` for each live client, `marker` to release the second client only once the first is provably
+# inside its act, `session_log` for the chronology, and the assert files for the count. The rendezvous is
+# `pg_locks` — an ungranted `transactionid` lock on the holder's transaction — not a sleep, and the holder
+# refuses to commit until it has seen that row, so an arm that never interleaved is an invalid arm rather
+# than a pass. See the `7X_race_arm*_*.sql` headers for what each arm claims and `8X_race_*_asserts.sql` for
+# what each counted cell measures.
 #
 # `historic` contains no stage's own pair, for the reason above, and says nothing about the censuses those
 # pairs print. That is a property of the instrument, not a gap in it.
@@ -88,13 +111,17 @@
 # PostgREST, Supabase Auth, the Storage API or an HTTP operator surface: the caller class that matters — a
 # signed-in host with a real JWT — cannot exist here, so `test.uid` stands in for the claim and the wire
 # half belongs to `supabase/tests/api/stage11_operations.test.mjs`. No browser opens a console. What these
-# numbers carry is the authority model and the trail; what they cannot carry is authentication.
+# numbers carry is the authority model and the trail; what they cannot carry is authentication. The `race` mode
+# adds the one thing the serial batteries structurally cannot: two and three live backends reaching the same
+# publication row, the same idempotency key and the same thread ordinal at the same moment, with the caller
+# still a `test.uid` shim rather than a JWT. A race tier that proves a lock serialised an act says nothing about
+# whether an HTTP gateway would have let two requests reach it, and the tier below does not claim otherwise.
 set -euo pipefail
 
 cd "$(dirname "$0")/../../.."   # -> repo root
 
 MODE="${1:-all}"
-case "$MODE" in authority|historic|regress|all) ;; *) echo "usage: $0 [authority|historic|regress|all]"; exit 2 ;; esac
+case "$MODE" in authority|historic|regress|race|all) ;; *) echo "usage: $0 [authority|historic|regress|race|all]"; exit 2 ;; esac
 
 IMAGE="${PG_IMAGE:-postgres:16-alpine}"
 CTR="vivaahvarnam-stage11-$$"
@@ -116,6 +143,16 @@ if [ "${STAGE11_LOCAL:-0}" = "1" ]; then
   run_rollback() { sql_bytes "$1" | psql -d "$DB" -v ON_ERROR_STOP=1 -q; }
   admin_sql()  { psql -U "${PGUSER:-postgres}" -d postgres -v ON_ERROR_STOP=1 -q "$@"; }
   probe_sql()  { psql -d "$DB" -v ON_ERROR_STOP=1 -q -tA "$@"; }
+  # A race session is a *live concurrent client*: `run_tx` cannot express a second backend, so each arm is
+  # backgrounded psql processes whose rendezvous is inside the SQL. Deliberate delta from Stage 10's identical
+  # helper, which omits `ON_ERROR_STOP`: this tier's arms *raise on purpose* when their own premise fails
+  # (`FAIL arm 3: session B never blocked …`), and psql without that flag prints such an error, keeps going,
+  # turns every later statement into "current transaction is aborted", and still exits 0. A plant that had
+  # silently stopped being a plant would then be read as a completed arm. With the flag the session dies with a
+  # non-zero status and `session_log` below refuses it. Nothing is weakened by it: every refusal this tier
+  # *expects* is caught by the arm's own plpgsql handler and returned as data, so an expected outcome never
+  # reaches psql's error path.
+  start_session() { sql_bytes "$1" | psql -d "$DB" -v ON_ERROR_STOP=1 -tA -q > "$2" 2>&1 & LAST_PID=$!; }
   echo "==> Backend: existing cluster (PGHOST=${PGHOST:-localhost} PGPORT=${PGPORT:-5432})"
 else
   cleanup() { docker rm -f "$CTR" >/dev/null 2>&1 || true; }
@@ -145,6 +182,12 @@ else
   # database, sitting above suites that assert real counts.
   probe_sql() { docker exec -i -e PGCLIENTENCODING=UTF8 -e PGOPTIONS="$PGOPTIONS" "$CTR" \
                psql -d "$DB" -U postgres -v ON_ERROR_STOP=1 -q -tA "$@"; }
+  # The live-client helper again, with the same `ON_ERROR_STOP` reasoning as the local branch (see the note
+  # there). `tr -d '\r'` has to happen host-side, before the pipe crosses into the container, because the image
+  # ships no `tr` to lean on afterwards. `-U postgres` is not optional here either: `docker exec` inherits no
+  # `PGUSER`, and Stage 9's runner recorded what a silent fallback to a role that does not exist looks like.
+  start_session() { sql_bytes "$1" | docker exec -i -e PGCLIENTENCODING=UTF8 -e PGOPTIONS="$PGOPTIONS" \
+               "$CTR" psql -d "$DB" -U postgres -v ON_ERROR_STOP=1 -tA -q > "$2" 2>&1 & LAST_PID=$!; }
 fi
 
 RESULTS=""
@@ -274,6 +317,158 @@ run_stage11_batteries() {
   fi
 }
 
+# marker <file> <pattern> [polls] — the driver's half of the rendezvous. It waits for a milestone line to
+# appear in a live session's log before starting the session behind it, so the interleaving is *arranged* and
+# not hoped for. The default budget is deliberately longer than any wait inside the SQL (900 polls here, 600 =
+# ~30 s there): a plant that never reached its lock should therefore surface as the session's own
+# `ARM_INVALID` / `A*_GATE_FAILED` and a non-zero psql exit — a diagnosable failure — rather than as this
+# message, which can only say that a line did not arrive. A pattern that never appears is an invalid arm,
+# never a pass.
+marker() {
+  local n="${3:-900}"
+  for _ in $(seq 1 "$n"); do
+    grep -q "$2" "$1" 2>/dev/null && return 0
+    sleep 0.05
+  done
+  echo "!! DRIVER_TIMEOUT: '$2' never appeared in $1 — the arm is invalid; read its partial output:"
+  mask < "$1" | tail -20
+  exit 1
+}
+
+# session_log <label> <file> <status> — session logs are chronology evidence, never counted assertions: a race
+# log printing PASS lines it had not asserted is exactly the confusion the session/assert split prevents. This
+# is also where the tier's *verdict* rule lives. An arm prints one of four shapes when it reaches a branch its
+# own file did not plan for — `…_PLANT_BROKEN=`, `…_GATE_FAILED=`, `ARM_INVALID`, or the word `UNEXPECTED` on a
+# refusal whose SQLSTATE or constraint was not the one the arm exists to measure — and every one of them means
+# the instrument failed, not the product. Stage 10's driver caught a green run whose arm had never
+# interleaved only by reading the logs afterwards; here the word itself ends the run, so a broken plant cannot
+# reach an assert file at all. The check runs on the masked body and each of these tokens is short, so `mask`'s
+# appetite for 36–43-character identifiers cannot hide a verdict.
+session_log() {
+  echo "==> $1 (session log, not a counted suite; exit $3)"
+  local body
+  body="$(mask < "$2")"
+  [ "$3" -ne 0 ] && { echo "!! $1 FAILED (psql exit $3). Full tail:"; printf '%s\n' "$body" | tail -40; exit 1; }
+  if printf '%s\n' "$body" | grep -qE 'UNEXPECTED|PLANT_BROKEN|GATE_FAILED|ARM_INVALID'; then
+    echo "!! $1 reached a branch its own file did not plan for. That is a broken arm, not a product"
+    echo "!! refusal, and it is not evidence about the control it was supposed to measure. The lines:"
+    printf '%s\n' "$body" | grep -nE 'UNEXPECTED|PLANT_BROKEN|GATE_FAILED|ARM_INVALID'
+    exit 1
+  fi
+  # The chronology vocabulary. A token that is on no arm's failure path and matches nothing here is printed by
+  # the session and invisible in the log, which is what had happened to `B1_PUB_SEEN_AFTER_BLOCK` (B's own read
+  # of the row `RC03` counts as terminal) and to `B3_OWN_VIEW_MIDTX` / `B3_OWN_VIEW_AFTER_ROLLBACK` (the loser's
+  # view either side of the rollback `RD01` re-reads from a second connection). `PLANT_BROKEN`/`GATE_FAILED` are
+  # deliberately absent: those exit above, with their own lines quoted.
+  printf '%s\n' "$body" | { grep -E 'STARTED=|_PRE=|APPLIED=|LOCKED=|OUTCOME=|REFUSAL=|ANSWERED=|DETAIL=|BLOCKED=|COMMITTED=|MATCHES|_SEEN_|OWN_VIEW|TRAIL=|AUTH_|ENDED=|REVOKED=' || true; }
+}
+
+xact_id() { # xact_id <file> <key> — pull one short numeric transaction id out of a session log. Transaction
+  # ids are what bind two logs together, they are nowhere near 36 characters long, and the two lines this is
+  # used on print them as data rather than as prose, so a shell comparison here is a measurement and not a
+  # guess about scheduling.
+  grep -o "$2=[0-9]\+" "$1" 2>/dev/null | head -1 | cut -d= -f2
+}
+
+run_race_battery() {
+  # Five arms, three assert files, one fixture — the shape §1 of the Stage 11 brief asks for and the shape
+  # Stage 10's race tier established. The arms run in this order because the assert files read the *committed*
+  # residue: 82 measures arms 1 and 2, 83 measures arm 4, and 84 measures arms 3 and 5 plus the closure census
+  # over all of them, so it runs last and rolls back its own writes. The tmp directory holds session logs, is
+  # removed on return, and can name no real couple: every row these arms touch was planted by
+  # `70_race_fixtures.sql` under the `0b0b0b00-…` prefix on the throwaway `st11qual_race` database, which the
+  # mode below drops.
+  local tmp a1 b1 a2 b2 a3 b3 h4 w4 r4 a5 b5 st hx rx LAST_PID
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+  suite "stage 11 70_race_fixtures" supabase/tests/stage11/race/70_race_fixtures.sql tx lines
+
+  # `start_session` hands the pid back through LAST_PID and never through command substitution: `x=$(f &
+  # echo $!)` makes the backgrounded psql a child of a subshell that exits at once, so the parent's `wait`
+  # returns before the session has finished — Stage 10's driver hit that and recorded it.
+  echo "==> ARM 1: two operators, one wedding, two keys (sessions 71 + 72)"
+  start_session supabase/tests/stage11/race/71_race_arm1_a.sql "$tmp/a1.log"; a1=$LAST_PID
+  marker "$tmp/a1.log" 'A1_APPLIED='
+  start_session supabase/tests/stage11/race/72_race_arm1_b.sql "$tmp/b1.log"; b1=$LAST_PID
+  st=0; wait "$a1" || st=$?; session_log "71_race_arm1_a" "$tmp/a1.log" "$st"
+  st=0; wait "$b1" || st=$?; session_log "72_race_arm1_b" "$tmp/b1.log" "$st"
+  marker "$tmp/a1.log" 'A1_SEES_B_BLOCKED='
+  marker "$tmp/a1.log" 'A1_COMMITTED='
+  marker "$tmp/b1.log" 'B1_REFUSAL=expected-no-active-publication'
+
+  echo "==> ARM 2: one operator, one key, delivered twice at once (sessions 73 + 74)"
+  start_session supabase/tests/stage11/race/73_race_arm2_a.sql "$tmp/a2.log"; a2=$LAST_PID
+  marker "$tmp/a2.log" 'A2_APPLIED='
+  start_session supabase/tests/stage11/race/74_race_arm2_b.sql "$tmp/b2.log"; b2=$LAST_PID
+  st=0; wait "$a2" || st=$?; session_log "73_race_arm2_a" "$tmp/a2.log" "$st"
+  st=0; wait "$b2" || st=$?; session_log "74_race_arm2_b" "$tmp/b2.log" "$st"
+  marker "$tmp/a2.log" 'A2_SEES_B_BLOCKED='
+  marker "$tmp/a2.log" 'A2_COMMITTED='
+  marker "$tmp/b2.log" 'B2_ANSWERED=replayed-record-answer'
+  marker "$tmp/b2.log" 'B2_MATCHES_STORED=audit-id-equals-stored-row'
+
+  suite "stage 11 82_race_arm1_asserts" supabase/tests/stage11/race/82_race_arm1_asserts.sql tx lines
+
+  echo "==> ARM 3: one key across two weddings, refused by the trail index (sessions 75 + 76)"
+  start_session supabase/tests/stage11/race/75_race_arm3_a.sql "$tmp/a3.log"; a3=$LAST_PID
+  marker "$tmp/a3.log" 'A3_APPLIED='
+  start_session supabase/tests/stage11/race/76_race_arm3_b.sql "$tmp/b3.log"; b3=$LAST_PID
+  st=0; wait "$a3" || st=$?; session_log "75_race_arm3_a" "$tmp/a3.log" "$st"
+  st=0; wait "$b3" || st=$?; session_log "76_race_arm3_b" "$tmp/b3.log" "$st"
+  marker "$tmp/a3.log" 'A3_SEES_B_BLOCKED='
+  marker "$tmp/a3.log" 'A3_COMMITTED='
+  marker "$tmp/b3.log" 'B3_REFUSAL=expected-trail-index-refusal'
+
+  echo "==> ARM 4: authority revoked while the act is parked (sessions 77 + 78, one-shot 79)"
+  # Three clients, and the driver starts the third only after the second has printed its entry token. The
+  # revoking session's own gate is `pg_locks`, so it waits for the act to be provably parked before it writes,
+  # and the holder waits for the revocation to be a committed row before it releases. No sleep is load-bearing
+  # anywhere in this arm.
+  start_session supabase/tests/stage11/race/77_race_arm4_holder.sql "$tmp/h4.log"; h4=$LAST_PID
+  marker "$tmp/h4.log" 'A4_LOCKED='
+  start_session supabase/tests/stage11/race/78_race_arm4_waiter.sql "$tmp/w4.log"; w4=$LAST_PID
+  marker "$tmp/w4.log" 'W4_STARTED='
+  start_session supabase/tests/stage11/race/79_race_arm4_revoke.sql "$tmp/r4.log"; r4=$LAST_PID
+  st=0; wait "$h4" || st=$?; session_log "77_race_arm4_holder" "$tmp/h4.log" "$st"
+  st=0; wait "$r4" || st=$?; session_log "79_race_arm4_revoke" "$tmp/r4.log" "$st"
+  st=0; wait "$w4" || st=$?; session_log "78_race_arm4_waiter" "$tmp/w4.log" "$st"
+  marker "$tmp/h4.log" 'A4_SEES_WAITER_BLOCKED='
+  marker "$tmp/h4.log" 'A4_SAW_REVOKE_COMMITTED='
+  marker "$tmp/h4.log" 'A4_COMMITTED='
+  marker "$tmp/r4.log" 'R4_SEES_WAITER_BLOCKED='
+  marker "$tmp/r4.log" 'R4_COMMITTED='
+  marker "$tmp/w4.log" 'W4_APPLIED='
+  marker "$tmp/w4.log" 'W4_AUTH_AFTER=refused-as-revoked'
+  # The arm's premise, checked rather than eyeballed: the third client says it saw an act ungranted on
+  # transaction id N, and the first client says N is its own. Two logs naming the same id is what turns "the
+  # revocation was written while *this* lock was held" into a fact about the data. If they disagree, the
+  # revocation landed against some other transaction and `RC10`–`RC12` would be counting a sequence other than
+  # the one their headers describe — true numbers about an arm that did not happen.
+  hx="$(xact_id "$tmp/h4.log" 'xact')"
+  rx="$(xact_id "$tmp/r4.log" 'xid')"
+  if [ -z "$hx" ] || [ "$hx" != "$rx" ]; then
+    echo "!! ARM 4 lock ids do not agree: holder xact='$hx', observed by the revoking client as xid='$rx'."
+    echo "!! The revocation was not written while the act was parked on this holder's publication lock, so"
+    echo "!! this arm's chronology is not what its files claim. Read the three logs before citing any cell"
+    echo "!! below; an arm that did not interleave is an invalid arm."
+    exit 1
+  fi
+  echo "==> ARM 4 rendezvous confirmed on transaction id $hx"
+
+  suite "stage 11 83_race_arm4_asserts" supabase/tests/stage11/race/83_race_arm4_asserts.sql tx lines
+
+  echo "==> ARM 5: two trusted-channel appenders, one thread ordinal (sessions 80 + 81)"
+  start_session supabase/tests/stage11/race/80_race_arm5_first.sql "$tmp/a5.log"; a5=$LAST_PID
+  marker "$tmp/a5.log" 'A5_APPLIED='
+  start_session supabase/tests/stage11/race/81_race_arm5_second.sql "$tmp/b5.log"; b5=$LAST_PID
+  st=0; wait "$a5" || st=$?; session_log "80_race_arm5_first" "$tmp/a5.log" "$st"
+  st=0; wait "$b5" || st=$?; session_log "81_race_arm5_second" "$tmp/b5.log" "$st"
+  marker "$tmp/a5.log" 'A5_SEES_B_BLOCKED='
+  marker "$tmp/a5.log" 'A5_COMMITTED='
+  marker "$tmp/b5.log" 'B5_REFUSAL=expected-ordinal-collision'
+
+  suite "stage 11 84_race_replay_asserts" supabase/tests/stage11/race/84_race_replay_asserts.sql rollback lines
+}
+
 run_stage10_batteries() {
   local found=0 f
   for f in $(ls supabase/tests/stage10/[89]*.sql 2>/dev/null | sort); do
@@ -381,6 +576,16 @@ if [ "$MODE" = all ] || [ "$MODE" = regress ]; then
   done
 fi
 
+if [ "$MODE" = all ] || [ "$MODE" = race ]; then
+  build_chain race
+  run_race_battery
+  # The scoped teardown §1 asks for, in two halves: `84_race_replay_asserts.sql` rolls back the one cell that
+  # writes through a door, and dropping the database here removes everything the five arms committed. Nothing
+  # this tier produced survives its own mode, and nothing of anyone else's was ever in it — the database name is
+  # this runner's own, created at the top of the chain and dropped at the bottom of it.
+  admin_sql -c "DROP DATABASE IF EXISTS st11qual_race WITH (FORCE)" >/dev/null | mask
+fi
+
 if [ "$MODE" = all ] || [ "$MODE" = historic ]; then
   for variant in clean legacy; do
     build_chain "$variant"
@@ -400,6 +605,16 @@ echo "    and that is the difference between a fresh deployment and a qualified 
 echo "    is evidence about another database."
 echo "==> Every total labelled 'at Stage 11 head' is a re-measurement of an older suite against a schema that"
 echo "    contains Stage 11. The older runners' own totals still describe their own heads."
+echo "==> The race tier is the only mode here that ran two or three live backends against one row at once. Its"
+echo "    numbers are the assert files' (RC00–RC16, RD00–RD07); its session logs are chronology and are never"
+echo "    counted, which is why a session prints no PASS line at all. Where the two disagree, the logs say what"
+echo "    order the statements happened in and the cells say what the database ended up holding — and an arm"
+echo "    whose rendezvous never happened fails here, on its own word, rather than becoming a number."
+echo "    The race chain's committed residue is real: five takedowns' worth of revoked publications,"
+echo "    invalidated artefacts and trail rows, all of it planted by this tier's own fixture and all of it"
+echo "    dropped with st11qual_race above. It never ran against the local development stack, and it never can:"
+echo "    §1 of the Stage 11 brief forbids concurrency against customer data, and no cell in this tier would"
+echo "    survive being pointed at a wedding belonging to a real couple."
 echo "==> Boundary: plain Postgres + role/auth shim + a storage-schema fixture. PostgREST, Supabase Auth,"
 echo "    the Storage API and any HTTP operator surface were not executing, and no JWT was verified. The"
 echo "    caller class that matters most to this stage — a signed-in hostile host at the wire — is claimed"
