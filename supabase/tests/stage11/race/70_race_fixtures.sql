@@ -231,11 +231,14 @@ INSERT INTO s11f_out (tag, id, wed, ver, kind, variant, fmt, domain, fate) VALUE
    'ready');
 
 INSERT INTO public.invitation_outputs (id, wedding_id, version_id, output_kind, variant, format,
-                                       render_config_hash, source_dto_digest, storage_domain, status)
+                                       render_config_hash, source_dto_digest, target_url_digest,
+                                       storage_domain, status)
 SELECT o.id, ('0b0b0b00-0000-4000-8000-00000000000' || o.wed)::uuid,
        ('0b0b0b00-0000-4000-8000-0000000002' || lpad(o.ver::text, 2, '0'))::uuid,
        o.kind, o.variant, o.fmt, pg_temp.s11f_h64('s11r-config-' || o.tag),
-       pg_temp.s11f_h64('s11r-dto-' || o.tag), o.domain, 'registered'
+       pg_temp.s11f_h64('s11r-dto-' || o.tag),
+       CASE WHEN o.kind = 'qr' THEN pg_temp.s11f_h64('s11r-qr-' || o.tag) END,
+       o.domain, 'registered'
   FROM s11f_out o;
 
 UPDATE public.invitation_outputs SET status = 'uploading'
@@ -415,7 +418,8 @@ BEGIN
     || 'reading the doors'' own writes rather than a fixture shortcut', v = 10);
 
   SELECT count(*) INTO v FROM private.commerce_review_notes n
-   JOIN private.audit_events a ON a.subject_key = n.id AND a.action = 'commerce_review_note_added';
+   JOIN private.audit_events a ON a.action = 'commerce_review_note_added'
+    AND a.subject_type = 'commerce_refund' AND a.payload ->> 'note_id' = n.id::text;
   PERFORM pg_temp.s11f_ok('the one accepted note act left one note row and one trail row, which is the '
     || 'first act RD05 collides a takedown key against', v = 1);
 

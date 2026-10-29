@@ -4,11 +4,12 @@
 --
 -- What this session arranges, and how it is proved rather than hoped for: A delivers a real takedown of w1
 -- under key …0301 and *holds*, so B meets a written-but-uncommitted revocation. The driver starts B only
--- after A's `A1_APPLIED=`, and A then polls `pg_locks` until a backend calling itself `s11r-arm1-b` is
--- ungranted on **A's own transaction id** — which is Postgres' own statement that B is waiting for A, not a
--- guess about a schedule. Only then does A commit. So B's decision point provably ran against the pre-commit
--- state, and the row B's `FOR UPDATE` finally returns is the one A committed, which is what makes the
--- shipped `v_pub.id IS NULL` branch (`20261020190400_stage11_takedown_and_oversight.sql:390-393`) the answer
+-- after A's `A1_APPLIED=`, and A then polls `pg_locks` until another backend is ungranted on **A's own
+-- transaction id** — which is Postgres' own statement that someone is waiting for A, not a guess about a
+-- schedule — and the driver binds the pid A saw to the pid B printed about itself, which is what makes that
+-- someone B rather than an unrelated client. Only then does A commit. So B's decision point provably ran
+-- against the pre-commit state, and the row B's `FOR UPDATE` finally returns is the one A committed, which is
+-- what makes the shipped `v_pub.id IS NULL` branch (`20261020190400_stage11_takedown_and_oversight.sql:390-393`) the answer
 -- instead of a second revocation.
 --
 -- No advisory lock appears anywhere in this tier, deliberately: Stage 10's 7700/7701 rendezvous solved a
@@ -45,32 +46,35 @@ BEGIN
   RETURN v::text;
 END $fn$;
 
-CREATE FUNCTION pg_temp.s11r_waits(p_peer text, p_limit integer) RETURNS text
+CREATE FUNCTION pg_temp.s11r_waits(p_limit integer) RETURNS text
 LANGUAGE plpgsql AS $fn$
--- The rendezvous, spelled as an observation: `txwait` counts backends ungranted on *this* transaction id,
--- which is exactly what a blocked `SELECT … FOR UPDATE` and a blocked unique-index insertion both look like
--- in `pg_locks`. `anywait` is the same count with no name match and `peerseen` says whether the peer's
--- `pg_stat_activity` row is readable yet, so a poll that never returns true is diagnosable from the log as
--- either "the arm did not interleave" or "the stats view lagged" rather than being read as a product
--- failure. `pg_current_xact_id()` needs an assigned id, so every caller takes this poll *after* it has
--- written or locked something of its own.
-DECLARE i int := 0; v_tx int; v_any int; v_peer int;
+-- The rendezvous, spelled as an observation: `txwait` counts backends ungranted on *this* transaction id and
+-- `waiterpids` names them, which is what both a blocked `SELECT … FOR UPDATE` and a blocked unique-index
+-- insertion look like in `pg_locks`. `pg_current_xact_id()` needs an assigned id, so every caller takes this
+-- poll *after* it has written or locked something of its own.
+-- Identity is the pid, never the peer's `application_name`: inside one open transaction a session's
+-- `pg_stat_activity` reads are frozen at the backends that existed when that transaction began, so a peer that
+-- connects and parks *after* the holder began is invisible there under all three legal
+-- `stats_fetch_consistency` values (measured — the holder counted six rows on every poll while an outside
+-- session listed the peer among eight). `pg_locks` is not frozen, so the holder reports the waiter's pid and
+-- the driver binds it to the pid that peer printed about itself, the same way ARM 4 binds two logs by
+-- transaction id. A name a session sets for itself is not evidence about who it is; a lock row Postgres wrote
+-- and that same backend's own log line, in a file the driver opened for that client alone, are.
+-- `pg_locks.transactionid` is type `xid` while `pg_current_xact_id()` returns `xid8`, so the comparison lands
+-- in the lock domain through the catalogue's only xid cast (`::xid`); a `::text` right operand has no `=`
+-- operator for `xid` and aborts the arm at its first poll.
+DECLARE i int := 0; v_any int; v_pids text;
 BEGIN
   LOOP
-    SELECT count(*) INTO v_any FROM pg_locks l
+    SELECT count(*), coalesce(string_agg(l.pid::text, ',' ORDER BY l.pid), '')
+      INTO v_any, v_pids FROM pg_locks l
       WHERE l.locktype = 'transactionid' AND NOT l.granted
-        AND l.transactionid = pg_current_xact_id()::text;
-    SELECT count(*) INTO v_tx FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-      WHERE l.locktype = 'transactionid' AND NOT l.granted
-        AND l.transactionid = pg_current_xact_id()::text AND a.application_name = p_peer;
-    SELECT count(*) INTO v_peer FROM pg_stat_activity a WHERE a.application_name = p_peer;
-    IF v_tx > 0 THEN
-      RETURN 'txwait=' || v_tx || ' anywait=' || v_any || ' peerseen=' || v_peer
-             || ' after ' || i || ' polls';
+        AND l.transactionid = pg_current_xact_id()::xid;
+    IF v_any > 0 THEN
+      RETURN 'waiterpids=' || v_pids || ' txwait=' || v_any || ' after ' || i || ' polls';
     END IF;
     IF i >= p_limit THEN
-      RETURN 'ARM_INVALID txwait=0 anywait=' || v_any || ' peerseen=' || v_peer
-             || ' after ' || p_limit || ' polls';
+      RETURN 'ARM_INVALID waiterpids=none txwait=0 after ' || p_limit || ' polls';
     END IF;
     PERFORM pg_sleep(0.05);
     i := i + 1;
@@ -121,9 +125,9 @@ BEGIN
   -- strongly as the rendezvous it is supposed to report — the driver would then read an arm that never
   -- interleaved as an arm that serialised on the product's lock. So the failure branch names itself under a
   -- token the gate cannot match, and aborts the session.
-  v_gate := pg_temp.s11r_waits('s11r-arm1-b', 600);
+  v_gate := pg_temp.s11r_waits(600);
   IF v_gate LIKE 'ARM_INVALID%' THEN
-    RAISE NOTICE 'A1_GATE_FAILED=the peer never parked on this transaction: %', v_gate;
+    RAISE NOTICE 'A1_GATE_FAILED=no backend parked on this transaction: %', v_gate;
     RAISE EXCEPTION 'FAIL arm 1: session B never blocked on A''s transaction id — %', v_gate;
   END IF;
   RAISE NOTICE 'A1_SEES_B_BLOCKED=%', v_gate;

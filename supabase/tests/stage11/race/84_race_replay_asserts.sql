@@ -98,6 +98,7 @@ DECLARE
   v_creds integer;
   v_arts  integer;
   v_acts  integer;
+  v_w6_rows_before bigint;
   v_ref1  text;
   v_ref6  text;
   v_ref9  text;
@@ -157,6 +158,11 @@ BEGIN
           WHERE a.idempotency_key = v_key4) = v_winner);
 
   -- ------------------------------------------- the same key met serially: the pre-read answers first
+  -- Read before the act, not memorised: w6 is not an untouched wedding, because the plant at the top of this
+  -- tier already spent key …0306 on a review note there and that note owns exactly one trail row. So "the
+  -- refusal wrote nothing to w6" is a before/after equality plus a class guard, and RD03 and RD05 both measure
+  -- against this one snapshot.
+  SELECT count(*) INTO v_w6_rows_before FROM private.audit_events a WHERE a.wedding_id = v_w6;
   SELECT (pg_temp.s11r_act(v_op,
       'SELECT api.operator_takedown_publication('
       || '''0b0b0b00-0000-4000-8000-000000000006''::uuid, '
@@ -166,11 +172,13 @@ BEGIN
   PERFORM pg_temp.s11r_cell('RD03',
     'the same act, run after the winner committed instead of against its uncommitted row, is caught one step '
     'earlier and refused rather than replayed: one sentence naming the key as spent on another wedding, still '
-    'exactly one row for that key, and w6 — a live, published wedding — untouched and no thread row added to '
-    'the ticket it cited',
+    'exactly one row for that key, and w6 — a live, published wedding — holding row-for-row what the plant put '
+    'there, with no takedown of its own and no thread row added to the ticket it cited',
     v_ans LIKE 'RAISED 23514 | this idempotency key already belongs to a different act%'
     AND (SELECT count(*) FROM private.audit_events a WHERE a.idempotency_key = v_key4) = 1
-    AND (SELECT count(*) FROM private.audit_events a WHERE a.wedding_id = v_w6) = 0
+    AND (SELECT count(*) FROM private.audit_events a WHERE a.wedding_id = v_w6) = v_w6_rows_before
+    AND (SELECT count(*) FROM private.audit_events a
+          WHERE a.wedding_id = v_w6 AND a.action = 'publication_takedown') = 0
     AND (SELECT p.status FROM public.publications p WHERE p.wedding_id = v_w6) = 'active'
     AND (SELECT count(*) FROM private.support_case_events e WHERE e.case_id = v_case6) = 1);
 
@@ -214,7 +222,9 @@ BEGIN
     AND (SELECT a.subject_type FROM private.audit_events a
           WHERE a.idempotency_key = v_key6) = 'commerce_refund'
     AND (SELECT count(*) FROM private.commerce_review_notes) = 1
-    AND (SELECT count(*) FROM private.audit_events a WHERE a.wedding_id = v_w6) = 0
+    AND (SELECT count(*) FROM private.audit_events a WHERE a.wedding_id = v_w6) = v_w6_rows_before
+    AND (SELECT count(*) FROM private.audit_events a
+          WHERE a.wedding_id = v_w6 AND a.action = 'publication_takedown') = 0
     AND (SELECT p.status FROM public.publications p WHERE p.wedding_id = v_w6) = 'active');
 
   -- ------------------------------------------- the closure census, taken before the cell that writes
@@ -282,19 +292,19 @@ BEGIN
       'SELECT api.operator_add_case_note('
       || quote_literal(v_ref9) || ', '
       || '''message_operator'', '
-      || quote_literal('race tier: the door mints its ordinal after two hand writers already tried'), ', '
+      || quote_literal('race tier: the door mints its ordinal after two hand writers already tried') || ', '
       || quote_literal(v_key8) || '::uuid)') INTO v_a1;
   SELECT pg_temp.s11r_act(v_sup,
       'SELECT api.operator_add_case_note('
       || quote_literal(v_ref9) || ', '
       || '''message_operator'', '
-      || quote_literal('race tier: the same key, delivered twice'), ', '
+      || quote_literal('race tier: the same key, delivered twice') || ', '
       || quote_literal(v_key8) || '::uuid)') INTO v_a2;
   SELECT pg_temp.s11r_act(v_sup,
       'SELECT api.operator_add_case_note('
       || quote_literal(v_ref9) || ', '
       || '''message_host'', '
-      || quote_literal('race tier: the same key, the other arm'), ', '
+      || quote_literal('race tier: the same key, the other arm') || ', '
       || quote_literal(v_key8) || '::uuid)') INTO v_a3;
 
   PERFORM pg_temp.s11r_cell('RD06',

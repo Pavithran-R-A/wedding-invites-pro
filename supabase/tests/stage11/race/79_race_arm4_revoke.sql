@@ -14,36 +14,40 @@
 --
 -- The ordering is an observation, not a schedule. This file will not write the revocation until it has *seen*,
 -- from its own snapshot of `pg_locks`, that the waiter is ungranted on a transaction id, and it prints that id
--- in `R4_SEES_WAITER_BLOCKED=`. The holder prints its own transaction id in `A4_LOCKED=…/xact=…`. When the two
--- logs name the same id, the statement "the revocation was written while the act was waiting on the held
--- publication row" is supported by Postgres' own lock table from two sides, and the only remaining step — that
--- the holder releases only after this commit is readable — is the holder's own second gate. If the ids differ,
--- the arm has not interleaved the way its header says, and that is what the assert file's prose will be wrong
--- about; the numbers would still be true of a different sequence.
+-- in `R4_SEES_WAITER_BLOCKED=`, together with the pid of the backend that holds the wait. The holder prints
+-- its own transaction id in `A4_LOCKED=…/xact=…`. When the two logs name the same id, the statement "the
+-- revocation was written while the act was waiting on the held publication row" is supported by Postgres' own
+-- lock table from two sides; the driver then binds the pid this file saw to the pid the waiter printed about
+-- itself, which is what makes that backend the waiter rather than an unrelated client, and the only remaining
+-- step — that the holder releases only after this commit is readable — is the holder's own second gate. If the
+-- ids differ, the arm has not interleaved the way its header says, and that is what the assert file's prose
+-- will be wrong about; the numbers would still be true of a different sequence.
 BEGIN;
 SET search_path = public, pg_temp;
 SET application_name = 's11r-arm4-revoke';
 
-CREATE FUNCTION pg_temp.s11r_peer_waits(p_peer text, p_limit integer) RETURNS text
+CREATE FUNCTION pg_temp.s11r_peer_waits(p_limit integer) RETURNS text
 LANGUAGE plpgsql AS $fn$
--- The same witness arms 1–4 use inside the holder, read from outside it: how many transactions this named
--- backend is ungranted on, and *which* ids those are. The ids come back as text because they are the thing
--- the holder's log is compared against. `peerseen` again distinguishes "the stats view has not published this
--- backend yet" from "this backend is not waiting", so a timeout is diagnosable rather than merely red.
-DECLARE i int := 0; v_tx int; v_ids text; v_seen int;
+-- The same witness the arms use inside a holder, read from outside it: which backends are ungranted on some
+-- transaction, *which* ids those are, and the pids. Ids come back as text because they are the thing the
+-- holder's log is compared against; pids come back for the same reason, and for the same one the arms' helper
+-- gives them up rather than joining names — a session inside an open transaction reads `pg_stat_activity`
+-- frozen at the backends that existed when that transaction began, so no name match is a dependable witness
+-- from here. `pg_current_xact_id()` is not used in this file: this client waits on *someone else's* id.
+DECLARE i int := 0; v_tx int; v_ids text; v_pids text;
 BEGIN
   LOOP
-    SELECT count(*), string_agg(DISTINCT l.transactionid::text, ',')
-      INTO v_tx, v_ids
-      FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-     WHERE l.locktype = 'transactionid' AND NOT l.granted AND a.application_name = p_peer;
-    SELECT count(*) INTO v_seen FROM pg_stat_activity a WHERE a.application_name = p_peer;
+    SELECT count(*), string_agg(DISTINCT l.transactionid::text, ','),
+           coalesce(string_agg(l.pid::text, ',' ORDER BY l.pid), '')
+      INTO v_tx, v_ids, v_pids
+      FROM pg_locks l
+     WHERE l.locktype = 'transactionid' AND NOT l.granted;
     IF v_tx > 0 THEN
       RETURN 'txwait=' || v_tx || ' xid=' || coalesce(v_ids, 'NULL')
-             || ' peerseen=' || v_seen || ' after ' || i || ' polls';
+             || ' waiterpids=' || v_pids || ' after ' || i || ' polls';
     END IF;
     IF i >= p_limit THEN
-      RETURN 'ARM_INVALID txwait=0 peerseen=' || v_seen || ' after ' || p_limit || ' polls';
+      RETURN 'ARM_INVALID txwait=0 waiterpids=none after ' || p_limit || ' polls';
     END IF;
     PERFORM pg_sleep(0.05);
     i := i + 1;
@@ -69,7 +73,7 @@ BEGIN
   -- Do not write until the act is provably parked. The limit is shorter than the holder's own two gates on
   -- purpose: this is the client whose failure should surface first, because the holder's second gate can only
   -- time out as a consequence of this one.
-  v_gate := pg_temp.s11r_peer_waits('s11r-arm4-waiter', 400);
+  v_gate := pg_temp.s11r_peer_waits(400);
   IF v_gate LIKE 'ARM_INVALID%' THEN
     RAISE NOTICE 'R4_GATE_FAILED=the act never reached a lock wait: %', v_gate;
     RAISE EXCEPTION 'FAIL arm 4: the waiter never blocked, so there was no mid-flight to revoke into — %',

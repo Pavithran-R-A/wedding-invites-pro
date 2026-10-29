@@ -64,9 +64,6 @@ BEGIN
     (SELECT count(*) FROM private.audit_events a
       WHERE a.wedding_id = v_w1 AND a.action = 'publication_takedown') = 1);
 
-  SELECT a.payload INTO v_pub FROM private.audit_events a
-   WHERE a.wedding_id = v_w1 AND a.action = 'publication_takedown';
-
   PERFORM pg_temp.s11r_cell('RC01',
     'the one recorded act is the *first* operator''s, not whichever session happened to finish last: the trail '
     || 'row names A''s account as its operator actor, the publication as its subject, A''s ticket as the reason''s '
@@ -155,11 +152,17 @@ BEGIN
     AND (SELECT count(*) FROM private.audit_events a WHERE a.wedding_id = v_w2
           AND a.idempotency_key = v_key2) = 1);
 
+  SELECT a.payload INTO v_pub FROM private.audit_events a
+   WHERE a.idempotency_key = v_key2;
+
   PERFORM pg_temp.s11r_cell('RC08',
-    'what a replay returns is the first delivery''s own recorded answer, field for field: the stored payload '
-    || 'names w2, its publication, the reason the operator gave, the case that authorised it, and the two '
-    || 'effect counts — and it states its own limit twice, that the file links survive and that no object was '
-    || 'deleted',
+    'the payload of that one row is a complete record of the first delivery, read from a backend that never '
+    || 'took part in the race: it names w2 and that wedding''s publication, the reason the operator gave and the '
+    || 'ticket that authorised it, the two effect counts — and it states its own two limits, that the file links '
+    || 'survive and that no object was deleted. The other half of "the replay returned the record" is the second '
+    || 'session''s own line: `74_race_arm2_b.sql` prints `B2_DETAIL` with the fields it was handed and '
+    || '`B2_MATCHES_STORED` with their audit id compared to this row''s, and `run.sh` fails the tier on an '
+    || '`UNEXPECTED` there, so a payload this file cannot contradict is also an answer that was checked live',
     v_pub ->> 'wedding_id' = v_w2::text
     AND v_pub ->> 'publication_id' = (SELECT p.id::text FROM public.publications p
                                        WHERE p.wedding_id = v_w2)

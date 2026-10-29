@@ -37,28 +37,23 @@ BEGIN
   RETURN v::text;
 END $fn$;
 
-CREATE FUNCTION pg_temp.s11r_waits(p_peer text, p_limit integer) RETURNS text
+CREATE FUNCTION pg_temp.s11r_waits(p_limit integer) RETURNS text
 LANGUAGE plpgsql AS $fn$
 -- The same observation as the arm 1 and arm 2 pair: a blocked unique-index insertion looks identical to a
 -- blocked `SELECT … FOR UPDATE` in `pg_locks` — `locktype='transactionid'`, ungranted, on the winner's xid —
 -- so one helper covers both shapes and neither arm has to guess which one it caused.
-DECLARE i int := 0; v_tx int; v_any int; v_peer int;
+DECLARE i int := 0; v_any int; v_pids text;
 BEGIN
   LOOP
-    SELECT count(*) INTO v_any FROM pg_locks l
+    SELECT count(*), coalesce(string_agg(l.pid::text, ',' ORDER BY l.pid), '')
+      INTO v_any, v_pids FROM pg_locks l
       WHERE l.locktype = 'transactionid' AND NOT l.granted
-        AND l.transactionid = pg_current_xact_id()::text;
-    SELECT count(*) INTO v_tx FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-      WHERE l.locktype = 'transactionid' AND NOT l.granted
-        AND l.transactionid = pg_current_xact_id()::text AND a.application_name = p_peer;
-    SELECT count(*) INTO v_peer FROM pg_stat_activity a WHERE a.application_name = p_peer;
-    IF v_tx > 0 THEN
-      RETURN 'txwait=' || v_tx || ' anywait=' || v_any || ' peerseen=' || v_peer
-             || ' after ' || i || ' polls';
+        AND l.transactionid = pg_current_xact_id()::xid;
+    IF v_any > 0 THEN
+      RETURN 'waiterpids=' || v_pids || ' txwait=' || v_any || ' after ' || i || ' polls';
     END IF;
     IF i >= p_limit THEN
-      RETURN 'ARM_INVALID txwait=0 anywait=' || v_any || ' peerseen=' || v_peer
-             || ' after ' || p_limit || ' polls';
+      RETURN 'ARM_INVALID waiterpids=none txwait=0 after ' || p_limit || ' polls';
     END IF;
     PERFORM pg_sleep(0.05);
     i := i + 1;
@@ -94,9 +89,9 @@ BEGIN
   -- The gate's value is tested before its token is printed: `run.sh` matches this line by prefix, so an
   -- `ARM_INVALID` travelling under `A3_SEES_B_BLOCKED=` would let a non-interleaved pair read as a collision
   -- that the unique index serialised.
-  v_gate := pg_temp.s11r_waits('s11r-arm3-b', 600);
+  v_gate := pg_temp.s11r_waits(600);
   IF v_gate LIKE 'ARM_INVALID%' THEN
-    RAISE NOTICE 'A3_GATE_FAILED=the peer never parked on this transaction: %', v_gate;
+    RAISE NOTICE 'A3_GATE_FAILED=no backend parked on this transaction: %', v_gate;
     RAISE EXCEPTION 'FAIL arm 3: session B never blocked on A''s transaction id — %', v_gate;
   END IF;
   RAISE NOTICE 'A3_SEES_B_BLOCKED=%', v_gate;

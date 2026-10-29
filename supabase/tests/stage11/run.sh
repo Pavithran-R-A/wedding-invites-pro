@@ -370,6 +370,39 @@ xact_id() { # xact_id <file> <key> — pull one short numeric transaction id out
   grep -o "$2=[0-9]\+" "$1" 2>/dev/null | head -1 | cut -d= -f2
 }
 
+# rendezvous <label> <holder log> <holder gate line> <peer log> <peer start line> — the identity half of every
+# arm. A holder can only report *pids*: `pg_stat_activity` reads inside an open transaction are frozen at the
+# backends that existed when that transaction began, so the peer that connects and parks afterwards is
+# invisible there whatever `stats_fetch_consistency` says (measured in tier attempt 3's aftermath: the holder
+# counted the same six rows on all 600 polls while an outside session listed the peer among eight, and
+# `q11-logs/probe_pid_rendezvous.sh` confirmed the holder's `pg_locks` poll did see the peer's pid). The arm
+# therefore stops at "a backend is ungranted on my transaction id" and this function finishes the sentence from
+# the other side: the peer's own log carries the pid its backend printed about itself, into a file this script
+# opened for that client alone. That is stronger than the name join it replaces — `application_name` is a label
+# a session gives itself and proves nothing about who it is — and it is the same two-log shape ARM 4 already
+# builds out of transaction ids. No match, either because the value is missing or because a third backend
+# waited here, ends the run: an arm that did not interleave cannot be read as a product result.
+rendezvous() {
+  local obs pid
+  obs="$(grep "$3" "$2" 2>/dev/null | head -1 | { grep -o 'waiterpids=[0-9,]*' || true; } | cut -d= -f2)"
+  pid="$(grep -o "$5=pid [0-9]\+" "$4" 2>/dev/null | head -1 | cut -d' ' -f2)"
+  if [ -z "$obs" ] || [ -z "$pid" ]; then
+    echo "!! $1: the rendezvous is not measurable (holder waiterpids='$obs', peer's own pid='$pid')."
+    echo "!! Either the holder printed no waiter list or the peer printed no backend id of its own, so nothing"
+    echo "!! here binds the two sessions and the counted cells describe a sequence that was never observed."
+    exit 1
+  fi
+  case ",$obs," in
+    *",$pid,"*)
+      echo "==> $1 rendezvous confirmed: the holder saw backend $pid ungranted on its own transaction (waiterpids=$obs)." ;;
+    *)
+      echo "!! $1: the holder saw waiterpids=$obs and its peer's own backend is $pid, so the client that parked"
+      echo "!! on this transaction is not the peer this arm was written around. The interleave happened, but not"
+      echo "!! between the two sessions the arm names — read the two logs before citing any cell below."
+      exit 1 ;;
+  esac
+}
+
 run_race_battery() {
   # Five arms, three assert files, one fixture — the shape §1 of the Stage 11 brief asks for and the shape
   # Stage 10's race tier established. The arms run in this order because the assert files read the *committed*
@@ -394,6 +427,7 @@ run_race_battery() {
   marker "$tmp/a1.log" 'A1_SEES_B_BLOCKED='
   marker "$tmp/a1.log" 'A1_COMMITTED='
   marker "$tmp/b1.log" 'B1_REFUSAL=expected-no-active-publication'
+  rendezvous "ARM 1" "$tmp/a1.log" 'A1_SEES_B_BLOCKED=' "$tmp/b1.log" 'B1_STARTED'
 
   echo "==> ARM 2: one operator, one key, delivered twice at once (sessions 73 + 74)"
   start_session supabase/tests/stage11/race/73_race_arm2_a.sql "$tmp/a2.log"; a2=$LAST_PID
@@ -405,6 +439,7 @@ run_race_battery() {
   marker "$tmp/a2.log" 'A2_COMMITTED='
   marker "$tmp/b2.log" 'B2_ANSWERED=replayed-record-answer'
   marker "$tmp/b2.log" 'B2_MATCHES_STORED=audit-id-equals-stored-row'
+  rendezvous "ARM 2" "$tmp/a2.log" 'A2_SEES_B_BLOCKED=' "$tmp/b2.log" 'B2_STARTED'
 
   suite "stage 11 82_race_arm1_asserts" supabase/tests/stage11/race/82_race_arm1_asserts.sql tx lines
 
@@ -417,6 +452,7 @@ run_race_battery() {
   marker "$tmp/a3.log" 'A3_SEES_B_BLOCKED='
   marker "$tmp/a3.log" 'A3_COMMITTED='
   marker "$tmp/b3.log" 'B3_REFUSAL=expected-trail-index-refusal'
+  rendezvous "ARM 3" "$tmp/a3.log" 'A3_SEES_B_BLOCKED=' "$tmp/b3.log" 'B3_STARTED'
 
   echo "==> ARM 4: authority revoked while the act is parked (sessions 77 + 78, one-shot 79)"
   # Three clients, and the driver starts the third only after the second has printed its entry token. The
@@ -438,6 +474,8 @@ run_race_battery() {
   marker "$tmp/r4.log" 'R4_COMMITTED='
   marker "$tmp/w4.log" 'W4_APPLIED='
   marker "$tmp/w4.log" 'W4_AUTH_AFTER=refused-as-revoked'
+  rendezvous "ARM 4 holder" "$tmp/h4.log" 'A4_SEES_WAITER_BLOCKED=' "$tmp/w4.log" 'W4_STARTED'
+  rendezvous "ARM 4 revoker" "$tmp/r4.log" 'R4_SEES_WAITER_BLOCKED=' "$tmp/w4.log" 'W4_STARTED'
   # The arm's premise, checked rather than eyeballed: the third client says it saw an act ungranted on
   # transaction id N, and the first client says N is its own. Two logs naming the same id is what turns "the
   # revocation was written while *this* lock was held" into a fact about the data. If they disagree, the
@@ -465,6 +503,7 @@ run_race_battery() {
   marker "$tmp/a5.log" 'A5_SEES_B_BLOCKED='
   marker "$tmp/a5.log" 'A5_COMMITTED='
   marker "$tmp/b5.log" 'B5_REFUSAL=expected-ordinal-collision'
+  rendezvous "ARM 5" "$tmp/a5.log" 'A5_SEES_B_BLOCKED=' "$tmp/b5.log" 'B5_STARTED'
 
   suite "stage 11 84_race_replay_asserts" supabase/tests/stage11/race/84_race_replay_asserts.sql rollback lines
 }
