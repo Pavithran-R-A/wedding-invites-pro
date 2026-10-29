@@ -1275,6 +1275,119 @@ one-character call-arity defect. Its counted contribution in isolation is 34 cel
 run itself is still outstanding. §13's replay, two-operator, revoked-mid-flight and second-tab rows no longer
 name an authored arm and disclaim it in the same breath; they cite those two logs.
 
+Three instruments stand behind that tier and none of them opens a connection, so none of them is a race-tier pass.
+Each is a claim about the bytes of the tier and its driver, and each has been made to demonstrate that it can say
+no — which is the only reason the two green runs are worth more than their own exit codes.
+
+**The structure validator.** `q11-racecheck/check_race_tier.sh` reads the fifteen files under
+`supabase/tests/stage11/race/` plus the `race` block of `supabase/tests/stage11/run.sh` and answers 26 numbered
+rules that print 30 lines, because `S02` carries two claims (that the chain build, the battery and the teardown
+are live lines of the dispatch block, and that they sit in that order) and `S07` carries four (one assert file
+each, plus the tier-wide arithmetic). What it decides, rule by rule, is in `q11-logs/s11-race-structure-5.txt`:
+`run.sh` parses as bash (`S01`); the fifteen files on disk are the fifteen the driver references, with nothing
+orphaned in either direction and no arm reachable by the serial glob (`S03`); dollar-quote tags open and close an
+even number of times in every file (`S04`); only the four suite files may print a counted total and no session
+file may call a counting helper, so an arm is chronology and can never be read as a score (`S05`, `S06`); the 25
+numbered cells are declared exactly once and every `RC`/`RD` token anywhere in the tier or the driver names one of
+them (`S07d`, `S14`); cross-session order rests on `pg_locks` rows over real locks, with no advisory lock in
+either file (`S08`); all 14 plant/gate failure notices are followed within three lines by a `RAISE EXCEPTION`, and
+both `start_session` definitions carry `ON_ERROR_STOP=1`, so a plant that fails cannot exit 0 and be counted as
+an arm that passed (`S09`, `S12`); every rendezvous token sits under an `ARM_INVALID` test on its own gate string,
+so a poll that never saw the wait aborts rather than reporting (`S10`); all 26 markers the driver waits on are
+literal strings the session that must print them is able to print (`S11`) — the rule that caught an arm printing
+its banner through a `%` placeholder the driver could never match; the driver's 900-second budget exceeds the
+longest in-SQL poll of 600 and no marker call shortens it, so the session's own `ARM_INVALID` surfaces first
+(`S13`); all 93 tokens the eleven sessions emit belong to one of the two vocabularies the driver greps the log
+with (`S15`); suite files hold no top-level transaction statement while each session file owns and ends its own
+(`S16`); the tier's only `pg_sleep` is the 0.05 poll cadence and every file that polls can return `ARM_INVALID`
+(`S17`); every `…03xx` key is named inside one arm only and lies in the allocated `0301`-`0313` block (`S18`);
+every uuid is under the `0b0b0b00` plant prefix, the race block names only its own chain, and only the fixture
+issues teardown DDL (`S19`); all 41 punctuation-free verdict literals and marker patterns survive `mask()`
+unchanged (`S20`); the holder's own transaction id and the revoker's observed xid are both extracted and
+compared, with `exit 1` within eight lines of disagreement (`S21`); no executable line in the tier or the driver
+names the local stack, the Supabase CLI or a hosted endpoint (`S22`); each token lives in the namespace of the
+session that prints it and no session spans two (`S23`); no session reads `pg_stat_activity` in an executable
+line while all six wait helpers return `waiterpids` (`S24`); all six arms bind those pids to the peer's own
+logged `pg_backend_pid()` and refuse both an unverifiable and a mismatched witness (`S25`); and all 51
+`pg_temp` helper calls carry the arity their definitions declare (`S26`). At the head this pass opened that is
+30 lines and `validator_exit=0`. It was re-taken once this section stopped moving:
+`q11-logs/s11-race-structure-7.txt` is the run against the final bytes of this paragraph, prints the same 30
+`PASS` lines with no `FAIL`, ends `structure_validator_exit=0`, and stamps the head plus the working tree it read,
+so the claim "these sentences were checked" is a measurement of the bytes that ship rather than of an earlier read.
+
+Two of those thirty lines were decoration before anything fired them, and both catches are kept rather than
+relabelled: `q11-logs/s11-race-mutation-control-1b-FOUND-INERT-S06-S07.txt` prints `INERT S06` — the mutated copy
+still reported every rule green — and `WRONG S07/84_race_replay_asserts.sql`, where the copy failed but not on the
+target rule, and it closes `MUTATION CONTROL FAILED: 2 of 27 rules did not fire on their own defect`. A third
+defect was in how the validator was invoked rather than in what it checked: run by bare name from inside its own
+directory, `${0%/*}` evaluates to `$0`, so the arity helper beside it was declared missing and `S26` reported an
+unmeasured rule; the `SELF_DIR` repair is recorded with both invocation forms re-taken green in
+`q11-logs/s11-race-structure-4.txt`. And `S02`'s first draft grepped the whole runner, which let the mutation
+control comment the chain build out with a line that repeated the words and leave the rule green on a tier whose
+arms would have run against no database at all; it now requires live, non-comment lines inside the block, and
+`S02b` pins their order, because a build behind the arms is arms run against somebody else's chain.
+
+**The mutation battery.** `q11-racecheck/mutation_control.sh` copies the tier into a fresh `mktemp` tree 31 times:
+once unmuted, to prove the copy is equivalent to the tree, then 30 times breaking exactly one property per copy —
+a deletion, a rewrite or an append inside an existing block, so the rest of the file stays byte-identical and a
+failure names one property instead of a diff — and requires the named rule to fail each time. It writes nothing to
+the repository, and no copy is given a database. The authoritative capture is
+`q11-logs/s11-race-mutation-control-3.txt`: `tree_head=9bd83ca…`, `BASELINE ok`, thirty `FIRED` lines,
+`mutation_control_exit=0`, and the closing line `MUTATION CONTROL PASSED (30 of 30 rules, each fired against its
+own defect; 1 unmuted copy also passed)`. Its cost is on the record too — `utc_start=06:26:47Z`,
+`utc_end=07:52:00Z`, eighty-five minutes for thirty-one validator runs on a shared host — and there is no cheaper
+way to show that a green line is capable of going red. Six cases co-fire a second rule (`S02`+`S02b`, `S05`+`S06`,
+`S06`+`S07d`, `S07/84`+`S14`, `S07d`+`S07/82`, `S20`+`S15`). That is correct behaviour — a cell that stops
+existing must not stay cited — but it blurs which property broke, which is why single-rule cases are the default
+and why the list is printed instead of hidden. Because "30 of 30" is a sentence the battery writes about itself,
+`q11-racecheck/verify_mutation_capture.sh` re-reads the capture and re-derives it from the per-case lines: every
+case must name a rule that appears in its own failing set, no case may be `INERT`/`WRONG`/`SETUP`/`COVERAGE`, no
+case may be reported `FIRED` with `exit=0`, the verdict must equal the count of `FIRED` lines, and the exit marker
+and the head must both be stamped. That re-derivation prints five `PASS` lines and the co-firing list in
+`q11-logs/s11-race-mutation-verify-1.txt` and ends `MUTATION CAPTURE VERIFIED (30 cases, baseline green, exit 0)`.
+
+A second capture exists and is not quotable, and it is kept because the reason is an instrument lesson, not a
+typo. `q11-logs/s11-race-mutation-control-2-SUPERSEDED-concurrent-run.txt` was mid-battery when a second battery
+was started into `-3.txt`. The first process was never killed: it kept its file descriptor open, wrote `VOID:
+stopped after 4 of 30 cases` and then continued past its own marker to a `PASSED (30 of 30)` line. So the marker
+is false — that run did reach its end — while it carries no wrapper-recorded exit code, no `utc_end`, and
+per-case durations measured against a concurrent battery on a shared host. The correction is appended inside that
+file rather than left for a reader who finds it first. The lesson is the §0 vocabulary seen from the other side:
+a run that never recorded what it observed is not evidence at any of the five levels, however green its last line
+reads.
+
+The battery ran at `9bd83ca` and this section is read at a later head, so the reach of those thirty verdicts was
+measured, not assumed: `git diff 9bd83ca..HEAD -- supabase/tests/stage11` prints nothing (the delta is two
+documents), and the tier's bytes in the working tree are its bytes in the commit — the sha256 of `run.sh` and of
+each of the fifteen race files taken once from `git show HEAD:` and once from disk agrees on all sixteen, with
+`files_compared=16 differing=0` in `q11-logs/s11-race-tier-head-bytes-2.txt`. The sixteen digests are the same
+sixteen printed file by file in `q11-logs/s11-race-commit-bytes-check-1.txt`, which is the pair that ties
+`s11-race-run-7.txt` to committed bytes rather than to a working tree.
+
+**The citation checker.** `q11-racecheck/check_doc_citations.sh` answers two questions this document cannot answer
+about itself: whether every arm marker the four race rows print is a string the run log actually contains, and
+whether every cell those rows name singly is a cell the tier declares, with the range forms contiguous over those
+declarations. Against `q11-logs/s11-race-run-7.txt` it reports all 22 markers verbatim, all 17 doc-named cells
+among the 25 declarations, `RC00`-`RC16` contiguous at 17 and `RD00`-`RD07` contiguous at 8, and the arithmetic
+that holds the two together: the four suite totals in the log sum to 34, which is what the tier declares as 9
+plant cells plus 25 numbered ones (`q11-logs/s11-race-doc-citations-1.txt`, `code=0`). Its negative control is in
+the same file: with one suite total doctored from 8 to 7 the checker prints
+`MISMATCH  the log's suite totals (33) do not equal the tier's counted cells (34)` and exits 1, so the agreement
+above it is a measurement rather than a coincidence. The checker reads §13's rows through a fixed line window of
+this file, which is a fragility of the instrument and not of the evidence, and it is therefore re-run whenever
+anything in or above those rows moves. The run cited for this section's own bytes is
+`q11-logs/s11-race-doc-citations-3.txt`, taken after the last markdown byte above it: the same five `PASS` lines
+and the same arithmetic, ending `citation_checker_exit=0`, with the sha256 of the document bytes it read stamped
+beside the head — which is what makes "these sentences cite that log" a measurement of this commit rather than of
+the one before it.
+
+One limitation covers all three instruments: they live in this session's `q11-racecheck/` directory, outside the
+repository, and are cited by log path exactly as this stage's other shell probes are (`q11-logs/s11_s5_tier.sh`,
+`q11-logs/s11-http-tier-probe.sh`). A reader who clones this branch gets the tier, its runner and its batteries,
+but not the validator that checks the tier's shape and not the battery that proves that validator can fail.
+Promoting either into `scripts/`, where `npm test` would reach it and `product:check` would scan it, is a new
+shipped gate rather than a documentation move, and this stage records it as the owner's call instead of taking it.
+
 `scripts/check-db-contract.mjs` compares the migrations with the generated
 `src/integrations/supabase/types.ts` for **tables in `public`** and for nothing else — at this head it prints
 `schema: 20 public + 21 non-client table(s)` and `client types: 20 table(s); data layer: 45 query column
@@ -1375,9 +1488,18 @@ under `src/`; and **10** non-client is exactly what `f7096ef` prints, so the "Ca
 parser lists eight private names at `c9eb27a` and thirteen here. `README.md:252` and the "Row-level security"
 row print **13** `api` and **24** `internal_api` as a live-stack read at Stage 7's head, while the same names
 counted in migration source are **22** and **39** at `c9eb27a` against **41** and **61** here: two instruments,
-which is why the pair is recorded as a comparison and not as a correction. `product:check` scans **262** files
-in this tree, **260** of them tracked here and **258** at `c9eb27a`, and the two this stage added are its own
-design note and its kickoff spec; the "Product-contract checker" row now leads with that **262**, and the
+which is why the pair is recorded as a comparison and not as a correction. `product:check` scanned **262** files
+in this tree when slice 5 wrote that sentence, **260** of them tracked here and **258** at `c9eb27a`, and the two
+this stage added were its own design note and its kickoff spec. The figure is **263** at the head this section now
+describes, and the step was re-measured rather than inferred: the checker's own `isScannedPath` was run over two
+`git archive` trees — **248** tracked in scope at `f7096ef`, **261** at this head, thirteen additions and no
+removal, with the thirteen named in `q11-logs/s11-doc-scan-delta-1.txt` — and the thirteenth, the one that arrived
+after the earlier capture printed **262**, is `supabase/tests/api/stage11_operations_http.test.mjs`,
+Stage 11's own HTTP battery, which became tracked at `b18027d` on 2026-10-26. So the addition is this stage's, and
+it is still not this stage's *instrument* that moved it: the operations CLI and its forty-cell battery sit under
+`scripts/`, where the walk answers `false`. The **261** tracked names and the **263** on disk are one measurement
+seen twice, the two-file gap being this worktree's untracked `pnpm-lock.yaml` and `pnpm-workspace.yaml`; the row
+now leads with **263** beside its own capture, and the
 **250** it used to lead with stays pinned to `f7096ef`, whose
 tracked tree scans **248** while the log that row cites printed **250**, the row itself disclosing that its
 figure came from a working tree — this tree's own gap is the same shape, `pnpm-lock.yaml` and
@@ -1445,7 +1567,13 @@ Those figures moved afterwards, by exactly one rule, and the move is the arrival
 rests on. The checker was re-taken after the last markdown byte of this section and prints `Product contract
 self-test OK — 34 rule(s) verified.` beside `self-test code=0` — one id more than the four `-3` … `-6` logs
 above, and the extra one is `operator-rpc-referenced-outside-cli` — while `product:check code=0` still scans
-**262** active files with 0 violations, so the new rule fires on nothing in the shipped tree. That absence is
+**262** active files with 0 violations at that tree, so the new rule fires on nothing in the shipped tree. Both
+halves of that pair hold at the head this section now describes, and the file half holds by moving: `product:check`
+exits 0 on **263** files with 0 violations, `--self-test` exits 0 on the same **34** rules and `dbtypes:check`
+exits 0 on **37** migrations, **20 public + 21 non-client** tables and **45** reconciled column groups
+(`q11-logs/s11-race-static-gates-1.txt`, each exit read from the line beside it). The **262** to **263** step is
+the single tracked file the scanned-set paragraph above names, measured in `q11-logs/s11-doc-scan-delta-1.txt`,
+and nothing else in that trio moved. That the rule fires on nothing is
 measured rather than assumed: `OD-45` writes each of the sixteen operator door names into a file under `src/`
 and shows the rule lighting on all sixteen, then shows the same sixteen silent in the CLI itself and in the
 generated `src/integrations/supabase/types.ts`, with `isScannedPath` proving one of those two paths is outside
