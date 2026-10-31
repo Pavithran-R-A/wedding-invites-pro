@@ -405,7 +405,7 @@ async function serviceRemove(bucket, key) {
 }
 
 /** `expiresIn` is a parameter rather than a constant because E-07 has to measure two things at once: the
- *  lifetime the product actually asks for (60, `src/integrations/supabase/invitationOutputs.ts:53`) and a
+ *  lifetime the product actually asks for (60, `src/integrations/supabase/invitationOutputs.ts:63`) and a
  *  refusal that can only be observed before a minute of dead air. The probe that read both numbers off a
  *  running Storage is `q9-logs/live/probe-s9-sign-scope-02.txt`; this file asks for the short clock so the
  *  expiry is an observation rather than an inference. */
@@ -1586,7 +1586,7 @@ describe('S9 DELIVERY', () => {
   });
 
   /** The client half of this claim is already unit-pinned: `invitationOutputsTransport.test.ts:185` proves
-   *  the panel passes `OUTPUT_LINK_SECONDS` to `createSignedUrl`, and `invitationOutputs.ts:53` sets it to
+   *  the panel passes `OUTPUT_LINK_SECONDS` to `createSignedUrl`, and `invitationOutputs.ts:63` sets it to
    *  60. What was never measured — in Stage 6, in §13, or in `verify-bytes.mjs` — is Storage's answer:
    *  whether the minted token really carries sixty seconds and whether a token past its `exp` is refused
    *  on the wire. Both numbers here come from `q9-logs/live/probe-s9-sign-scope-02.txt`. */
@@ -1603,15 +1603,32 @@ describe('S9 DELIVERY', () => {
       && claims.iat > Math.floor(Date.now() / 1000) - 120,
       `a token stamped at ${claims.iat}, clock at ${Math.floor(Date.now() / 1000)}`);
 
-    // The refusal this case exists for: the same credential, after its own `exp`. Storage is asked for one
-    // second here rather than the product's sixty because the mechanism under test is the server's clock
-    // check, and waiting a minute for the same check would be a slower instrument, not a better one.
-    const quick = await storageSign(art.key, { as: 'hostA', expiresIn: 1 });
+    // The refusal this case exists for: the same credential, after its own `exp`. Storage is asked for two
+    // seconds here rather than the product's sixty because the mechanism under test is the server's clock
+    // check, and waiting a minute for the same check would be a slower instrument, not a better one. Two and
+    // not one because of how Storage stamps: `iat` is the whole second the mint landed in and `exp` is
+    // `iat + ask`, so the guaranteed freshness floor of a link is `ask - 1` seconds — the mint can happen one
+    // millisecond before the second rolls over — and at ask=1 that floor is nothing. Measured, not inferred:
+    // `q11-logs/s11-e07-expiry-window-probe-1.txt` sends the fresh GET at controlled waits and shows the same
+    // ~520 ms answer 200 or 400 depending only on where the stamp fell in its second (`stamp_phase_ms=122` +
+    // 520 ms → 200; `stamp_phase_ms=688` + 514 ms → 400), and the unmodified cell died on the freshness line
+    // below — nowhere else — in 2 of the 12 isolated runs of `q11-logs/s11-e07-isolated-trials-1.txt` and in
+    // the nine-suite chain at `8d6abce` (`q11-logs/s11-runtime-4-full-chain-1.txt:148`). What has to fit
+    // inside the floor is the post-stamp half of the mint plus the fresh GET, and no row of that probe has a
+    // `mintRT` + `fetchRT` above 202 + 95 = 297 ms, so ask=2 leaves better than seven-tenths of a second
+    // unused; the expiry half keeps its 4000 ms wait, which is now more than twice the outer edge of its own
+    // boundary even after the 83 ms the VM clock measured as running ahead of this host. The floor is also
+    // now aimable: `q11-logs/run-e07-phase-control.sh` hands this cell its own mint at a chosen distance
+    // from its `exp`, and at 1000 ms the fresh GET answered 200 in 3/3 trials
+    // (`s11-e07-phase-control-post-2s.txt`) while at 0 ms it sat on the boundary itself — 200 with 118 ms of
+    // the service's second left, 400 with 101 ms of it gone (`s11-e07-phase-control-post-2s-at-boundary.txt`)
+    // — which is the same assertion this repair moved off the edge, still refusing when it should.
+    const quick = await storageSign(art.key, { as: 'hostA', expiresIn: 2 });
     assert.equal(quick.status, 200, shown(JSON.stringify(quick.body)));
     assert.equal(tokenClaims(signedToken(quick.body.signedURL)).exp
-      - tokenClaims(signedToken(quick.body.signedURL)).iat, 1, 'Storage would not stamp a one-second link');
+      - tokenClaims(signedToken(quick.body.signedURL)).iat, 2, 'Storage would not stamp a two-second link');
     const live = await fetchSigned(quick.body.signedURL);
-    assert.equal(live.status, 200, `a fresh one-second link was refused: ${live.status}`);
+    assert.equal(live.status, 200, `a fresh two-second link was refused: ${live.status}`);
     assert.deepEqual([...live.bytes], [...art.bytes], 'the fresh link served other bytes');
     await new Promise((resolve) => setTimeout(resolve, 4000));
     const dead = await fetchSigned(quick.body.signedURL);
