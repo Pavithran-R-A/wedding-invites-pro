@@ -1,5 +1,5 @@
-// Database types for the canonical Stage 9 schema: the RLS-governed tables in `public`,
-// and the twenty-two browser-callable RPCs in `api`.
+// Database types for the canonical schema this build ships: the RLS-governed tables in `public`,
+// and the forty-one browser-callable RPCs in `api`.
 //
 // Generated, not hand-written:
 //
@@ -146,6 +146,29 @@
 // every table in the generated text carries a `ComputedFields: never` line this file has never carried
 // for any of them, which is the third suppression described above, unchanged and still twenty tables
 // wide because Stage 10 added no public table to make it twenty-one.
+//
+// Stage 11 adds nineteen RPCs and no public table, and its regeneration is the same procedure: CLI
+// 2.122.0 run as `supabase gen types typescript --local --schema public --schema api` against the
+// migrated `localvivaahvarnam` stack, stdout captured outside the repository in
+// `q12-logs/gen-types-1.ts`, and the `api.Functions` delta applied here in this file's one-key-per-line
+// style with the generator's own key order. Nineteen is the whole stage, not the six the pilot uses:
+// thirteen of them are the operator doors (`operator_transition_case`, `operator_takedown_publication`,
+// `operator_privacy_queue` and their neighbours) and `npm run product:check` refuses any `src/` file
+// outside the operator console — the Stage 11 tool under `scripts/` that signs in as a named human — a
+// reference to one, which is why they appear in this
+// catalogue and in no component. The file's own `operator-rpc` exemption exists for exactly that
+// asymmetry — a generated list of names is not a call.
+//
+// Two facts about the six host doors belong with this paragraph rather than in a component comment,
+// because the generator is what makes them misleading. PostgreSQL records no nullability for a function
+// parameter, so all nineteen entries print every argument as required and non-null; the bodies at
+// `20261020190100_stage11_support_cases.sql` and `20261020190300_stage11_privacy_intake.sql` in fact
+// accept NULL for `p_wedding_id` (an account-level ticket), `p_status` and `p_limit` (no filter, the
+// default count) and `p_note` (no note). This is the same lie-by-omission Stage 7 recorded above, and the
+// same answer: the type stays as the generator printed it, and the adapter that sends the null says so at
+// the call site. `get_my_privacy_requests` prints `Args: Record<PropertyKey, never>` because it genuinely
+// takes nothing — the caller is read from `auth.uid()`, so there is no parameter to put somebody else's
+// identity in.
 export type Json =
   | string
   | number
@@ -171,6 +194,14 @@ export type Database = {
         Args: { p_wedding_id: string }
         Returns: Json
       }
+      create_privacy_request: {
+        Args: {
+          p_kind: string
+          p_note: string
+          p_wedding_id: string
+        }
+        Returns: Json
+      }
       get_approval_requests: {
         Args: { p_wedding_id: string }
         Returns: Json
@@ -183,6 +214,22 @@ export type Database = {
         Args: { p_wedding_id: string }
         Returns: Json
       }
+      get_my_privacy_requests: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      get_my_support_case: {
+        Args: { p_case_ref: string }
+        Returns: Json
+      }
+      get_my_support_cases: {
+        Args: { p_limit: number; p_status: string }
+        Returns: Json
+      }
+      get_operator_case: {
+        Args: { p_case_ref: string }
+        Returns: Json
+      }
       issue_guest_invitations: {
         Args: {
           p_expires_at?: string
@@ -193,6 +240,91 @@ export type Database = {
       }
       list_invitation_outputs: {
         Args: { p_wedding_id: string }
+        Returns: Json
+      }
+      open_support_case: {
+        Args: {
+          p_category: string
+          p_idempotency_key: string
+          p_severity: string
+          p_summary: string
+          p_wedding_id: string
+        }
+        Returns: Json
+      }
+      operator_add_case_note: {
+        Args: {
+          p_body: string
+          p_case_ref: string
+          p_idempotency_key: string
+          p_kind: string
+        }
+        Returns: Json
+      }
+      operator_add_commerce_review_note: {
+        Args: {
+          p_case_ref: string
+          p_idempotency_key: string
+          p_kind: string
+          p_note: string
+          p_refund_id: string
+        }
+        Returns: Json
+      }
+      operator_advance_privacy_request: {
+        Args: {
+          p_idempotency_key: string
+          p_note: string
+          p_request_ref: string
+          p_status: string
+        }
+        Returns: Json
+      }
+      operator_case_queue: {
+        Args: { p_category: string; p_limit: number; p_status: string }
+        Returns: Json
+      }
+      operator_claim_case: {
+        Args: { p_case_ref: string; p_idempotency_key: string }
+        Returns: Json
+      }
+      operator_commerce_review_queue: {
+        Args: { p_limit: number; p_status: string }
+        Returns: Json
+      }
+      operator_operations_summary: {
+        Args: { p_window_hours: number }
+        Returns: Json
+      }
+      operator_privacy_queue: {
+        Args: { p_status: string }
+        Returns: Json
+      }
+      operator_release_case: {
+        Args: { p_case_ref: string; p_idempotency_key: string }
+        Returns: Json
+      }
+      operator_takedown_plan: {
+        Args: { p_wedding_id: string }
+        Returns: Json
+      }
+      operator_takedown_publication: {
+        Args: {
+          p_case_ref: string
+          p_idempotency_key: string
+          p_reason: string
+          p_wedding_id: string
+        }
+        Returns: Json
+      }
+      operator_transition_case: {
+        Args: {
+          p_body: string
+          p_case_ref: string
+          p_idempotency_key: string
+          p_resolution_code: string
+          p_to_status: string
+        }
         Returns: Json
       }
       preview_invitation: { Args: { p_wedding_id: string }; Returns: Json }
@@ -210,6 +342,14 @@ export type Database = {
       }
       render_invitation_document: {
         Args: { p_version_id: string }
+        Returns: Json
+      }
+      reply_to_support_case: {
+        Args: {
+          p_body: string
+          p_case_ref: string
+          p_idempotency_key: string
+        }
         Returns: Json
       }
       request_family_review: {
