@@ -406,7 +406,7 @@ a measurement instead of a claim:
 
 | Block | Source it reads | Meaning |
 | --- | --- | --- |
-| `migrations` | `supabase_migrations.schema_migrations` | applied count and highest version. The comparison against the files under `supabase/migrations/` is the CLI's job, because a file listing is not a database fact: that directory holds 37 files at this head — 31 at §2's baseline plus this stage's six — which is exactly why the tool reads it instead of carrying a number, and why it prints both figures or says it could not read one. It cannot read one on the runner chain that the figures in this section come from: `to_regclass` answers NULL for that table there (`q11-logs/s11-s5-doc-figures-2.txt` section 6, which is the same probe the body runs), and section 5 of that file parses the twelve stores the shipped body names straight out of its `prosrc` — the eleven that resolve, plus that one, plus the fact that `authenticated` holds SELECT on none of the nine `private` stores and on both `public` ones only through a single RLS policy each. So the block answers `not_measured` with the reason there — and it is the database, not the code, that decides which arm a reader gets: on the shared `localvivaahvarnam` stack the CLI owns that schema, so the block takes the `measured` arm and only three blocks are absent, not four (`q11-logs/s11-q1-stack-verify.txt` reads the live table's columns as `version|text ; statements|ARRAY ; name|text` with no `schema_migrations_versions` relation beside it, and `q11-logs/s11-q2-applied-fingerprint.txt` counts its rows 31→37 across the Stage 11 push). Neither arm has been read as an answer on that stack: the door returns 200 there with the projection's top-level keys intact (`q11-logs/s11-http-stage11-a5.txt` lines 45 and 53, A-04 and A-07) and no case names the `migrations` block's status; `H-01` is the case that does, and group H has never run. The SQL tier does not have to wait for the stack for that arm: the battery's group N builds a table at exactly that name in its own transaction, reads the block as `measured` twice, drops it, and re-reads the whole original answer unchanged. The real CLI's column set was *not* proven when this section was first written — no `supabase_migrations` schema exists on either runner chain, so the fixture's shape was the battery's invention, and `N5` reads the shipped branch's own column references from `pg_proc.prosrc` rather than trusting the fixture; the stack has since named that column set, and `version` — the one column this projection depends on — is in it. |
+| `migrations` | `supabase_migrations.schema_migrations` | applied count and highest version. The comparison against the files under `supabase/migrations/` is the CLI's job, because a file listing is not a database fact: that directory holds 37 files at this head — 31 at §2's baseline plus this stage's six — which is exactly why the tool reads it instead of carrying a number, and why it prints both figures or says it could not read one. It cannot read one on the runner chain that the figures in this section come from: `to_regclass` answers NULL for that table there (`q11-logs/s11-s5-doc-figures-2.txt` section 6, which is the same probe the body runs), and section 5 of that file parses the twelve stores the shipped body names straight out of its `prosrc` — the eleven that resolve, plus that one, plus the fact that `authenticated` holds SELECT on none of the nine `private` stores and on both `public` ones only through a single RLS policy each. So the block answers `not_measured` with the reason there — and it is the database, not the code, that decides which arm a reader gets: on the shared `localvivaahvarnam` stack the CLI owns that schema, so the block takes the `measured` arm and only three blocks are absent, not four (`q11-logs/s11-q1-stack-verify.txt` reads the live table's columns as `version|text ; statements|ARRAY ; name|text` with no `schema_migrations_versions` relation beside it, and `q11-logs/s11-q2-applied-fingerprint.txt` counts its rows 31→37 across the Stage 11 push). Neither arm has been read as an answer on that stack: the door returns 200 there with the projection's top-level keys intact (`q11-logs/s11-http-stage11-a5.txt` lines 45 and 53, A-04 and A-07) and no case named the `migrations` block's status; `H-01` is the case that does, and group H had never run — which is this row's state when it was written, not the tier's now: `q11-logs/s11-runtime-2-stage11-http-5.txt` answers `H-01` … `H-05` at 5 pass / 0 fail inside the suite's 38 / 38 green, and its own `H-01` line prints `the migrations branch answered 'measured' against to_regclass=true`, so the `measured` arm has been read as an answer on that stack rather than forecast, while the `not_measured` arm stays group N's fixture alone because taking it here would mean dropping the tool's real table. The SQL tier does not have to wait for the stack for that arm: the battery's group N builds a table at exactly that name in its own transaction, reads the block as `measured` twice, drops it, and re-reads the whole original answer unchanged. The real CLI's column set was *not* proven when this section was first written — no `supabase_migrations` schema exists on either runner chain, so the fixture's shape was the battery's invention, and `N5` reads the shipped branch's own column references from `pg_proc.prosrc` rather than trusting the fixture; the stack has since named that column set, and `version` — the one column this projection depends on — is in it. |
 | `publication` | `public.publications` | counts by status inside/outside the window, plus weddings with an active publication. |
 | `credentials` | `private.access_tokens` | live vs revoked vs expired, by kind, and `last_used_at` distribution — the "which link did I send and when did it stop working" question Stage 3 left for support. |
 | `delivery` | `public.invitation_outputs` | counts by status, and `failed` rows at the attempt ceiling (the stuck state Stage 9's repair made visible). |
@@ -664,11 +664,16 @@ the tool prints the census as two figures — files on disk under `supabase/migr
 database names — and which arm of `migrations` a reader gets is the database's decision rather than this
 section's: on the runner chains the batteries run on the block answers `not_measured`, because
 `supabase_migrations.schema_migrations` resolves on none of them, while on the shared `localvivaahvarnam`
-stack the CLI owns that table and the same projection answers `measured` (§9). Neither arm has been read *as
-an answer* on that stack: `A-07` runs the `health` verb there and asserts its exit code, the door's top-level
-field list and that neither stream carries a credential, and no case that has run names the block's status —
-`H-01` is the case that derives the live `to_regclass` flag and pins the field list to the arm it selects,
-and group H has never executed. `describeCensus` (`:1170-1196`) then says which figure it does not have
+stack the CLI owns that table and the same projection answers `measured` (§9). What that paragraph could only
+forecast has since been read: `A-07` runs the `health` verb there and asserts its exit code, the door's top-level
+field list and that neither stream carries a credential, so it names no block status, and at the time no case
+that had run did — group H had never executed. It now has (`q11-logs/s11-runtime-2-stage11-http-5.txt`: `H-01` …
+`H-05`, 5 pass, 0 fail, `node_test_exit=0`), and `H-01` is the case that derives the live `to_regclass` flag and
+pins the field list to the arm it selects, so the answer it prints is the stack's, not this section's:
+`the migrations branch answered 'measured' against to_regclass=true`, with the derived absences
+`["auth_failures","rate_limits","token_abuse"]` beside it. The `not_measured` arm stays the SQL tier's fixture
+alone: re-enacting it here would mean dropping the tool's real table, which is a destructive reset of a stack
+this stage does not own. `describeCensus` (`:1170-1196`) then says which figure it does not have
 rather than implying the pair matched; measured at this head, the one it has is 37 files, highest version
 `20261020190500`, none of them unversioned
 (`OD-50` counts, `OD-51` prints the five arms, `OD-52` runs both verdicts against this repository's real
@@ -801,8 +806,10 @@ head, not inherited: 137, 641, 191 and 208 are the same figures slice 4 logged, 
 census cells reading 40 / 60 / 52 / 46 — and the `p:` arms left in the table below are HTTP, browser and unit
 citations, of which the HTTP set is now bounded rather than open-ended: `supabase/tests/api/stage11_operations_http.test.mjs`
 declares 38 cells (`A-01`–`A-07`, `C-01`–`C-09`, `T-01`–`T-05`, `R-01`–`R-05`, `V-01`–`V-04`, `AI-01`–`AI-03`,
-`H-01`–`H-05`), sixteen of which have run on this branch's stack (§16 names both logs), so twenty-two are
-outstanding — and no `RC*`/`RD*` cell is among them, because those are race-tier cells and the race tier answers
+`H-01`–`H-05`), and all thirty-eight of them have now run green on this branch's stack — §16 names the log, which
+carries `tests 38 / pass 38 / fail 0` beside `node_test_exit=0` and an empty `declared_not_run` — so the HTTP
+scope that paragraph bounded at twenty-two outstanding cells is closed, and what those `p:` arms leave unrun is
+the browser tier. No `RC*`/`RD*` cell is among them, because those are race-tier cells and the race tier answers
 through `run.sh race`, not through an HTTP log; that tier has since been authored, executed twice and passed, and
 its 34 counted cells are reported in §13's four rows and §16 rather than counted here. The families `80_operator_authority.sql` actually measures are
 `A01-A26b` (the state the migrations ship, then every privilege refusal role by role), `R01-R17` (the
@@ -941,8 +948,11 @@ when the suite ships five.
 
 The numbers behind that are read, not asserted. `supabase/tests/api/stage11_operations_http.test.mjs` declares
 **38** cells — `A-01`–`A-07`, `C-01`–`C-09`, `T-01`–`T-05`, `R-01`–`R-05`, `V-01`–`V-04`, `AI-01`–`AI-03`,
-`H-01`–`H-05`, seven disjoint families — and §16 records that `A` (7) and `C` (9) have run on the stack, so
-exactly **22** are outstanding and that is the whole HTTP scope this stage still owes.
+`H-01`–`H-05`, seven disjoint families. When this section was written §16 recorded that only `A` (7) and `C` (9)
+had run on the stack, so exactly **22** were outstanding and that was the whole HTTP scope this stage owed; the
+scope has since been spent rather than narrowed — §16's log re-derives the declaration from the file's bytes
+before it runs them (`declared_test_calls|38`, `declared_unique_ids|38`, `run_unique_ids|38`, with
+`declared_not_run` and `run_not_declared` both printed empty) and then reports all 38 green.
 `scripts/stage11-operations-cli.test.mjs` declares **40** — `OD-01`–`OD-18`, `OD-20`–`OD-24`, `OD-30`–`OD-34`,
 `OD-40`–`OD-46`, `OD-50`–`OD-54` — which is the "forty cells" the tool row claims, with `OD-19` absent from the
 sequence rather than from a count. The instruments are `q11-logs/s11-http-cell-inventory.cjs` (capture `-2.txt`:
@@ -960,17 +970,39 @@ the families. A `test\(['\`]…` pattern also missed `C-07`, whose double-quoted
 and naive `grep 'T-0'` / `grep 'V-0'` light inside `CAT-0*` (Stage 4) and `PRV-0*` (Stage 5), which is why ids
 here are matched at the start of a title and then resolved to the file that declares them.
 
-What this pass deliberately leaves alone: the comment at `stage11_operations_http.test.mjs:1113` still names a
-`V-06`, and it is left as residue rather than edited, because the file is a battery this branch has not run
-since its cells went unexercised and a comment-only change to it would make the next green certify bytes that
-no run had ever seen — the row above carries the sentence instead. §13 promises that an arm which did not run
+What this pass deliberately leaves alone: the comment at `stage11_operations_http.test.mjs:1116` still names a
+`V-06` — the suite ships `V-01`–`V-04` — and it stays as residue for the reason that has now changed direction:
+it was left because the file was a battery this branch had not run, and editing a line of it today would move
+the bytes a green run quoted. The repair that took the suite's eleven red cells did touch other lines of the same
+file, and where those eleven come from is a capture rather than a section: run 1 of the harness read the battery as
+`dbbbebf` ships it (`suite_lines|5263`) and printed `tests 38 / pass 27 / fail 6 / cancelled 5`
+(`q11-logs/s11-runtime-2-stage11-http-1-raw/node-test.txt`); runs 2 and 3 read it at 5319 and 5337 lines with 2
+failures and then 1; run 4 read the repaired length and died in one second against the engine
+(`tests 39 / pass 0 / fail 1 / cancelled 38`); and run 5 is the green one — `node_test_exit=0` at 248 s,
+`tests 38 / suites 7 / pass 38 / fail 0`, `declared_test_calls|38`, `declared_unique_ids|38` and
+`run_unique_ids|38` with `declared_not_run` and `run_not_declared` both printed empty, seven families
+(A 7, C 9, T 5, R 5, V 4, AI 3, H 5) each at zero failures, and the harness's own outer census identical on all
+30 names before and after. Two consequences follow, and this section states both instead of letting one green
+number carry them. First, the repair is uncommitted: `git diff --stat` against `dbbbebf` is +110 −23 on this one
+file, so the run that closed the scope measured a working tree, and §16's A and C captures are of bytes from
+before that repair — no capture yet pairs a green Stage 11 battery to a head whose tracked file holds those bytes.
+Second, this comment is the one line the repair chose not to touch, so the number above is the post-repair one
+(`git show HEAD:` prints the same sentence at `:1113` for the pre-repair bytes, which is the pair a reader can
+check), while the citation at `:789` that pointed at `3641-3643` was corrected to `3649-3652` *after* run 5:
+`q11-logs/s11-suite-bytes-delta-2.txt` states that pair, shows the line begins ` * ` and carries
+`executable_markers_on_line_789|0`, and prints the limit of the pairing — run 5 stamped `suite_lines|5350`, which
+the file still has, but no digest, so `sha256_of_the_bytes_run5_read|NOT_RECORDED` and the strongest honest claim
+is the same line count plus one known comment-only line. The byte-level claim is owed to the next run of the
+tracked chain, which can pay it because the harness now stamps `suite_sha256_before_run`
+(`q11-logs/run-runtime-2-stage11-http.sh:24`). §13 promises that an arm which did not run
 "says so in the Stage 11 audit", and there is no `docs/audits/stage-11-*.md` at this head; that file is the
 closure deliverable, so until it exists §13 and §16 are where the absences live. And this section changes no
 gate: no unit or CI file reads the HTTP suite's bytes (`grep -rn "stage11_operations_http" scripts/*.mjs` is
 empty), and the one doc-sensitive cell, `scripts/stage11-operations-cli.test.mjs:2343`, asserts only that this
-file still names `scripts/stage11-operations-cli.mjs`. Repairing a citation is truth-sync, not qualification:
-the 22 HTTP cells stay unrun, and nothing here makes a refusal measured
-that was not measured before. The race tier's later execution is a separate act from this citation pass, not a
+file still names `scripts/stage11-operations-cli.mjs`. Repairing a citation is truth-sync, not qualification: the
+22 cells this sentence left unrun have since run, and no citation repair made that happen — nothing here turns an
+unrun arm into a measured refusal, and the arms §13 still leaves without a run are the browser tier and the races
+over the wire. The race tier's later execution is a separate act from this citation pass, not a
 by-product of it: rewriting a `p:` cell name cannot make an engine run an arm, and the two run logs §13's four
 race rows now cite came from writing and repairing the harness itself.
 
@@ -978,7 +1010,8 @@ race rows now cite came from writing and repairing the harness itself.
 
 Each row's third column is the assertion that would have to fail if the refusal were abandoned. Slice 1
 names its cell; the rows whose instrument belongs to a later slice point at the row of §13 they are held to,
-and §13 says which of those arms has not run.
+and §13 says which of those arms has not run — a sentence the tier has since narrowed, because its HTTP set is
+now closed there and the arm left without a run is the browser tier, not a refusal this stage can name.
 
 | Refused | Why | The assertion that keeps it refused |
 | --- | --- | --- |
@@ -1279,7 +1312,9 @@ Three instruments stand behind that tier and none of them opens a connection, so
 Each is a claim about the bytes of the tier and its driver, and each has been made to demonstrate that it can say
 no — which is the only reason the two green runs are worth more than their own exit codes.
 
-**The structure validator.** `q11-racecheck/check_race_tier.sh` reads the fifteen files under
+**The structure validator.** `scripts/stage11-race-structure.sh` — promoted out of this session's
+`q11-racecheck/check_race_tier.sh`, which is the path the captures below were taken at; the paragraph at the end
+of this section records the move and its proof — reads the fifteen files under
 `supabase/tests/stage11/race/` plus the `race` block of `supabase/tests/stage11/run.sh` and answers 26 numbered
 rules that print 30 lines, because `S02` carries two claims (that the chain build, the battery and the teardown
 are live lines of the dispatch block, and that they sit in that order) and `S07` carries four (one assert file
@@ -1327,7 +1362,8 @@ control comment the chain build out with a line that repeated the words and leav
 arms would have run against no database at all; it now requires live, non-comment lines inside the block, and
 `S02b` pins their order, because a build behind the arms is arms run against somebody else's chain.
 
-**The mutation battery.** `q11-racecheck/mutation_control.sh` copies the tier into a fresh `mktemp` tree 31 times:
+**The mutation battery.** `scripts/stage11-race-mutation.sh` (promoted from
+`q11-racecheck/mutation_control.sh`) copies the tier into a fresh `mktemp` tree 31 times:
 once unmuted, to prove the copy is equivalent to the tree, then 30 times breaking exactly one property per copy —
 a deletion, a rewrite or an append inside an existing block, so the rest of the file stays byte-identical and a
 failure names one property instead of a diff — and requires the named rule to fail each time. It writes nothing to
@@ -1340,7 +1376,8 @@ way to show that a green line is capable of going red. Six cases co-fire a secon
 `S06`+`S07d`, `S07/84`+`S14`, `S07d`+`S07/82`, `S20`+`S15`). That is correct behaviour — a cell that stops
 existing must not stay cited — but it blurs which property broke, which is why single-rule cases are the default
 and why the list is printed instead of hidden. Because "30 of 30" is a sentence the battery writes about itself,
-`q11-racecheck/verify_mutation_capture.sh` re-reads the capture and re-derives it from the per-case lines: every
+`q11-racecheck/verify_mutation_capture.sh`, now `scripts/stage11-mutation-capture-verify.sh`, re-reads the
+capture and re-derives it from the per-case lines: every
 case must name a rule that appears in its own failing set, no case may be `INERT`/`WRONG`/`SETUP`/`COVERAGE`, no
 case may be reported `FIRED` with `exit=0`, the verdict must equal the count of `FIRED` lines, and the exit marker
 and the head must both be stamped. That re-derivation prints five `PASS` lines and the co-firing list in
@@ -1364,7 +1401,8 @@ each of the fifteen race files taken once from `git show HEAD:` and once from di
 sixteen printed file by file in `q11-logs/s11-race-commit-bytes-check-1.txt`, which is the pair that ties
 `s11-race-run-7.txt` to committed bytes rather than to a working tree.
 
-**The citation checker.** `q11-racecheck/check_doc_citations.sh` answers two questions this document cannot answer
+**The citation checker.** `scripts/stage11-race-doc-citations.sh` (promoted from
+`q11-racecheck/check_doc_citations.sh`) answers two questions this document cannot answer
 about itself: whether every arm marker the four race rows print is a string the run log actually contains, and
 whether every cell those rows name singly is a cell the tier declares, with the range forms contiguous over those
 declarations. Against `q11-logs/s11-race-run-7.txt` it reports all 22 markers verbatim, all 17 doc-named cells
@@ -1381,12 +1419,108 @@ and the same arithmetic, ending `citation_checker_exit=0`, with the sha256 of th
 beside the head — which is what makes "these sentences cite that log" a measurement of this commit rather than of
 the one before it.
 
-One limitation covers all three instruments: they live in this session's `q11-racecheck/` directory, outside the
-repository, and are cited by log path exactly as this stage's other shell probes are (`q11-logs/s11_s5_tier.sh`,
-`q11-logs/s11-http-tier-probe.sh`). A reader who clones this branch gets the tier, its runner and its batteries,
-but not the validator that checks the tier's shape and not the battery that proves that validator can fail.
-Promoting either into `scripts/`, where `npm test` would reach it and `product:check` would scan it, is a new
-shipped gate rather than a documentation move, and this stage records it as the owner's call instead of taking it.
+That last clause — a fixed line window, re-run whenever anything in or above those rows moves — was honoured, and
+then made unnecessary by a change to the instrument rather than to the arithmetic, and what forced it was this
+pass's own editing. The lines this stage added above the threat matrix, retiring §15's and §16's stale runtime
+claims, shifted the two race rows from 908–909 to 915–916 while the checker still read lines 900..915. Over the
+committed document (HEAD `dbbbebf1`) that window extracts 22 arm markers, and all seven arm-4 names are inside it,
+which is what the `markers=22` figure above honestly reports; over this working tree the same window extracts **9**
+and none of the seven — `A4_SEES_WAITER_BLOCKED`, `A4_SAW_REVOKE_COMMITTED`, `R4_SEES_WAITER_BLOCKED`,
+`W4_AUTH_AT_ENTRY`, `W4_APPLIED`, `W4_ENDED`, `W4_AUTH_AFTER` — and exits 0 regardless. Nothing failed loudly: the
+checker read a block that had lost an entire race arm and printed a PASS about text it no longer names, which is
+the mode §13's rule exists to catch. The 14 names the shifted window never read are printed one per line as
+`markers_the_window_never_read` in `q11-logs/s11-citecheck-anchor-controls-1.txt`.
+
+The repair removes the coupling instead of re-typing its numbers: rule 1 locates the contiguous Markdown table
+carrying the row that opens `| Race: two operators`, prints the range it read on every run, and exits 2 with
+`SETUP: … rule 1 has nothing to read` if that row is gone, so a shrunken or empty window cannot pass. Re-taken at
+this tree it answers `BLOCK rule 1 reads doc lines 906..927 (22 table rows)` and
+`markers=23 cells=17 numbered=25 counted=34`, green against both race captures (`run6 code=0`, `run7 code=0` in
+the same file); the name the 22 did not include is `API_NAMES`, printed by a row below the retired window's last
+line. Four controls come with it. Ten blank lines inserted above the matrix move the reported range to `916..937`
+with the same 23 markers and `shift code=0`, which is the property the repair was for. Deleting the arm-1 row earns
+`anchor code=2` from the anchored rule, while the retired window reading that same doctored file still finds 11
+markers and would have passed over it (`retired-window-still-reads:`, 11 lines). Renaming one arm-4 marker to
+`W4_ENDED_ISH` earns `ABSENT W4_ENDED_ISH (printed by the doc, absent from the run log)` and `marker2 code=1`, and
+`retired_window_saw_the_mutation=0` says the pinned window could not have caught that defect at all. That last
+control was run twice and the first run is void: its needle demanded a closing backtick after `W4_ENDED=` and the
+document prints none — the marker runs straight into `act-completed-after-revocation` — so nothing was mutated,
+`needle_lines=0` printed only after the checker had already returned its green, and that green described
+unmutated bytes. The sequel checks the needle before trusting the instrument and then fails as designed
+(`needle_present=1 original_present=0`): `q11-logs/s11-citecheck-anchor-controls-2.txt`,
+`harness2_exit=1`, harnesses `q11-logs/run-citecheck-anchor-controls.sh` and `-2.sh`. Their fixtures are copies of
+the document, the tier and the scripts under `q11-citecheck/` (1.6 MiB); no committed file was opened for writing
+by any of them. What the anchor does not buy: it guarantees the checker reads the right block, not that the block's
+sentences are true, and rules 2–4 are untouched. The paragraph added here sits *below* the matrix, so the range it
+quotes stays `906..927`; the next edit above the matrix will move it, and the checker will print the new range
+rather than read the old one in silence.
+
+One limitation covered all three instruments, and it is now closed by a move rather than by a sentence: they
+lived in this session's `q11-racecheck/` directory, outside the repository, and were cited by log path exactly as
+this stage's other shell probes are (`q11-logs/s11_s5_tier.sh`, `q11-logs/s11-http-tier-probe.sh`), so a reader
+who cloned this branch got the tier, its runner and its batteries but not the validator that checks the tier's
+shape and not the battery that proves that validator can fail. Five files now ship —
+`scripts/stage11-race-structure.sh`, `scripts/stage11-race-arity.pl`, `scripts/stage11-race-mutation.sh`,
+`scripts/stage11-mutation-capture-verify.sh` and `scripts/stage11-race-doc-citations.sh` — and the move is
+measured in `q11-logs/s11-promotion-proof-1.txt`, whose steps each print their own adjacent exit code.
+
+What had to change was resolution, not logic: every machine path and every session-only name is gone
+(`residual_machine_paths` and `residual_old_names` both 0 for each of the five files), the four shells parse with
+`bash -n` and the helper with `perl -c` at `code=0`, and each instrument derives its own repository, so all four
+ways a reader can invoke it — no argument, an explicit repository argument, by bare name from inside `scripts/`,
+and by absolute path from the root — answered `exit=0` with `pass_lines=30 fail_lines=0`, including the
+`S26: all 51 pg_temp helper calls in the tier carry the arity their definitions declare` line that the bare-name
+form once lost. Byte form is the part a Windows clone cannot skip, and it was tested rather than assumed: an
+index-and-worktree copy of the branch landed 21 of 21 requested files with the tier's CRLF forms intact
+(`run.sh|cr=662`, `70_race_fixtures.sql|cr=445`), and three pairings then ran green — an LF instrument judging a
+CRLF tier, a CRLF instrument judging that same CRLF tier (the subject that matters: exactly what a clone without
+a pin hands a reader), and, after the `.gitattributes` rules added beside these files (`scripts/*.sh text eol=lf`,
+`scripts/*.pl text eol=lf`), a pinned instrument judging a pinned tier. Each printed 30 `PASS` and no `FAIL`.
+The pin's own effect was sampled on the two files whose resolution it exercises — `stage11-race-structure.sh`
+and `stage11-race-arity.pl`, both `cr=0` on checkout after it where both had been `cr=474` and `cr=82` before —
+while `supabase/tests/stage11/run.sh` keeps its CRLF working copy, because this stage pins its instruments and
+not the tier's runner; step 7 of the same capture lists all five promoted files as `i/lf w/lf attr/text eol=lf`.
+
+The `S26` floor hid one hazard one level down, and this pass walked into it. The arity helper walks `@ARGV` and has
+no default file list, so the static-gate harness that ran `perl scripts/stage11-race-arity.pl` bare from the
+repository root examined nothing and said so cheerfully — `call-arity check: 0 helper calls examined, 0 malformed`
+with `race_arity_exit=0` in `q11-logs/s11-static-gates-anchor-repair-1.txt`. A green line whose subject was an
+empty list is the same failure mode as the stale window above, caught here only because it was printed and read
+rather than counted. The composed validator was never exposed to it: `S26` requires an examined count of at least
+40 alongside exit 0 (`scripts/stage11-race-structure.sh:459`), so a zero-file run fails the tier check instead of
+passing it; the harness calling the helper directly was the unprotected path. Two changes close it — the helper
+refuses an empty list with a usage line and exit 2, and the gate invocation names the tier's files. Both shapes are
+printed in `q11-logs/s11-static-gates-anchor-repair-4.txt`: `51 helper calls examined, 0 malformed` at
+`race_arity_exit=0` for the glob, and `bare_code=2` with `bare_says_zero=0` for the bare form, which is the
+measurement that the "0 examined, exit 0" line cannot be produced again. That capture re-takes the rest of the
+static set at these bytes — `product:check` 263 files and 0 violations, its self-test 34 rules, `check-db-contract`
+37 migrations, `S01`–`S26` at `race_structure_exit=0`, the CLI battery at `cli_unit_battery_exit=0` with
+`Tests 40 passed (40)` under vitest (the `node --test` shape in capture -1 was this harness's error, not the tree's:
+the file imports vitest and cannot load outside its runner), the citation checker green against both race logs at
+`markers=23`, and the mutation-capture verifier's five `PASS` lines. Disk is recorded on either side of it,
+1,915,976 KB free before and 1,688,492 KB after, because this host has been falling and these gates are cheap.
+
+The promotion adds no gate, which was the owner's condition and is read from the three instruments that could
+have grown one: `vitest.config.ts:11` collects `src/**/*.{test,spec}.{ts,tsx}` and `scripts/**/*.test.mjs`, so a
+`.sh` and a `.pl` are never loaded by `npm test`; `scripts/check-product-contract.mjs:49` sets
+`EXCLUDED_PREFIXES = ["docs/audits/", "scripts/"]` and applies it at `:687`, so `product:check` never scans
+them; and `package.json`'s script list has no shell-lint or formatter entry that could reach them. They are
+callable on demand. That includes the mutation battery's cost — thirty-one validator runs took 5,113 s pre
+promotion and the full verdict already landed in `q11-logs/s11-race-mutation-control-3.txt`, so the promoted
+copy was executed under a deliberate 900 s budget (`battery|exit=124`, `baseline_ok_lines=1`,
+`fired_lines=11`, `inert_lines=0`), proving the promoted path runs rather than repeating finished
+qualification. The pair's refusal behaviour was then proven on the same bytes: the capture verifier accepted
+the retained complete run (`exit=0`, five `PASS` lines, `MUTATION CAPTURE VERIFIED (30 cases…`) and refused the
+truncated one (`exit=1`, `ABSENT no PASSED verdict line`, `BADCODE mutation_control_exit=124`).
+The citation checker, promoted, re-ran green against `q11-logs/s11-race-run-7.txt` at the same head
+(`markers=22 cells=17 numbered=25 counted=34`, `exit=0`).
+
+What still lives outside the repository is the evidence itself — every `q11-logs/` capture, all of them
+machine-local by design — and one recursion that cannot be written away: this section names a capture whose
+stamped digest is of the bytes it read, so the sentence naming that capture cannot be inside it. The pairing of
+the *shipped* document bytes with the checker's verdict therefore belongs to the run-log directory, and the
+last re-run recorded there is the authority for "these sentences were checked", not the one this paragraph
+cites.
 
 `scripts/check-db-contract.mjs` compares the migrations with the generated
 `src/integrations/supabase/types.ts` for **tables in `public`** and for nothing else — at this head it prints
@@ -1423,7 +1557,12 @@ the widened files were committed as `b18027d` and `4d1daae` at 21:38 and 21:40 o
 three prints a git head, or even a forty-character sha, so what passed was a working tree and the
 *committed* lists have never been executed. The same caveat applies to the two captures §16 records —
 `s11-http-stage11-a5.txt` at 16:15 and `s11-http-c3.txt` at 18:26 on 2026-10-25, both before either commit
-and neither stamped with a head — and §16's own list of what did not run beside them is unchanged. Neither has the runner's own chain, and the reason is no longer a missing engine: the probe that
+and neither stamped with a head — and §16's list of what did not run beside them stood until 2026-10-31, when the
+whole 38-cell battery went green on that stack (`q11-logs/s11-runtime-2-stage11-http-5.txt`, the first Stage 11
+HTTP capture to stamp a head at both ends: `HEAD dbbbebf1…` on its first line and `git_head_after|dbbbebf1…` on
+its last). That head stamp buys less than it appears to, and §15 is where the reason is written out: the head it
+names does not yet carry the repair the run measured, its census is the harness's own before/after read rather
+than the runner's inside-chain read, and it stamped line counts where the harness now stamps a digest. Neither has the runner's own chain, and the reason is no longer a missing engine: the probe that
 walked the suites called `node --test` once per file (`q11-logs/s11-http-tier-probe.sh:31`) and deliberately
 bypassed `supabase/tests/api/run.sh`, so that file's `leak_census` baseline (`:188`) and closing comparison
 (`:277`), its precondition object list (`:200`) and its migration-count parity (`:225`–`:245`) have still
@@ -1452,7 +1591,13 @@ the stack's apply of these six files was outstanding, and §16's push plus the A
 halves false, so it now prints what ran beside the list of what did not — groups T, R, V, AI and H, a grant,
 revoke or purge that actually executes, the races *over the wire* (that clause was rewritten when the race tier
 ran: the row no longer lists the races among the absences, and says instead that the tier executed on a host
-cluster and what remains unrun is the same collision through PostgREST), the runner's own chain — with its label unchanged. The
+cluster and what remains unrun is the same collision through PostgREST), the runner's own chain — with its label unchanged.
+The row has been edited a third time for the same reason, disclosed in the same place: it opened its absence list
+with "the same file's groups T, R, V, AI and H", and §16's whole-file 38 / 38 capture is what retired that clause
+rather than any change to what the groups do. What the row lists as unrun now therefore starts where the battery
+cannot reach — an operator grant or revoke, or a console purge, *executed* rather than dry-run or refused, the
+runner's own chain, and the collision through PostgREST — and it prints the whole-file run beside the two family
+captures that came before it. Its label moves for none of it: rule 3 still earns `PLANNED V1`, because nothing in `src/` names an operator verb. The
 rest of the matrix is recorded below, not rewritten. That clause — "no writer
 in product code" — survived the re-read and still says something true: no query in `src/` names
 `private.audit_events`. What the row did not say is that thirty-nine `INSERT INTO private.audit_events`
@@ -1468,7 +1613,8 @@ earns a status from working code *plus* a test or verified manual check of the u
 is no console screen, no activity view and no browser interaction with either. The third item in that list used
 to read *no HTTP call*, and it is now false on its own terms: groups A and C of
 `supabase/tests/api/stage11_operations_http.test.mjs` put the nineteen doors and the ticket lifecycle over HTTP
-against the pushed stack — 7 tests / 7 pass and 9 / 9 (`§16`) — so the labels rest on the product surface this
+against the pushed stack — 7 tests / 7 pass and 9 / 9 (`§16`) — and the whole file has since run in one pass on
+that stack, so `T`, `V`, `R`, `AI` and `H` answered too (38 / 38, §16) — so the labels rest on the product surface this
 stage did not build, which is what rule 3 asks, and not on a server that has since been fed the schema. The
 descriptions move and the labels do not, which is recorded here rather than left to the reader to infer. The
 rule-3 sweep then read the rest of that matrix and `README.md` for the same class of sentence and found five
@@ -1643,8 +1789,18 @@ outstanding is done, and what remains of the old caveat is the wire: of the HTTP
 `A` (A-01 … A-07 — 7 tests, 7 pass, 0 fail, `q11-logs/s11-http-stage11-a5.txt`) and support group `C`
 (C-01 … C-09 — 9 tests, 9 pass, 0 fail, with `node_test_exit=0` recorded beside it,
 `q11-logs/s11-http-c3.txt`) have run on that stack; takedown `T`, health `H`, privacy `V`, refund-oversight
-`R` and audit-integrity `AI` have not — twenty-two of the suite's thirty-eight declared cells — and the
-browser tier has not. The concurrency tier is a third list, and it has closed on its own terms: fifteen files in
+`R` and audit-integrity `AI` had not — twenty-two of the suite's thirty-eight declared cells — and the
+browser tier had not. The HTTP half of that sentence is now closed by measurement rather than by this section's
+permission: `q11-logs/s11-runtime-2-stage11-http-5.txt` runs the whole file against that same stack in one pass —
+`node_test_exit=0` at 248 s, `tests 38 / suites 7 / pass 38 / fail 0`, each family at zero failures (A 7, C 9,
+T 5, R 5, V 4, AI 3, H 5), `declared_test_calls|38`, `declared_unique_ids|38` and `run_unique_ids|38` with
+`declared_not_run` and `run_not_declared` both printed empty, and the harness's outer census identical across all
+30 store names before and after, `stage11_audit_rows=0` among them. So the scope §13 and §15 bounded at twenty-two
+outstanding cells is spent, and what the wire still lacks is narrower than a count: the runner's own chain with
+Stage 11's file inside it, the two-operator collision through PostgREST rather than through a host cluster, an
+operator grant or revoke and a console purge *executed* rather than dry-run or refused, and any browser tier —
+which has no subject, because nothing in `src/` names an operator verb. §15 is where the limit of the green
+capture is written: it stamps a head whose tracked file does not yet hold the repair it ran. The concurrency tier is a third list, and it has closed on its own terms: fifteen files in
 `supabase/tests/stage11/race/` declare `RC00`–`RC16` and `RD00`–`RD07`, and `run.sh`'s `race` mode builds the
 throwaway `st11qual_race` chain for them and drops it at the end — and that mode **has run twice**, green in both
 (`q11-logs/s11-race-run-6.txt`, then `q11-logs/s11-race-run-7.txt` at the pushed head
