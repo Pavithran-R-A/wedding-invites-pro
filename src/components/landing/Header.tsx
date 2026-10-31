@@ -11,6 +11,16 @@ const landingNavItems = [
   { label: "How it works", href: "#how-it-works" },
 ];
 
+// Where a signed-in host can go that is not their invitations. These are in the bar rather than tucked
+// behind an icon because the alternative for a customer who cannot find them is no alternative: support in
+// this product is a thread attached to an account, and there is no second channel — no email address is
+// configured to send to and no phone number exists.
+const accountNavItems = [
+  { label: "My invitations", to: "/dashboard" },
+  { label: "Support", to: "/support" },
+  { label: "My data", to: "/my-data" },
+];
+
 const Header = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, signOut } = useAuth();
@@ -32,7 +42,7 @@ const Header = () => {
         <BrandLockup to={user ? "/dashboard" : "/"} className="h-full items-center" />
 
         {isLanding && (
-          <nav className="hidden md:flex items-center gap-8" aria-label="Landing page sections">
+          <nav className="hidden lg:flex items-center gap-8" aria-label="Landing page sections">
             {landingNavItems.map((item) => (
               <a
                 key={item.href}
@@ -45,16 +55,25 @@ const Header = () => {
           </nav>
         )}
 
-        <div className="hidden md:flex items-center gap-3">
+        {user && (
+          <nav className="hidden lg:flex items-center gap-6" aria-label="Account">
+            {accountNavItems.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="text-sm font-medium text-ink-muted transition-colors hover:text-ink"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        )}
+
+        <div className="hidden lg:flex items-center gap-3">
           {user ? (
-            <>
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/dashboard">My invitations</Link>
-              </Button>
-              <Button variant="outline" size="sm" onClick={signOut}>
-                Log out
-              </Button>
-            </>
+            <Button variant="outline" size="sm" onClick={signOut}>
+              Log out
+            </Button>
           ) : (
             <>
               <Button variant="ghost" size="sm" asChild>
@@ -69,7 +88,7 @@ const Header = () => {
 
         <button
           type="button"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-ink md:hidden"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-ink lg:hidden"
           onClick={() => setMobileOpen((open) => !open)}
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
           aria-expanded={mobileOpen}
@@ -86,7 +105,7 @@ const Header = () => {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-line/60 bg-paper md:hidden"
+            className="overflow-hidden border-t border-line/60 bg-paper lg:hidden"
           >
             <div className="container flex flex-col gap-4 px-4 py-4">
               {isLanding &&
@@ -100,24 +119,28 @@ const Header = () => {
                     {item.label}
                   </a>
                 ))}
+              {user &&
+                accountNavItems.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className="flex min-h-11 items-center text-sm font-medium text-ink-muted hover:text-ink"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
               <div className="flex gap-3 pt-2">
                 {user ? (
-                  <>
-                    <Button variant="outline" className="min-h-11 flex-1" asChild>
-                      <Link to="/dashboard" onClick={() => setMobileOpen(false)}>
-                        My invitations
-                      </Link>
-                    </Button>
-                    <Button
-                      className="min-h-11 flex-1"
-                      onClick={() => {
-                        signOut();
-                        setMobileOpen(false);
-                      }}
-                    >
-                      Log out
-                    </Button>
-                  </>
+                  <Button
+                    className="min-h-11 flex-1"
+                    onClick={() => {
+                      signOut();
+                      setMobileOpen(false);
+                    }}
+                  >
+                    Log out
+                  </Button>
                 ) : (
                   <>
                     <Button variant="outline" className="min-h-11 flex-1" asChild>

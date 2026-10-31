@@ -16,6 +16,8 @@ const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Support = lazy(() => import("./pages/Support"));
+const MyData = lazy(() => import("./pages/MyData"));
 const CreateProject = lazy(() => import("./pages/CreateProject"));
 const ConfigureProject = lazy(() => import("./pages/ConfigureProject"));
 const EditProject = lazy(() => import("./pages/EditProject"));
@@ -59,6 +61,12 @@ const AccountApplication = () => (
         <Route path="/terms-of-service" element={<TermsOfService />} />
         <Route path="/cookie-policy" element={<CookiePolicy />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        {/* Both of these read only what `auth.uid()` owns, and both write through a door that re-derives the
+            same caller — so they belong behind the session like the dashboard does. A signed-out visitor who
+            asks for `/support` gets the login page, which is the honest answer: support in this product is a
+            thread attached to an account, and there is no anonymous door to a host's own tickets. */}
+        <Route path="/support" element={<ProtectedRoute><Support /></ProtectedRoute>} />
+        <Route path="/my-data" element={<ProtectedRoute><MyData /></ProtectedRoute>} />
         <Route path="/create-project" element={<ProtectedRoute><CreateProject /></ProtectedRoute>} />
         <Route path="/project/:id/configure" element={<ProtectedRoute><ConfigureProject /></ProtectedRoute>} />
         <Route path="/project/:id/edit" element={<ProtectedRoute><EditProject /></ProtectedRoute>} />
