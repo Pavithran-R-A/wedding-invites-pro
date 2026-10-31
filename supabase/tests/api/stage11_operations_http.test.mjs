@@ -782,12 +782,15 @@ async function plantMoney(who, weddingId, label) {
       now() - interval '2 hours', now() - interval '1 hour')`,
   `the ${label} refund row`);
   moneyFixtures.push({ orderId, refundId, weddingId, label });
-  return { orderId, refundId };
+  return { orderId, refundId, weddingId, label };
 }
-/** The ledger read as one line: every column an oversight note could be accused of moving. */
+/** The ledger read as one line: every column an oversight note could be accused of moving. The refund's
+ *  amount is `coalesce`d because the recorded chargeback this file plants carries it genuinely NULL
+ *  (`3649-3652`), and `||` with a NULL swallows the whole line rather than showing the absent column — the
+ *  literal `null` keeps the two shapes distinguishable, which is all the line is for. */
 const moneyLine = (fixture) => cell(`
   select 'order=' || o.status || '/' || o.amount_minor::text || '/' || o.currency
-    || ' refund=' || r.status || '/' || r.amount_minor::text || '/' || coalesce(r.provider_refund_ref, '-')
+    || ' refund=' || r.status || '/' || coalesce(r.amount_minor::text, 'null') || '/' || coalesce(r.provider_refund_ref, '-')
     || ' attempts=' || (select count(*)::text from private.commerce_payment_attempts a where a.order_id = o.id)
     || ' events=' || (select count(*)::text from private.commerce_payment_events e where e.order_id = o.id)
     || ' entitlements=' || (select count(*)::text from public.entitlements e where e.wedding_id = o.wedding_id)
@@ -3436,7 +3439,6 @@ describe('S11 T a published invitation taken down, and the files that outlive it
     const bucketBefore = await bucketCount();
     const readyBytesBefore = await signedFetch(fx.readyKey);
     const registeredBytesBefore = await signedFetch(fx.registeredKey);
-    const storesBefore = snapshot(fx.case, fx.live.weddingId);
     fx.purgeKey = randomUUID();
     const planned = trusted(call(fx.case, actor, fx.purgeKey), 'the accepted purge plan');
     assert.equal(keysOf(planned), keySet('wedding_id', 'case_ref', 'publication_id', 'version_id',
@@ -3463,6 +3465,11 @@ describe('S11 T a published invitation taken down, and the files that outlive it
 
     // The two halves of §6's promise, measured against each other rather than against this file's guess: the
     // surface a browser could reach and the body no browser can reach list the same files.
+    // The baseline is taken here rather than above the accepted plan because the plan's own two writes are
+    // designed (`20261020190400…:598` links the ticket, `:616` puts the plan on the trail) and are pinned as
+    // exactly two by the assertions below. What this comparison is about is the door: a STABLE read that
+    // reached the same stores would move them from here.
+    const storesBeforeDoor = snapshot(fx.case, fx.live.weddingId);
     const doorPlan = await rpc('operator_takedown_plan', { p_wedding_id: fx.live.weddingId },
       { as: 'opOps' });
     assert.equal(doorPlan.status, 200, `the Hotel plan after the takedown answered ${json(shape(doorPlan))}`);
@@ -3471,8 +3478,8 @@ describe('S11 T a published invitation taken down, and the files that outlive it
     assert.deepEqual(doorPlan.body.object_keys, planned.object_keys,
       'the door and the doorless body disagree about which files a purge would name');
 
-    assert.equal(snapshot(fx.case, fx.live.weddingId), storesBefore,
-      'the accepted plan moved the manifest, the trail or the ticket link beyond its own two writes');
+    assert.equal(snapshot(fx.case, fx.live.weddingId), storesBeforeDoor,
+      'the plan door moved the manifest, the trail or the ticket link, so it was not the read §6 says it is');
     assert.equal(await bucketCount(), bucketBefore,
       `the plan went from ${json(String(bucketBefore))} objects in the bucket to `
       + `${json(String(await bucketCount()))}, so "deletes nothing" is a claim and not a measurement`);
@@ -3521,7 +3528,9 @@ describe('S11 T a published invitation taken down, and the files that outlive it
       + `each leaving the manifest, the trail, the ticket link and this wedding's artefact states where they `
       + `were; the accepted plan then listed ${json(planned.object_keys)} as one object while the bucket held `
       + `${json(String(bucketBefore))} files and both links still served the same bytes, wrote one `
-      + 'maintenance row and a second ticket link, and replayed without writing');
+      + 'maintenance row and a second ticket link, and replayed without writing — while the same list read '
+      + 'through the browser-reachable door moved none of the four stores the trusted plan had just written '
+      + 'two of');
   });
 });
 
@@ -4263,6 +4272,18 @@ describe('S11 V a privacy request as its host and its desk each see it', () => {
 
     // The satisfied-with-a-note arm that the refusal above refuses, and nothing else: this is the presence
     // control for the whole seven, and it also proves the rule is about the *absence* of the annotation.
+    // The row is walked to `queued_for_stage13` first because that is the only status the shipped lifecycle
+    // offers `satisfied_outside_this_build` from (`20261020190300…:194`, and the HINT at `:198-200` names the
+    // same edge); from `received` the trigger's edge rule answers instead of the annotation rule, and the
+    // control would prove nothing about the arm it is meant to isolate.
+    const queued = await rpc('operator_advance_privacy_request',
+      { p_request_ref: fx.erasureRequest, p_status: 'queued_for_stage13', p_note: null,
+        p_idempotency_key: randomUUID() }, { as: 'opPrivacy' });
+    assert.equal(queued.status, 200, `the walk to the status that offers the satisfied edge answered `
+      + `${json(shape(queued))}`);
+    harvest(queued.body);
+    assert.match(requestLine(fx.erasureRequest), /status=queued_for_stage13/,
+      'the walk did not move the row that the presence control stands on');
     const named = await rpc('operator_advance_privacy_request',
       { p_request_ref: fx.erasureRequest, p_status: 'satisfied_outside_this_build',
         p_note: `hand-delivered to the family on paper (${RUN_TAG})`, p_idempotency_key: randomUUID() },
@@ -4278,8 +4299,9 @@ describe('S11 V a privacy request as its host and its desk each see it', () => {
     console.log('  V-03  seven refusals at the advance door (a sixth status word, a missing key, a return to '
       + 'received, a satisfied move naming nowhere, two operator-note shapes and a ref that exists in '
       + 'nobody\'s store) each arrived as 400/23514 or 403/42501 carrying the caller\'s own value where the '
-      + '`%` is, left the store, the row and the trail exactly as they were, and the same door then accepted '
-      + 'the satisfied move as soon as it named where the work was done');
+      + '`%` is, left the store, the row and the trail exactly as they were, and the same door then walked '
+      + 'the control row to `queued_for_stage13` and accepted the satisfied move from there as soon as it '
+      + 'named where the work was done');
   });
 
   test('V-04: a replay reads its answer off the trail, so a twice-moved request still returns its first move', async () => {
@@ -4458,11 +4480,26 @@ describe('S11 AI the trail from outside: no surface, no credential, no uncounted
     assert.notEqual(writeShape.body?.code, 'PGRST205',
       `PATCH /weddings answered the schema-cache code too, so the router's answer carries no information: `
       + `${json(shape(writeShape))}`);
-    const grantRows = sqlRows(`select table_name || ' ' || grantee || ':' || privilege_type
+    // The grant census, stated as the shipped design states it rather than as a tidier number. Stage 2
+    // opened `SELECT, INSERT, UPDATE, DELETE` on the trail to `service_role`
+    // (`20260925120400_stage2_assets_entitlements_secrets.sql:197`) and slice 1 revoked the rewrite half
+    // (`20261020190000_stage11_operator_authority.sql:254`), so the live posture is the append-only pair.
+    // What must be empty is the *session* credential set — the roles a browser token can ever be — and what
+    // must be absent from the key's set is any grant that lets it rewrite or erase a row. That the remaining
+    // pair is not a route is the claim of the HTTP half above: the sixteen shapes include ones sent with the
+    // service_role key itself, and each answered PGRST205.
+    const sessionGrants = sqlRows(`select grantee || ':' || privilege_type
       from information_schema.role_table_grants
       where table_schema = 'private' and table_name = 'audit_events'
-        and grantee in ('anon','authenticated','service_role') order by 1`);
-    assert.deepEqual(grantRows, [], `a client role holds a table grant on private.audit_events: ${json(grantRows)}`);
+        and grantee in ('anon','authenticated') order by 1`);
+    assert.deepEqual(sessionGrants, [], `a session role holds a table grant on private.audit_events: `
+      + `${json(sessionGrants)}`);
+    const keyGrants = sqlRows(`select grantee || ':' || privilege_type
+      from information_schema.role_table_grants
+      where table_schema = 'private' and table_name = 'audit_events'
+        and grantee = 'service_role' order by 1`);
+    assert.deepEqual(keyGrants, ['service_role:INSERT', 'service_role:SELECT'],
+      `the server key's grants on the trail are not the append-only pair slice 1 left them as: ${json(keyGrants)}`);
     const exposed = cell(`select coalesce(string_agg(c.relname, ',' order by c.relname), '<none>')
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'api' and c.relname = 'audit_events'`, 'the api relation census');
@@ -4471,8 +4508,10 @@ describe('S11 AI the trail from outside: no surface, no credential, no uncounted
     console.log(`  AI-01  ${probes} request shapes (4 verbs × anon, a host, an operator and service_role) `
       + 'against /rest/v1/audit_events each answered 404 PGRST205, while the same kind of client reads an '
       + 'exposed table in 200 and gets a non-404, non-schema-cache answer to a PATCH that matched no row and '
-      + 'left the wedding count where it was; 0 client '
-      + 'table grants exist on the trail and no api relation of that name exists');
+      + 'left the wedding count where it was; ' + `${sessionGrants.length} grants reach the trail from a `
+      + 'session role, the server key holds exactly ' + `${json(keyGrants)} — the append-only pair slice 1 `
+      + 'left it with, no UPDATE or DELETE grant survives on the table for any of the three roles, and no '
+      + 'api relation of that name exists');
   });
 
   test('AI-02: no credential this run used reaches any trail row this run wrote, and the same scan finds the value this run did store', async () => {
@@ -4835,7 +4874,7 @@ describe('S11 H the health projection as the body delivers it', () => {
     // own, so `not_measured` is asserted-against-to_regclass at H-01 and never re-enacted.
     { path: 'migrations.applied_count', migrationsBranch: 'measured',
       sql: `(select count(*) from supabase_migrations.schema_migrations)` },
-    { path: 'migrations.highest_version', migrationsBranch: 'measured',
+    { path: 'migrations.highest_version', migrationsBranch: 'measured', text: true,
       sql: `(select coalesce(max(version)::text, 'null') from supabase_migrations.schema_migrations)` },
   ];
 
@@ -4846,6 +4885,18 @@ describe('S11 H the health projection as the body delivers it', () => {
   /** All the tiles in one round trip: eighty-odd `psql` children would take longer than the case they
    *  serve and would each read the stores at a different instant, which is precisely the thing the tiles
    *  exist to compare. The index travels in the line so the row order is never trusted. */
+  /** psql writes a `timestamptz` as `2026-10-29 13:53:28.359711+00` while the delivered body carries the same
+   *  instant as `2026-10-29T13:53:28.359711+00:00`. A stamp tile is compared only after the store's own text
+   *  has been put into the delivered form: every digit survives, so an instant that genuinely differs — by a
+   *  microsecond, by a zone, or by being absent — still fails, while a difference of rendering alone no longer
+   *  reads as a disagreement between the body and the store. */
+  const wireStamp = (text) => {
+    const iso = text.trim().replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+    assert.ok(ISO_STAMP.test(iso), `the store's stamp ${shown(text).slice(0, 80)} is not a form this `
+      + 'instrument can put beside the delivered one');
+    return iso;
+  };
+
   const readTiles = (a) => {
     const live = TILES.filter((t) => !t.migrationsBranch
       || t.migrationsBranch === String(at(a.blocks, 'migrations.status')));
@@ -4857,7 +4908,9 @@ describe('S11 H the health projection as the body delivers it', () => {
     for (const line of rows) {
       const bar = line.indexOf('|');
       assert.ok(bar > 0, `a tile row arrived without its index: ${shown(line).slice(0, 120)}`);
-      out[live[Number(line.slice(0, bar))].path] = line.slice(bar + 1);
+      const tile = live[Number(line.slice(0, bar))];
+      out[tile.path] = tile.path.endsWith('_at')
+        ? wireStamp(line.slice(bar + 1)) : line.slice(bar + 1);
     }
     assert.equal(Object.keys(out).length, live.length, 'two tiles answered the same path');
     return out;
@@ -4999,13 +5052,18 @@ describe('S11 H the health projection as the body delivers it', () => {
       ? 'measured' : 'not_measured',
       `the migrations block answered a branch that does not match to_regclass (${migrationsLive})`);
 
-    // Types, driven by the transcription rather than by a list that could rot against it: every scalar this
-    // file claims to know how to count must arrive as an integer, and every `*_at` must arrive as an ISO
-    // instant or as JSON null — never as the string 'null', never as an absent key.
+    // Types, driven by the transcription rather than by a list that could rot against it: every count this
+    // file claims to know about must arrive as an integer, every `*_at` as an ISO instant or as JSON null,
+    // and the tiles marked `text` as a non-empty JSON string — never as the string 'null', never as an
+    // absent key. `migrations.highest_version` is `text` because the tool's own column is: measured on this
+    // stack, `information_schema.columns` gives `supabase_migrations.schema_migrations.version` the type
+    // `text`, so `max(version)` is text and the body's `jsonb_build_object` renders a JSON string. Treating
+    // it as a count was this instrument claiming a type the store never had.
     const tiles = readTiles(a);
     let numeric = 0;
     let stamped = 0;
     let nulls = 0;
+    let texted = 0;
     for (const t of TILES) {
       if (t.migrationsBranch
         && t.migrationsBranch !== String(at(a.blocks, 'migrations.status'))) continue;
@@ -5016,13 +5074,25 @@ describe('S11 H the health projection as the body delivers it', () => {
       } else if (t.path.endsWith('_at')) {
         if (value === null) nulls += 1; else { stamp(value, t.path); stamped += 1; }
         assert.notEqual(String(value), 'null', `${t.path} arrived as the string 'null'`);
+      } else if (t.text) {
+        assert.equal(typeof value, 'string',
+          `${t.path} arrived as ${typeof value} (${json(value)}), not as the string the store's text column `
+          + 'makes it');
+        assert.notEqual(value, 'null', `${t.path} arrived as the string 'null'`);
+        assert.ok(value.length > 0, `${t.path} arrived as an empty string`);
+        texted += 1;
       } else {
         assert.equal(typeof value, 'number',
           `${t.path} arrived as ${typeof value} (${json(value)}), not as the number a count is`);
         assert.ok(Number.isInteger(value) && value >= 0, `${t.path} arrived as ${json(value)}`);
         numeric += 1;
       }
-      assert.equal(String(value), tiles[t.path], `the ${t.path} read disagrees with the delivered body`);
+      // The same normalization H-03 already applies: a grouped count is an object on the wire and a
+      // `k:n` list in the store read, so comparing them needs `groupedText`. `String(value)` here scored
+      // every grouped tile as `[object Object]` against a real list — four cells failing on a rendering
+      // the object and the text agree on.
+      const asText = t.grouped ? groupedText(value) : String(value);
+      assert.equal(asText, tiles[t.path], `the ${t.path} read disagrees with the delivered body`);
     }
 
     // `blocks_not_measured` recomputed from the delivered blocks, with the expected set derived from the
@@ -5043,7 +5113,8 @@ describe('S11 H the health projection as the body delivers it', () => {
 
     console.log(`  H-01  the body delivered ${BLOCK_NAMES.length} blocks on one instant (${asOf}), `
       + `${numeric} counts arrived as JSON numbers, ${stamped} timestamps as ISO instants and ${nulls} as `
-      + `JSON null, ${Object.keys(tiles).length} tiles agreed with a fresh read of the stores, the `
+      + `JSON null, ${texted} text-column scalar(s) as JSON strings, `
+      + `${Object.keys(tiles).length} tiles agreed with a fresh read of the stores, the `
       + `migrations branch answered '${at(a.blocks, 'migrations.status')}' against to_regclass=`
       + `${migrationsLive} and the derived absences were ${json(derived)}`);
   });
@@ -5192,9 +5263,24 @@ describe('S11 H the health projection as the body delivers it', () => {
     // `includes`, against a document that is entitled to carry them. The operator's own case queue is that
     // document — C-02 proved hostA's sentinel reaches it — so the scan is shown to be able to find what it
     // is looking for before its silence is read as safety.
+    // `opSupport`, because `support` is the scope this door is granted to (`operator_case_queue` in the
+    // DOORS table above, and C-02 read it with the same holder). Asking an `operations` account was the
+    // instrument contradicting the design, not the design failing: it answered 42501.
+    // 100 is this door's own ceiling — `operator_case_queue` refuses anything outside 1..100 at
+    // `20261020190100_stage11_support_cases.sql:908-912`, and C-02 walks that refusal at the wire — so
+    // asking for 100 is asking for the whole queue. Asking for 200 asked for more rows than the rule lets
+    // exist and was answered 400/23514: the product enforcing a limit that A-04 and C-02 both obey at the
+    // same door. Whether 100 really is the whole queue here is measured below, not assumed.
+    const caseRowsLive = count('from private.support_cases', 'the case rows in flight at the control read');
     const queue = await rpc('operator_case_queue',
-      { p_status: null, p_category: null, p_limit: 200 }, { as: 'opOps' });
+      { p_status: null, p_category: null, p_limit: 100 }, { as: 'opSupport' });
     assert.equal(queue.status, 200, `the control read failed: ${json(shape(queue))}`);
+    assert.ok(Number(caseRowsLive) <= 100,
+      `the store holds ${caseRowsLive} case rows, above this door's 100-row ceiling, so the control `
+      + 'document is a slice of the queue and not the queue');
+    assert.equal(String(queue.body?.cases?.length), caseRowsLive,
+      `the control queue delivered ${json(queue.body?.cases?.length)} of ${caseRowsLive} case rows, so `
+      + 'a needle could be absent from it simply by not being in the slice');
     const control = JSON.stringify(queue.body);
     const found = needles.filter((n) => control.includes(n.value)).map((n) => n.label);
     assert.ok(found.includes('sentinel summary'),
@@ -5210,7 +5296,8 @@ describe('S11 H the health projection as the body delivers it', () => {
 
     console.log(`  H-04  ${needles.length} live identifiers across ${kinds.size} kinds were planted this run `
       + `and none appears in the ${body.length}-byte body; the same scan found ${found.length} of them `
-      + `(the sentinel summary among them) in the operator queue that is entitled to carry them, while `
+      + `(the sentinel summary among them) in the operator queue, which was read at the door's own ${queue.body.limit} `
+      + `ceiling and delivered all ${caseRowsLive} case rows in flight — so its silence is a slice of nothing; `
       + `held_by_reason still delivered the minted categories ${json(Object.keys(held))} and the read `
       + `counted ${activeWeddings} weddings' publications for an operator that owns no wedding`);
   });
