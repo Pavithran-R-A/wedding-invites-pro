@@ -42,3 +42,16 @@ public/fonts/files/*.woff2 binary
 src/render/outputGeometry.ts text eol=lf
 src/render/render.css text eol=lf
 src/index.css text eol=lf
+
+# The Stage 11 race-tier instruments are bash + perl read by bash, and they judge their own tier's bytes. Git
+# for Windows ships core.autocrlf=true in system config, so with nothing pinning them a fresh checkout rewrites
+# scripts/*.sh and scripts/*.pl — and the tier they parse — with CRLF. This repo already documents that hazard
+# twice above, for the font digests and for render_config_hash; the reason to close it here is narrower and
+# measurable: these files are instruments, so a checkout-dependent byte form makes a green run a statement
+# about the operator's git config.
+#
+# Scoped to the promoted instruments rather than to *.sh or *.pl repo-wide, for the same reason the rules above
+# are scoped: a repository-wide line-ending policy would re-normalise text committed with CRLF elsewhere, which
+# is a larger decision than this repair.
+scripts/*.sh text eol=lf
+scripts/*.pl text eol=lf
