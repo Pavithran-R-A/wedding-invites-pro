@@ -392,7 +392,7 @@ tier that drove thirteen purchase states on the shipped bundle
 **no provider credential, no checkout redirect, no webhook receiver and no approved price exist**, so
 every quote still refuses and nobody has been asked to pay. QR codes and PDF/image export left that list in Stage 9: the host's
 workbench lists the files made from one frozen version and asks Storage for a 60-second signed URL
-(`src/integrations/supabase/invitationOutputs.ts:53`), and the bytes behind those rows were uploaded,
+(`src/integrations/supabase/invitationOutputs.ts:63`), and the bytes behind those rows were uploaded,
 read back and re-hashed against the digests their own rows carry by the trusted local publisher —
 **8 artefacts delivered, 0 blocking findings**, then **21/21** from a verifier that does not read the
 publisher's log ([`docs/audits/stage-9-render-exports.md`](docs/audits/stage-9-render-exports.md) §13).

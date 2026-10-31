@@ -74,7 +74,7 @@ class Refusal extends Error {
 const HOST_B_PREFIX = 's9-delivery-host-b';
 
 /** The private artefact bucket, named by the product at
- *  `src/integrations/supabase/invitationOutputs.ts:49`, where the constant is module-private. Storage's
+ *  `src/integrations/supabase/invitationOutputs.ts:59`, where the constant is module-private. Storage's
  *  signed and authenticated read addresses both take the form `/{bucket}/{object_key}`, so an
  *  instrument that leaves the bucket out gets refused for a malformed address rather than by a policy —
  *  and would report that refusal as a security pass. */
@@ -758,7 +758,7 @@ export async function runTier({ opts, log, channels }) {
       + `against ${retired.length} invalidated, ${otherShown} saying something else`);
 
     // What the panel says *besides* the rows is decided by reprintWarnings() in
-    // src/lib/invitationOutputs.ts:272-315: one sentence per reason the manifest holds retired rows for,
+    // src/lib/invitationOutputs.ts:275-323: one sentence per reason the manifest holds retired rows for,
     // counting the rows that carry it, plus one fixed sentence whenever a ready QR plate exists, because
     // the projection deliberately carries no target-url digest for this read to compare against. The
     // expectation is built from this manifest's own reasons and counts, so a retired row changes what the
@@ -841,7 +841,7 @@ export async function runTier({ opts, log, channels }) {
       const url = new URL(href);
       // `createSignedUrl` answers `/storage/v1/object/sign/{bucket}/{key}`, so the bucket is part of
       // the address in front of the key the manifest holds. The name is the product's own constant
-      // (`BUCKET` at src/integrations/supabase/invitationOutputs.ts:49), which that module keeps
+      // (`BUCKET` at src/integrations/supabase/invitationOutputs.ts:59), which that module keeps
       // private; repeating it here is the price of checking the shape instead of the download alone.
       const expectedPath = `/storage/v1/object/sign/${OUTPUT_BUCKET}/${row.object_key}`;
       const shapeOk = url.pathname === expectedPath
