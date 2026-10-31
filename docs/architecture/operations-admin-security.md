@@ -3,11 +3,14 @@
 **Status: design and threat model, and the contract the Stage 11 migrations are written against — with
 slices 1–5 now exercised.** The five batteries have run, on the runner's own chains, against a real
 PostgreSQL 17 (§13 cites them by log), the six Stage 11 migrations have since been applied to the shared
-`localvivaahvarnam` stack (§16), and the HTTP battery has run there for authority group `A` and support group
-`C`. So "every capability here is labelled **designed** until a battery measures it" still governs this
-document, but it no longer means the wire is unread: what has **not** run is the takedown `T`, health `H`,
-privacy `V`, refund-oversight `R` and audit-integrity `AI` groups and the whole browser tier, because they need
-Docker running and starting it is a human-only action. The concurrency tier is a different thing, and the two
+`localvivaahvarnam` stack (§16), and the HTTP battery has run there in full — all 38 of its cells across the
+seven families, and then inside `supabase/tests/api/run.sh` beside the tier's other ten suites, at a head pushed
+to the remote (`q11-logs/s11-runtime-4-full-chain-3.txt`; §15 and §16 give the counts). So "every capability here
+is labelled **designed** until a battery measures it" still governs this document, but it no longer means the
+wire is unread: what has **not** run is an operator grant or revoke or a console purge that actually *executes*
+rather than dry-runs or refuses, the two-operator collision through PostgREST rather than through a host cluster,
+and the whole browser tier — and that last absence has no subject to drive rather than no engine, because nothing
+in `src/` names an operator verb while the containers the HTTP chain just ran against are up. The concurrency tier is a different thing, and the two
 must not be read as one list: `supabase/tests/stage11/race/` declares `RC00`–`RC16` and `RD00`–`RD07` across
 fifteen files, `run.sh` has a `race` mode that builds its own throwaway chain, and that chain **has now run** —
 attempts 6 and 7 both exited 0 with 34 counted cells green (the plant census's 9 plus the 25 numbered ones) on a
@@ -1546,28 +1549,66 @@ Stage 5's (**28 / 27 / 1**), and the other seven of the ten suites that probe wa
 across it, which is what turns the three reds into a measurement of the three lists rather than of the
 stack. The widening that answers them is `4d1daae`, the same three files Stage 7 and Stage 8 widened in
 turn, and at this head a grep of the HTTP tier for `operator_`, `support_case` or `privacy_request` returns
-**435** lines across **four** of its **eleven** files, 385 of them Stage 11's own battery. The sentence this
+**441** lines across **four** of its **eleven** `.test.mjs` files, 391 of them Stage 11's own battery. The pair
+this paragraph printed until now — 435 and 385 — was true of the tree at `4d1daae`, the commit that wrote the
+widening, and `2111091` moved both numbers by the same six lines when it repaired the battery's eleven red cells;
+the re-derivation is
+`grep -rcE "operator_|support_case|privacy_request" supabase/tests/api/*.test.mjs | awk -F: '{s+=$2} END {print s}'`,
+which prints 441 at `3e28851` and leaves `run.sh`'s own ten matches outside the count. The sentence this
 paragraph carried until now said *zero*, which was true the day slice 5 wrote it, is false because of
 `4d1daae`, and is corrected here rather than quietly replaced. Re-running those three suites on 2026-10-25
 printed `stage3_publication` **39 / 39 / 0**, `stage4_tradition_packs` **28 / 28 / 0** and
 `stage5_pack_driven_http` **28 / 28 / 0** (`q11-logs/s11-http-tier/after-*.txt`), so the loop closes on the
 instrument's own terms: it fires on an unnamed door and goes quiet once the door is named. What that green
-trio does *not* certify is a head. The three captures are stamped 13:31, 13:31 and 13:32 on 2026-10-25 and
-the widened files were committed as `b18027d` and `4d1daae` at 21:38 and 21:40 on 2026-10-26; none of the
-three prints a git head, or even a forty-character sha, so what passed was a working tree and the
-*committed* lists have never been executed. The same caveat applies to the two captures §16 records —
+trio did *not* certify, as captured, was a head. The three captures are stamped 13:31, 13:31 and 13:32 on
+2026-10-25 and the widened files were committed as `b18027d` and `4d1daae` at 21:38 and 21:40 on 2026-10-26;
+none of the three prints a git head, or even a forty-character sha, so what passed was a working tree and the
+*committed* lists had never been executed. That last clause is now retired by a run rather than by this
+paragraph's permission: `q11-logs/s11-runtime-4-full-chain-3.txt` walks all eleven suites at head
+`3e2885158cfd79d07f10d8aa5739a55a7cec16d8` with nothing tracked modified in the tree and prints those three of
+them green inside the chain — `stage3_publication` **39 / 39 / 0**, `stage4_tradition_packs` **28 / 28 / 0** and
+`stage5_pack_driven_http` **28 / 28 / 0**, each under the runner's own `==> node --test` marker, with
+`declared_suite_files|11` against `reached_suite_files|11` and `declared_not_reached` empty. So the committed
+lists have been executed, on the bytes a head carries rather than the bytes a working tree happened to hold, and
+the 2026-10-25 trio keeps its value as the record of the instrument firing on an unnamed door and going quiet
+once it was named — which is not the same thing as a certification, and the chain above is. The same caveat applies to the two captures §16 records —
 `s11-http-stage11-a5.txt` at 16:15 and `s11-http-c3.txt` at 18:26 on 2026-10-25, both before either commit
 and neither stamped with a head — and §16's list of what did not run beside them stood until 2026-10-31, when the
 whole 38-cell battery went green on that stack (`q11-logs/s11-runtime-2-stage11-http-5.txt`, the first Stage 11
 HTTP capture to stamp a head at both ends: `HEAD dbbbebf1…` on its first line and `git_head_after|dbbbebf1…` on
-its last). That head stamp buys less than it appears to, and §15 is where the reason is written out: the head it
-names does not yet carry the repair the run measured, its census is the harness's own before/after read rather
-than the runner's inside-chain read, and it stamped line counts where the harness now stamps a digest. Neither has the runner's own chain, and the reason is no longer a missing engine: the probe that
-walked the suites called `node --test` once per file (`q11-logs/s11-http-tier-probe.sh:31`) and deliberately
-bypassed `supabase/tests/api/run.sh`, so that file's `leak_census` baseline (`:188`) and closing comparison
-(`:277`), its precondition object list (`:200`) and its migration-count parity (`:225`–`:245`) have still
-never printed against Stage 11 — the parity sentence `ok  N migrations applied, matching supabase/migrations`
-appears in no capture under `q11-logs/`. The residue picture is more mixed than the first version of this
+its last). That head stamp bought less than it appeared to, and the three reasons written here were fair about
+the capture they describe: the head it named did not yet carry the repair the run measured, its census was the
+harness's own before/after read rather than the runner's inside-chain read, and it stamped line counts where
+the harness now stamps a digest. All three are closed by measurement rather than by this section's permission,
+and the closing is worth reading as a sequence rather than a total. The repair is committed at
+`b7dfbf9d9a3c53fec740704b86e18cec689824d4`, and its tracked bytes *are* the bytes that passed:
+`git cat-file blob HEAD:supabase/tests/api/stage9_render_outputs.test.mjs | sha256sum` prints
+`6c2d13e62fc384b93c51254c8617f46470fa15e3b8b1cd5de7dcdf4eb5e07f07`, which is both the `sha_before` and the
+`sha_after` of `q11-logs/s11-e07-tracked-pairing-1.txt` — that file's whole 30 cells green on it, at
+`node_test_exit=0` and `census_identical=yes` over 30 stores. The pairing is read backwards from the committed
+tree, and the honest form of it names the gap it is closing: that capture's own first line stamps
+`head|8d6abced8c3105ecd35cf3b9d647fed76f97dc6b`, the commit *before* `b7dfbf9`, and its `dirty` block lists this
+file among three tracked files modified — so the 30 green cells ran on the repair still uncommitted in the working
+tree. The equality of the two digests is what makes the earlier run evidence about the later bytes; nothing else
+about that capture is head-clean, and `q11-logs/s11-runtime-4-full-chain-3.txt` is the run that is. Both commits
+were pushed, read back from the remote rather than from a stale tracking ref, and the pushed head carried the
+chain:
+`q11-logs/s11-runtime-4-full-chain-3.txt` runs `bash supabase/tests/api/run.sh` with nothing tracked modified in
+the tree, `head` and `git_head_after` both `3e2885158cfd79d07f10d8aa5739a55a7cec16d8`, printing
+`run_sh_exit=0` at 649 s, `declared_suite_files|11` against `reached_suite_files|11` with `declared_not_reached`
+empty, `suite_total_tests=474 / pass=474 / fail=0`, `==> RESULT: PASS`, and an outer census of
+`30 before|30 after|30 matched|30 same|0 drifted`. So the runner's own chain now holds Stage 11's file inside
+it — 38 tests / 38 pass in 268 s in the same chain as the repaired 30 — and what the bypassed probe left
+unprinted has printed out of the runner, not out of a harness reading over its shoulder: in that run's own
+`run-sh.txt`, `ok  37 migrations applied, matching supabase/migrations` appears once, thirty
+`..  baseline <store>=<n>` lines are its before-read, twenty-five `ok  <store> back to <n> rows` lines are its
+closing comparison with `stage11_audit_rows back to 0 rows` among them, and six suites announce their own
+`residue census after the Stage N HTTP teardown` — the same six this section counted out of ten isolated
+captures, now counted inside one chain. The reason it had never printed was never a missing engine: the probe
+that walked the suites called `node --test` once per file (`q11-logs/s11-http-tier-probe.sh:31`) and
+deliberately bypassed `supabase/tests/api/run.sh`, so that file's `leak_census` baseline (`:188`) and closing
+comparison (`:277`), its precondition object list (`:200`) and its migration-count parity (`:225`–`:245`) had
+no capture to appear in. The residue picture is more mixed than the first version of this
 paragraph claimed. It said the only residue printed anywhere was Stage 11's own, and the ten captures say
 otherwise: five of them close with their own residue census (`stage6_storage`, `stage7_family_approval`,
 `stage8_guest_rsvp`, `stage9_render_outputs`, `stage10_commerce_http`) and five print none at all
@@ -1595,8 +1636,11 @@ cluster and what remains unrun is the same collision through PostgREST), the run
 The row has been edited a third time for the same reason, disclosed in the same place: it opened its absence list
 with "the same file's groups T, R, V, AI and H", and §16's whole-file 38 / 38 capture is what retired that clause
 rather than any change to what the groups do. What the row lists as unrun now therefore starts where the battery
-cannot reach — an operator grant or revoke, or a console purge, *executed* rather than dry-run or refused, the
-runner's own chain, and the collision through PostgREST — and it prints the whole-file run beside the two family
+cannot reach — an operator grant or revoke, or a console purge, *executed* rather than dry-run or refused, and the
+collision through PostgREST. The third item that stood in that list until now, *the runner's own chain*, is
+retired by `q11-logs/s11-runtime-4-full-chain-3.txt` on the pushed head for the reason given above, and the
+readiness row is edited for it in the same pass that writes this sentence rather than left to disagree with it —
+and it prints the whole-file run beside the two family
 captures that came before it. Its label moves for none of it: rule 3 still earns `PLANNED V1`, because nothing in `src/` names an operator verb. The
 rest of the matrix is recorded below, not rewritten. That clause — "no writer
 in product code" — survived the re-read and still says something true: no query in `src/` names
@@ -1761,6 +1805,66 @@ the fixture, not a relaxed assertion, and both files re-taken green print `28 pa
 why the two readiness rows for these checkers now carry the repair in their own words rather than leaving it
 in a commit message nobody reads with the row.
 
+A signed link's guaranteed freshness is `ask - 1` seconds, and no cell may be tested on the remainder. This
+stage's chain found the defect in Stage 9's file rather than in its own, which is why it is written as an
+instrument rule instead of filed as a Stage 11 finding: `q11-logs/s11-runtime-4-full-chain-1.txt` walked all
+eleven suites and came back `run_sh_exit=1` on a single red cell — `stage9_render_outputs.test.mjs:1614`,
+`a fresh one-second link was refused: 400`, the storage service answering
+`{"error":"InvalidJWT","message":"\"exp\" claim timestamp check failed"}` — and "flaky" is the wrong word for
+it, because the mechanism is knowable. Storage stamps a signed link's `iat` as the whole second the mint landed
+in and `exp` as `iat + ask`, and it serves a GET until the VM clock reaches `exp`, so the window a link is
+*guaranteed* is `ask - 1` seconds: a mint one millisecond before a second rolls over leaves an N-second link
+with N − 1 and an epsilon of life. Asking for one second asks for a race, and the assertion then measures where
+inside its own second the stamp fell — which is a fact about the clock, not about the product's refusal.
+`q11-logs/s11-e07-expiry-window-probe-1.txt` sends the same ~520 ms request at controlled waits and answers 200
+at `stamp_phase_ms=122` and 400 at 688; `q11-logs/s11-e07-isolated-trials-1.txt` died in 2 of 12 runs of the
+unrepaired bytes, both at that one line and nowhere else, with `census_identical=yes` in all twelve — so the
+cell's own cleanup was never in question, only its freshness claim.
+
+The repair is `b7dfbf9d9a3c53fec740704b86e18cec689824d4`: ask two seconds, so the floor is a whole second and
+the post-stamp path the tier has to fit inside it — the measured bound is a max mint of 202 ms plus a max fetch
+of 95 ms, 297 ms — leaves better than seven-tenths of a second unused. Nothing is weakened: the same credential
+is still served before its `exp` and refused after it, the 4000 ms expiry wait is untouched, and the assertion
+counts the same two claims it counted before. What makes this a repair rather than a softening is a control,
+not a green: `q11-logs/run-e07-phase-control.sh` loads a `fetch` wrapper through `NODE_OPTIONS` that hands the
+cell its own mint at a chosen distance from its `exp` — changing no tier file, no assertion and no argument —
+and with 1000 ms of life left the fresh GET answered 200 in 3/3 trials
+(`q11-logs/s11-e07-phase-control-post-2s.txt`), while delivered *at* the boundary the freshness assertion went
+red: 200 with 118 ms of the service's second left, then 400 with 101 ms of it gone, printing
+`a fresh two-second link was refused: 400` (`q11-logs/s11-e07-phase-control-post-2s-at-boundary.txt`). A cell
+that can still be made to refuse is a cell moved off an edge, not one blinded to it.
+
+Why no other cell noticed, and what has to move with the code: the product asks for 60 seconds
+(`src/integrations/supabase/invitationOutputs.ts:63`, exported as `OUTPUT_LINK_SECONDS` at `:124` and pinned to
+the mint call by `src/test/invitationOutputsTransport.test.ts:185`), so its floor is 59 and the remainder is
+invisible in traffic. Any future cell that mints a short link in order to observe a refusal has to budget so
+that `ask - 1` exceeds its own post-stamp path, and one that wants a *guaranteed* fresh read has to ask for at
+least that much again; two seconds is the smallest ask this tier's timings can rest on, and a slower host needs
+more. The clock offset itself does not travel: this host and the stack's VM measure 83 ms apart and drift
+(354 ms spread over 24 samples, `q11-logs/s11-e07-clock-drift-probe-1.txt`), so the floor is the only part of
+the arithmetic worth writing down. The same reading that produced this rule found four `file:line` pointers in
+three tracked files naming lines ten away from the constants they described — `invitationOutputs.ts:53` for a
+`TTL_SECONDS` that sits at `:63`, `:49` for a `BUCKET` at `:59`, and `:272-315` for a `reprintWarnings` that
+runs `:275-323` — while four other citations in the same grep were already right, which is the shape of the
+problem: nothing in this repository reads a code pointer, so six of them were wrong and every gate stayed
+green. They are corrected at `3e2885158cfd79d07f10d8aa5739a55a7cec16d8`, the sweep's scope is the citations
+naming those two constants rather than the whole tree, and the full record — including the fact that this
+section's own first draft cited the transport test under a directory that does not exist — is
+`q11-logs/s11-e07-classification-1.txt`.
+
+A pointer is not the only thing that rots for want of a reader, and the same pass re-derived three figures that
+had moved under this section. The tier grep printed above as 435 lines with 385 of them in Stage 11's battery
+reads **441** and **391** at this head: `2111091` added six matching lines to that battery and nothing else in the
+four-file set moved, so the pair is off by one commit's worth of prose rather than by a wrong command. The clause
+in `docs/product/feature-readiness.md` that the three widened inventory lists "have not been executed since" the
+widening commit is retired by the eleven-suite chain above rather than by the row's permission, because
+`stage3_publication` **39 / 39 / 0**, `stage4_tradition_packs` **28 / 28 / 0** and `stage5_pack_driven_http`
+**28 / 28 / 0** all ran green inside it at committed bytes. And `README.md` carried one sentence its own source
+document had superseded and left standing — the Stage 9 line saying the host's download half had "no HTTP or
+browser capture" — which now points at §§22, 23 and 25 of `docs/audits/stage-9-render-exports.md` and says plainly
+which half has been re-run at a Stage 11 head (the HTTP file, inside the chain) and which has not (the browser
+instrument, last walked in Stage 10's own closure pass, where `s10-stage9-browser-3.txt` came up 56/56).
+
 ## 16. Migration slices
 
 Forward-only, monotone after `20261020180000_stage10_nested_revocation.sql`, one concern per file so a
@@ -1796,11 +1900,21 @@ permission: `q11-logs/s11-runtime-2-stage11-http-5.txt` runs the whole file agai
 T 5, R 5, V 4, AI 3, H 5), `declared_test_calls|38`, `declared_unique_ids|38` and `run_unique_ids|38` with
 `declared_not_run` and `run_not_declared` both printed empty, and the harness's outer census identical across all
 30 store names before and after, `stage11_audit_rows=0` among them. So the scope §13 and §15 bounded at twenty-two
-outstanding cells is spent, and what the wire still lacks is narrower than a count: the runner's own chain with
-Stage 11's file inside it, the two-operator collision through PostgREST rather than through a host cluster, an
-operator grant or revoke and a console purge *executed* rather than dry-run or refused, and any browser tier —
-which has no subject, because nothing in `src/` names an operator verb. §15 is where the limit of the green
-capture is written: it stamps a head whose tracked file does not yet hold the repair it ran. The concurrency tier is a third list, and it has closed on its own terms: fifteen files in
+outstanding cells is spent, and what the wire still lacks is narrower than a count: the two-operator collision
+through PostgREST rather than through a host cluster, an operator grant or revoke and a console purge *executed*
+rather than dry-run or refused, and any browser tier — which has no subject, because nothing in `src/` names an
+operator verb. The item that stood at the head of that list when this section was written, *the runner's own chain
+with Stage 11's file inside it*, is retired by a capture rather than by this section's permission:
+`q11-logs/s11-runtime-4-full-chain-3.txt` runs `bash supabase/tests/api/run.sh` over all eleven suites at head
+`3e2885158cfd79d07f10d8aa5739a55a7cec16d8`, with nothing tracked modified in the tree, and prints `run_sh_exit=0`
+at 649 s, `declared_suite_files|11` against `reached_suite_files|11` with `declared_not_reached` empty,
+`suite_total_tests=474 / pass=474 / fail=0`, `==> RESULT: PASS`, and an outer census of 30 store names identical
+before and after — Stage 11's 38 cells and Stage 9's repaired 30 inside one chain, the E-07 cell green at
+6777.6 ms in the run whose head already carried it. The limit §15 wrote about the capture before that one — that
+it stamped a head whose tracked file did not yet hold the repair it ran — is closed there by a digest read out of
+`HEAD` and compared to the bytes that passed, not by a sentence here; §15 also names the pairing capture's own
+limit, which is that it ran at `8d6abce` with the repair still uncommitted, and says plainly that the digest
+equality is what makes it evidence about the later bytes. The concurrency tier is a third list, and it has closed on its own terms: fifteen files in
 `supabase/tests/stage11/race/` declare `RC00`–`RC16` and `RD00`–`RD07`, and `run.sh`'s `race` mode builds the
 throwaway `st11qual_race` chain for them and drops it at the end — and that mode **has run twice**, green in both
 (`q11-logs/s11-race-run-6.txt`, then `q11-logs/s11-race-run-7.txt` at the pushed head

@@ -396,10 +396,18 @@ workbench lists the files made from one frozen version and asks Storage for a 60
 read back and re-hashed against the digests their own rows carry by the trusted local publisher —
 **8 artefacts delivered, 0 blocking findings**, then **21/21** from a verifier that does not read the
 publisher's log ([`docs/audits/stage-9-render-exports.md`](docs/audits/stage-9-render-exports.md) §13).
-The host's own half of that sentence is not yet measured on the wire: a signed-in host listing their
-outputs, taking that URL, and downloading exactly those bytes — with another wedding's owner and an
-anonymous visitor refused while trying the same — is implemented and unit-tested, but no HTTP or
-browser capture says it happened (§18). None of it has
+The host's own half of that sentence is measured on the wire, and this paragraph is corrected here rather than
+replaced quietly: a signed-in host listing their outputs, taking that URL, and downloading exactly those bytes —
+with another wedding's owner and an anonymous visitor refused while trying the same — is held over HTTP by
+`supabase/tests/api/stage9_render_outputs.test.mjs` (30 cases; E-04 is the owner's download and nobody else's,
+M-03 and P-02 the refusals) and in a browser by `scripts/stage9-browser-outputs.mjs`, which drives three real
+Chromium sessions against the production bundle and the live local stack — first recorded as 51 green cases in
+that stage's own audit (§23), then re-run to 56/56 in Stage 10's closure (§20.1 of
+[`docs/audits/stage-10-commerce-foundations.md`](docs/audits/stage-10-commerce-foundations.md), `s10-stage9-browser-3.txt`).
+§§22 and 25 of the Stage 9 audit superseded the §18 row this sentence copied while leaving the row standing. The
+HTTP half has been walked again since, at this stage's head: 30 tests / 30 pass inside the eleven-suite chain of
+§16 of [`docs/architecture/operations-admin-security.md`](docs/architecture/operations-admin-security.md). The
+browser half has not been re-run at a Stage 11 head, and none of it has
 met a hosted project, a real crawler or a customer's chat app, which is why the Open Graph row stays
 `PARTIAL (local contract only)`. The people,
 venues and ceremonies of a wedding are now edited on screen as rows, so the fixtures behind Stage 3's
