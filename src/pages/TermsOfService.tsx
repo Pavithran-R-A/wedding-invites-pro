@@ -1,3 +1,9 @@
+// Terms for a pilot a person can actually use. One sentence here carried the same defect the privacy and
+// cookie pages just retired — "A monitored contact address will be published alongside the production
+// release" — while `/support` and `/my-data` had already shipped behind the sign-in wall
+// (`src/App.tsx:68-69`). A customer who cannot find a channel does not file a request, so the page names
+// the two that exist and says plainly that an email address is still missing. Everything else is left as
+// written: the preview is still free, still takes no money, and is still not a commercial service.
 import Header from "@/components/landing/Header";
 import Footer from "@/components/landing/Footer";
 import { PRODUCT } from "@/config/product";
@@ -13,7 +19,7 @@ const TermsOfService = () => {
           can try the invitation draft and styling interface. It is not a commercial service yet and
           this is not formal legal advice. The name {PRODUCT.name} is a working name and may change.
         </div>
-        <p className="text-muted-foreground mb-6">Last updated: September 2026</p>
+        <p className="text-muted-foreground mb-6">Last updated: November 2026</p>
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Acceptance of Terms</h2>
         <p className="text-sm text-muted-foreground">
@@ -61,7 +67,10 @@ const TermsOfService = () => {
 
         <h2 className="font-display text-xl font-semibold mt-8 mb-3">Contact</h2>
         <p className="text-sm text-muted-foreground">
-          A monitored contact address will be published alongside the production release.
+          The channels are in the product: sign in and use <strong>/support</strong> to reach a person about
+          an invitation or your account, or <strong>/my-data</strong> about the data on one of your
+          invitations. Both need a signed-in account, because a thread in this product is attached to one.
+          There is no published email address for this preview yet.
         </p>
       </main>
       <Footer />
