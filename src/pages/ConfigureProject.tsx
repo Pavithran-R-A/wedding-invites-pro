@@ -145,15 +145,27 @@ const ConfigureProject = () => {
           className="mt-10 p-4 rounded-xl border border-border bg-muted/30"
         >
           <h2 id="roadmap-heading" className="font-display font-semibold text-sm mb-2">
-            Planned, not part of this draft yet
+            What this build does, and what it does not
           </h2>
+          <p className="text-xs text-muted-foreground mb-2">
+            From the editor, on a draft like this one:
+          </p>
           <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-            <li>Family approval of a specific version</li>
-            <li>Guest lists, personalised links and RSVP replies</li>
-            <li>QR code, PDF, payment and printing options</li>
+            <li>Freeze the wording and publish it as a link your guests open</li>
+            <li>Give each guest household their own link and read the replies they send back</li>
+            <li>Send one specific published version to a family reviewer</li>
+            <li>Make a QR plate and printable files from a published version</li>
+            <li>Send a support message, or ask for a copy of your data or its removal</li>
+          </ul>
+          <p className="text-xs text-muted-foreground mt-3 mb-2">
+            Not in this build:
+          </p>
+          <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+            <li>Charging anything — this pilot is free and there is no checkout</li>
+            <li>Emailing your guests for you — you send the link yourself</li>
+            <li>Producing the data copy automatically — asking for it starts a request a person handles</li>
           </ul>
           <p className="text-xs text-muted-foreground mt-2">
-            These are directions for the product, not capabilities of this build.
             Nothing on this page can be purchased or activated.
           </p>
         </section>

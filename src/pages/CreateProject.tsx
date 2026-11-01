@@ -5,12 +5,13 @@ import {
   listDesignOptions,
   type DesignOption,
 } from '@/integrations/supabase/weddings';
+import { listSelectableTraditionReleases } from '@/integrations/supabase/traditionReleases';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { LANGUAGES } from '@/lib/i18n';
+import { LANGUAGES, packCoverageWords } from '@/lib/i18n';
 import { sanitizeSvg } from '@/lib/sanitizeSvg';
 import Header from '@/components/landing/Header';
 import { Check } from 'lucide-react';
@@ -25,6 +26,34 @@ const CreateProject = () => {
   const [templates, setTemplates] = useState<DesignOption[]>([]);
   const [templatesFailed, setTemplatesFailed] = useState(false);
   const [loading, setLoading] = useState(false);
+  /**
+   * Which languages a reviewed pack in this build can actually render, or why the page does not know.
+   * `reading` and `unknown` are separate because the sentence under the picker differs: one is a moment,
+   * the other is a failure this build cannot answer around. An empty `codes` with `read` is a real answer
+   * — no pack installed — and it is the state this product ships in until a pack clears review.
+   */
+  const [coverage, setCoverage] = useState<{ state: 'reading' | 'unknown' | 'read'; codes: Set<string> }>(
+    { state: 'reading', codes: new Set<string>() },
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    // The same door the editor's pack panel reads, so a language this page calls uncovered cannot be
+    // chosen there as covered. A failure narrows what the page may claim; it never blocks the draft.
+    void listSelectableTraditionReleases().then((result) => {
+      if (cancelled) return;
+      if (result.error !== null || result.data === null) {
+        setCoverage({ state: 'unknown', codes: new Set<string>() });
+        return;
+      }
+      const codes = new Set<string>();
+      for (const release of result.data) for (const code of release.languages) codes.add(code);
+      setCoverage({ state: 'read', codes });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     listDesignOptions().then(result => {
@@ -65,8 +94,10 @@ const CreateProject = () => {
         <h1 className="font-display text-2xl md:text-3xl font-bold mb-2">Create an Invitation Draft</h1>
         <p className="text-muted-foreground mb-8">
           Give the draft a name your family will recognise, pick the main language
-          and choose a design. The draft is saved privately to your account, and
-          you can change all of it later.
+          and choose a design. The draft is saved privately to your account. The
+          wording, the people, the venues and the styling are all editable later; the
+          name and the main language are not, because this build has no screen that
+          changes them once a draft exists — so those two are worth getting right now.
         </p>
 
         <form onSubmit={handleCreate} className="space-y-8">
@@ -142,15 +173,45 @@ const CreateProject = () => {
               onChange={e => setLanguage(e.target.value)}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {LANGUAGES.map(lang => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.nativeLabel} ({lang.label})
-                </option>
-              ))}
+              {LANGUAGES.map(lang => {
+                // The page hands the helper what it actually knows: a set when the read answered, `null`
+                // while it is still reading and after a failed read. Both are "not knowing", and the
+                // helper's contract is that not knowing never earns a sentence.
+                const warning = packCoverageWords(
+                  lang.code,
+                  coverage.state === 'read' ? coverage.codes : null,
+                );
+                return (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.nativeLabel} ({lang.label})
+                    {/* The uncovered languages stay in the list — a host may want to write the words now
+                        and take a reviewed pack later — but the page says what choosing one means today,
+                        in the option itself, where the choice is actually being made. It says it about
+                        the pack, never about the invitation: a draft with no pack attached is not held
+                        back by the freeze door. */}
+                    {warning === null ? '' : ' — no reviewed pack speaks this language'}
+                  </option>
+                );
+              })}
             </select>
             <p className="text-xs text-muted-foreground">
-              This is the language the invitation is written in, chosen by you.
+              {coverage.state === 'reading'
+                ? 'Checking which of these a reviewed pack in this build speaks.'
+                : coverage.state === 'unknown'
+                  ? 'This is the language the invitation is written in, chosen by you. The list of '
+                    + 'reviewed packs could not be read just now, so this page is not claiming any of '
+                    + 'these languages can or cannot be published.'
+                  : 'This is the language the invitation is written in, chosen by you. A language marked '
+                    + 'here has no reviewed pack in this build that speaks it, so there is no approved '
+                    + 'wording to draw on — writing it yourself still works, and publishing your own '
+                    + 'wording does not need a pack.'}
             </p>
+            {coverage.state === 'read' && coverage.codes.size === 0 ? (
+              <p className="text-xs text-warning" role="status">
+                No reviewed pack is installed in this build at all, so no language has approved wording
+                to draw on yet — every invitation here is written by you, and that is enough to publish.
+              </p>
+            ) : null}
           </div>
 
           <Button type="submit" size="lg" className="w-full rounded-xl text-base" disabled={loading}>
