@@ -75,7 +75,8 @@ const Footer = () => {
             feature set and brand name are still provisional.
           </p>
           <p className="text-sm text-paper/60">
-            RSVP, personalised guest links, payment and printing are not part of this build.
+            No checkout in this build, nothing hosted yet, and no reviewed pack wording has been
+            signed off by a reader of the language it writes.
           </p>
         </div>
       </div>

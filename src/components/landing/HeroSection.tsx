@@ -68,8 +68,9 @@ const HeroSection = () => {
           </div>
 
           <p className="mt-8 text-sm text-ink-muted">
-            Drafts are free while {PRODUCT.name} is in preview. RSVP, personalised
-            guest links, payment and printing are not part of this build.
+            Drafts are free while {PRODUCT.name} is in preview — there is no checkout, and nothing
+            in this build takes money. Household links, guest replies, family review on a version
+            and printable files are part of it; it is not hosted anywhere yet.
           </p>
         </div>
       </div>

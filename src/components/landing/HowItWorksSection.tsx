@@ -20,14 +20,26 @@ const implementedFoundations = [
   "The wording a guest reads, written and saved in four passages",
   "Freezing a draft as an immutable version, and publishing a chosen version as one link",
   "A public invitation page guests open without an account, and taking a link back down",
+  "One link per guest household, scoped to what that household is invited to",
+  "Replies collected through that link, and read back on your own invitation screen",
+  "A reviewer link that sends one frozen version to a family reader for their answer",
+  "A QR plate for the version you published, and printable files generated from it",
+  "A support screen that writes to a queue a person reads, and a My data screen for a copy request "
+    + "or a removal request",
 ];
 
+/**
+ * What is genuinely not in the build. Every item here was checked against `src/` rather than against a
+ * roadmap: there is no checkout address in the product, no sending service that reaches a guest on the
+ * host's behalf, no door that hands back a data copy without a person, and no tradition pack that a
+ * reader of the language it writes has signed off — the only approved releases this repository has ever
+ * carried are labelled, in the product's own words, as a test fixture rather than a real review.
+ */
 const plannedForV1 = [
-  "Family approval tied to a specific invitation version",
-  "Personalised guest links and household scoping",
-  "RSVP replies and an export of the guest list",
-  "QR code and PDF output for printing",
   "Payment and checkout",
+  "Reviewed pack wording that a reader of that language has signed off",
+  "Sending the invitation to your guests for you — you still send the link yourself",
+  "A data copy or removal prepared by the software rather than by a person reading your request",
 ];
 
 const HowItWorksSection = () => {
@@ -36,12 +48,12 @@ const HowItWorksSection = () => {
       <div className="container px-4 md:px-6">
         <div className="mx-auto mb-14 max-w-2xl text-center">
           <h2 className="mb-4 font-display text-3xl font-bold text-ink md:text-4xl">
-            How {PRODUCT.name} is intended to work
+            How {PRODUCT.name} works
           </h2>
           <p className="text-lg leading-relaxed text-ink-muted">
-            The target flow below is what we are building towards. Only the items in
-            &ldquo;Implemented foundations in this preview&rdquo; are present in the
-            codebase today.
+            The flow below is what this build does today, step by step, on a local
+            deployment. What is not built is listed beside it, and the note under the
+            lists says what has not been verified.
           </p>
         </div>
 
