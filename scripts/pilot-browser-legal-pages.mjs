@@ -30,13 +30,26 @@
 //          "Got it", because the cookie policy now claims exactly two stored items and a third would falsify it.
 //   LG-*   the path is visible, not merely routed: from the public landing page a real mouse press on the
 //          footer's "Privacy Policy" link lands on `/privacy-policy` and renders it.
+//   MD-*   the crawler's view: the raw served root document, fetched without running this bundle, declares
+//          the title, description, Open Graph and Twitter card properties it is claimed to declare, and names
+//          its own language. MD-04 measures whether a preview image is declared at all, because a card with
+//          no image renders text-only — that is a launch observation, not a pass condition.
+//   KB-*   the notice without a mouse: the acknowledgement is reached by real Tab presses (the number of
+//          stops is printed, since the notice mounts last in the landing document), and Enter on it writes
+//          the same flag the mouse press did. KB-04 is the control that makes KB-05 readable as a product
+//          verdict: the same raw key dispatch has to activate the notice's own link first, so a silent Enter
+//          on the button is the product's answer and not the harness failing to press anything. KB-06 reads
+//          the first stop's accessible name the way assistive tech computes it, because the walk census prints
+//          `textContent`, which also counts the wordmark's decorative halves.
 //
-// What it does NOT prove, so the report cannot over-claim: nothing about a signed-in screen, a guest door or
-// a crawler — those need the local stack, which is down and stays a human decision to start. Nothing about a
+// What it does NOT prove, so the report cannot over-claim: nothing about a signed-in screen or a guest door —
+// those need the local stack, which is down and stays a human decision to start, and so the guest document's
+// own server-rendered preview card is not observed here. Nothing about a
 // hosted deployment; the target is loopback only. Nothing about what WhatsApp does after the clicked door,
-// which happens on their servers. And the household/reviewer `last_used_at` behaviour the privacy copy
-// describes is asserted here as *text on the page*; the behaviour underneath it belongs to the Stage 7/8 door
-// batteries.
+// which happens on their servers. Nothing about a crawler's own cache or its user-agent-specific handling:
+// MD-* reads the document this server hands to a plain fetch, which is the half of P0-5 that is decidable
+// here. And the household/reviewer `last_used_at` behaviour the privacy copy describes is asserted here as
+// *text on the page*; the behaviour underneath it belongs to the Stage 7/8 door batteries.
 //
 // Run it against the built bytes:
 //   npm run build && npm run preview          (preview listens on 127.0.0.1:4173)
@@ -237,6 +250,38 @@ async function main(argv) {
   } catch { shippedChunks = 'dist/assets unreadable'; }
   measure('PV-04', 'JS chunk files in dist/assets (the figure feature-readiness row 282 quotes)', shippedChunks);
 
+  // ------------------------------------------------------------------ MD-* : what a crawler is handed
+  // Read from the raw served bytes, not the live DOM: a link-previewing crawler does not run this build's
+  // JavaScript, so the only metadata that reaches it is what the server put in the document.
+  let rootHtml = '';
+  let rootStatus = null;
+  try {
+    const res = await fetch(`${opts.preview}/`);
+    rootStatus = res.status;
+    rootHtml = await res.text();
+  } catch (e) { rootStatus = `fetch failed: ${e.message}`; }
+  const metas = [...rootHtml.matchAll(/<meta\b[^>]*>/gi)].map((m) => ({
+    key: /(?:name|property)="([^"]+)"/i.exec(m[0])?.[1] ?? null,
+    content: /content="([^"]*)"/i.exec(m[0])?.[1] ?? null,
+  }));
+  const metaValue = (k) => metas.find((m) => m.key === k)?.content ?? null;
+  const DECLARED = ['description', 'og:title', 'og:description', 'og:type',
+    'twitter:card', 'twitter:title', 'twitter:description'];
+  const missingMeta = DECLARED.filter((k) => !norm(metaValue(k)));
+  check('MD-01', 'the root document a crawler fetches declares its own title, description and card type',
+    `served=${rootStatus} declared=${DECLARED.length} missing or empty=${JSON.stringify(missingMeta)}`,
+    missingMeta.length === 0 && metas.length > 0);
+  const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(rootHtml)?.[1] ?? null;
+  const langAttr = /<html\b[^>]*\blang="([^"]*)"/i.exec(rootHtml)?.[1] ?? null;
+  check('MD-02', 'the document names itself and declares its language without running any script',
+    `title="${norm(titleTag ?? '')}" lang="${langAttr}"`,
+    norm(titleTag ?? '').includes('VivaahVarnam') && norm(langAttr ?? '').length > 0);
+  measure('MD-03', 'every crawler-facing property the root document declares, with its value',
+    metas.filter((m) => m.key && (/^(og:|twitter:)/.test(m.key) || m.key === 'description'))
+      .map((m) => `${m.key}="${String(m.content).slice(0, 60)}"`));
+  measure('MD-04', 'preview-image properties on the root document (a card with no image renders text-only)',
+    metas.filter((m) => m.key && /image/i.test(m.key)).map((m) => `${m.key}=${m.content}`));
+
   const browser = await openBrowser({ cdpPort: opts.cdpPort });
   const shots = [];
   const wire = [];
@@ -266,6 +311,103 @@ async function main(argv) {
     const jar = await land.cookiesForOrigin();
     check('ST-05', 'the browser holds no cookie for this origin, which is why there is nothing to decline',
       `cookie count=${jar.length} names=${JSON.stringify(jar.map((c) => c.name))}`, jar.length === 0);
+
+    // ------------------------------------------------------------------ KB-* : the notice without a mouse
+    // The notice is mounted last in the landing document (`src/pages/Index.tsx:22`), so how far a keyboard
+    // visitor has to travel to dismiss it is a fact about this build rather than an assumption, and the
+    // `Input.dispatchKeyEvent` pair below is a real key event rather than a synthetic `element.click()`.
+    // KB-04 is the control: the same dispatch has to activate the notice's own link, or a silent KB-05 would
+    // be the harness's fault and not the product's.
+    const enterKey = async () => {
+      await land.cdp('Input.dispatchKeyEvent', {
+        type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r', modifiers: 0 });
+      await land.cdp('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13, modifiers: 0 });
+      await sleep(350);
+    };
+    const armNotice = async () => {
+      await land.evaluate("localStorage.removeItem('cookie-consent')");
+      await land.goto(`${opts.preview}/`);
+      await land.waitForSelector('footer');
+      return land.waitForText('Your privacy', 8_000);
+    };
+    /** The notice leaves through a 400 ms exit animation (`src/components/landing/CookieConsent.tsx:25-30`),
+     *  so a fixed short sleep races the product: one run read the text still on screen 350 ms after Enter had
+     *  already written the flag. Poll for the departure instead, and let a real hang surface as a failure. */
+    const waitForGone = async (text, timeoutMs = 5_000) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        if (!(await land.hasText(text))) return true;
+        if (Date.now() > deadline) return false;
+        await sleep(120);
+      }
+    };
+    const walkToNotice = async (limit = 60) => {
+      const walk = [];
+      for (let i = 0; i < limit; i += 1) {
+        await land.pressTab();
+        const info = await land.focusInfo();
+        walk.push(info);
+        if (norm(info?.label) === 'Got it') return { walk, at: i + 1 };
+      }
+      return { walk, at: -1 };
+    };
+
+    const rearmed = await armNotice();
+    const first = await walkToNotice();
+    check('KB-01', 'the notice is reachable by keyboard alone, and how many stops that takes',
+      `notice on screen=${rearmed} Tab stops to "Got it"=${first.at} of ${first.walk.length}`,
+      rearmed === true && first.at > 0);
+    measure('KB-02', 'the focus order a keyboard visitor walks to get there',
+      first.walk.map((w, i) => `${i + 1}:${w.tag}${norm(w.label) ? ` "${norm(w.label).slice(0, 22)}"` : ''}`));
+    const onButton = await land.focusInfo();
+    measure('KB-03', 'what the focused "Got it" actually shows',
+      `outline=${onButton.outlineStyle} ${onButton.outlineWidth} ${onButton.outlineColor} ` +
+      `boxShadow=${onButton.boxShadow} size=${onButton.width}x${onButton.height}`);
+    await land.pressTab();
+    const onLink = await land.focusInfo();
+    await enterKey();
+    const afterEnterUrl = await land.currentUrl();
+    check('KB-04', 'control: the same raw Enter activates the notice\'s own link, so the harness can press keys',
+      `second stop=${onLink.tag} "${norm(onLink.label)}" url after Enter=${afterEnterUrl}`,
+      /\/cookie-policy$/.test(afterEnterUrl));
+    const rearmedAgain = await armNotice();
+    const second = await walkToNotice();
+    await enterKey();
+    const kbStore = await land.localStorageSnapshot();
+    const noticeGone = await waitForGone('Your privacy');
+    check('KB-05', 'Enter on "Got it" writes the flag and takes the notice off the screen',
+      `re-armed=${rearmedAgain} stops=${second.at} cookie-consent=${shown(kbStore['cookie-consent'] ?? null)} ` +
+      `notice still on screen=${!noticeGone}`,
+      second.at > 0 && kbStore['cookie-consent'] === 'acknowledged' && noticeGone);
+
+    // KB-02 prints `textContent`, which counts every node — including the two-tone wordmark's decorative
+    // halves, which `src/components/brand/BrandLockup.tsx:26-31` hides from assistive tech while naming the
+    // product once more in an `sr-only` span. That is why the census reads "VivaahVarnamVivaahVarnam" where a
+    // screen reader says it once. KB-06 measures the name the way AT computes it, so the doubling is recorded
+    // as this harness's reading rather than reported as a product defect.
+    await land.goto(`${opts.preview}/`);
+    await land.waitForSelector('footer');
+    await land.pressTab();
+    const axName = await land.evaluate(`(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return null;
+      const walk = (node) => {
+        if (node.nodeType === 3) return node.textContent;
+        if (node.nodeType !== 1) return '';
+        if (node.getAttribute('aria-hidden') === 'true') return '';
+        let out = '';
+        for (const child of node.childNodes) out += walk(child);
+        return out;
+      };
+      return [el.tagName, walk(el).replace(/\\s+/g, ' ').trim()];
+    })()`);
+    const rawFirstLabel = (await land.focusInfo())?.label ?? null;
+    check('KB-06', 'the first Tab stop announces the product name once, not twice',
+      `stop=${axName?.[0] ?? 'none'} accessible="${axName?.[1] ?? ''}" raw textContent="${rawFirstLabel}"`,
+      Array.isArray(axName) && axName[1] === 'VivaahVarnam');
 
     await land.clickLink('Privacy Policy');
     const landedUrl = await land.currentUrl();
