@@ -53,6 +53,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import InvitationRenderer from '@/components/invitation/InvitationRenderer';
 import { BrandLockup } from '@/components/brand/BrandLockup';
+import { useNoindexRoute } from '@/hooks/use-noindex-route';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -307,6 +308,11 @@ const FamilyReviewPage = () => {
   const { token } = useParams<{ token: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [sent, setSent] = useState<SentAnswer | null>(null);
+
+  // A reviewer's address is a credential, and this is mounted before the door has answered — the
+  // reviewer's own page is not something a search engine is ever asked to keep. `robots.txt` also
+  // disallows `/r/`, which is the half that works on a crawler that does not run this bundle.
+  useNoindexRoute();
 
   useEffect(() => {
     // The same shape test the resolver runs, done locally so an empty `/r/` costs no round trip.

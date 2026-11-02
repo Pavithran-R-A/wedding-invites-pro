@@ -116,3 +116,22 @@ describe("while the invitation is being read", () => {
     expect(screen.getByRole('status')).toHaveTextContent('Opening the invitation');
   });
 });
+
+describe("what a crawler is told about this address", () => {
+  it("asks for no index and no link before the door has answered", () => {
+    // The posture belongs to the route, not to the answer: `/i/<credential>` carries a credential
+    // whether the wedding behind it resolves, was taken down, or was never published, so the rule
+    // must not wait on the resolver. A promise that never settles is how that is pinned — a `noindex`
+    // mounted only on success would leave the refusal page, the one a leaked link actually lands on,
+    // indexable. The full hook semantics are `src/test/crawlabilityPosture.test.tsx`; this cell is the
+    // proof that *this* route mounts it.
+    const content = () =>
+      document.head.querySelector('meta[name="robots"]')?.getAttribute('content') ?? null;
+    resolve.mockReturnValue(new Promise(() => {}));
+    expect(content()).toBeNull();
+    const { unmount } = visit();
+    expect(content()).toBe('noindex, nofollow');
+    unmount();
+    expect(content()).toBeNull();
+  });
+});

@@ -504,3 +504,21 @@ describe("a door with nothing to answer, and every door that will not open", () 
     expect(api.resolve).not.toHaveBeenCalled();
   });
 });
+
+describe("what a crawler is told about this address", () => {
+  it("asks for no index and no link before the door has answered", () => {
+    // `/g/<credential>` is one household's address: the path is the key and the page behind it is a
+    // named family's invitation. `public/robots.txt` carries `Disallow: /g/` for crawlers that read
+    // the file, and this meta is what a crawler that runs the bundle is told — mounted by
+    // `src/hooks/use-noindex-route.ts` at the top of the component, so a refused or credential-less
+    // door asks for the same posture as an open one. Hook semantics: `src/test/crawlabilityPosture.test.tsx`.
+    const content = () =>
+      document.head.querySelector('meta[name="robots"]')?.getAttribute('content') ?? null;
+    api.resolve.mockReturnValue(new Promise(() => {}));
+    expect(content()).toBeNull();
+    const { unmount } = visit();
+    expect(content()).toBe('noindex, nofollow');
+    unmount();
+    expect(content()).toBeNull();
+  });
+});

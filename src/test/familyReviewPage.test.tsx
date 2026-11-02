@@ -424,3 +424,21 @@ describe("while the review is being read", () => {
     expect(screen.getByRole('status')).toHaveTextContent('Opening the review');
   });
 });
+
+describe("what a crawler is told about this address", () => {
+  it("asks for no index and no link before the door has answered", () => {
+    // Same rule as the guest's route, and it matters more here: `/r/<credential>` is a reviewer's
+    // address, and the page behind it names the household and the relative. The `Disallow: /r/` in
+    // `public/robots.txt` is the half that reaches a crawler without a fetch; this meta is the half
+    // that reaches one which runs the bundle anyway. Mounted before the resolver answers, so an
+    // expired or already-answered review link is no more indexable than a live one.
+    const content = () =>
+      document.head.querySelector('meta[name="robots"]')?.getAttribute('content') ?? null;
+    api.resolve.mockReturnValue(new Promise(() => {}));
+    expect(content()).toBeNull();
+    const { unmount } = visit();
+    expect(content()).toBe('noindex, nofollow');
+    unmount();
+    expect(content()).toBeNull();
+  });
+});

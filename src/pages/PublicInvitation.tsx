@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import InvitationRenderer from '@/components/invitation/InvitationRenderer';
 import { BrandLockup } from '@/components/brand/BrandLockup';
+import { useNoindexRoute } from '@/hooks/use-noindex-route';
 import { resolvePublicInvitation } from '@/integrations/supabase/publicInvitation';
 import type { PublicInvitation } from '@/lib/publicInvitation';
 
@@ -51,6 +52,11 @@ const Unavailable = () => (
 const PublicInvitationPage = () => {
   const { token } = useParams<{ token: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
+
+  // Mounted before the resolver answers, and on purpose: `/i/<credential>` is a
+  // credential-bearing address whether the wedding behind it resolves, was taken down, or was
+  // never there. See `src/hooks/use-noindex-route.ts` for what this reaches and what it cannot.
+  useNoindexRoute();
 
   useEffect(() => {
     // A missing parameter is the `/i/` route with nothing after it. Refuse it here

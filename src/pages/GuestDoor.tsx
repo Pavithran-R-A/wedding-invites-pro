@@ -43,6 +43,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import InvitationRenderer from '@/components/invitation/InvitationRenderer';
 import { BrandLockup } from '@/components/brand/BrandLockup';
+import { useNoindexRoute } from '@/hooks/use-noindex-route';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -408,6 +409,11 @@ const GuestDoorPage = () => {
   const { token } = useParams<{ token: string }>();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [receipt, setReceipt] = useState<GuestRsvpReceipt | null>(null);
+
+  // The household's own door: one family's salutation, events and answers. Mounted ahead of the
+  // door's answer, because a `/g/<credential>` that resolves to nothing is still a credential in a
+  // URL. `robots.txt` disallows `/g/` as well, for the crawlers that never run this bundle.
+  useNoindexRoute();
 
   useEffect(() => {
     if (!token) {

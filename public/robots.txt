@@ -1,14 +1,52 @@
+# Which pages this build asks crawlers to stay away from, and why the rule is not the same for
+# every door. The plan this implements is `docs/superpowers/specs/2026-10-13-stage9-render-exports-design.md`
+# §8.5; the requirement it answers is `docs/architecture/stage-2-domain-blueprint.md`'s "noindex on
+# token-bearing URLs".
+#
+#   /r/ and /g/  — a family-reviewer's address and one household's address. A third-party fetch of
+#                  either is itself the leak (the credential is in the path, and the page behind it
+#                  names people), and no unfurl is wanted there, so `Disallow` is the right
+#                  instrument: it needs no fetch to be honoured and no JavaScript to run.
+#   /i/          — the wedding's published address. Deliberately NOT disallowed. A host shares that
+#                  link in a chat app, and the card the chat draws comes from `facebookexternalhit`
+#                  and `Twitterbot` fetching it; blocking the path would break the Open Graph
+#                  contract for the one page that has to work. `/i/` is kept out of search indexes by
+#                  a `noindex, nofollow` robots meta that `src/pages/PublicInvitation.tsx` mounts
+#                  through `src/hooks/use-noindex-route.ts`.
+#
+# The limit, in the product's own words: a meta written by script is seen by a crawler that runs the
+# bundle (Googlebot does) and by no one else. For the two unfurling crawlers `noindex` is a
+# hosting-layer `X-Robots-Tag` requirement, which is unbuilt because there is no hosting target yet
+# — see the "Open Graph preview for links" row of `docs/product/feature-readiness.md`. Those two
+# agents do not maintain a web index, so what is at stake in letting them in is the fetch, not an
+# index entry.
+#
+# Each named group repeats the two `Disallow` lines rather than relying on the `*` group below,
+# because a crawler that matches a named group is governed by that group alone: a `Disallow` written
+# only under `*` would not reach Googlebot or Bingbot, and those are precisely the two whose index
+# this file is keeping out.
+
 User-agent: Googlebot
 Allow: /
+Disallow: /r/
+Disallow: /g/
 
 User-agent: Bingbot
 Allow: /
+Disallow: /r/
+Disallow: /g/
 
 User-agent: Twitterbot
 Allow: /
+Disallow: /r/
+Disallow: /g/
 
 User-agent: facebookexternalhit
 Allow: /
+Disallow: /r/
+Disallow: /g/
 
 User-agent: *
 Allow: /
+Disallow: /r/
+Disallow: /g/

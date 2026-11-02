@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Pilot tier: the three standing legal pages, read by a real browser off the built bytes.
+// Pilot tier: the public surface a visitor or a crawler reaches without an account, read by a real browser
+// and a raw fetch off the built bytes.
 //
 // Why this file exists. The copy repaired in `7a093e1` is pinned by `src/test/legalPagesTruth.test.tsx`,
 // and that is a jsdom cell: it proves the shipped component writes those sentences when handed an empty
@@ -41,6 +42,23 @@
 //          on the button is the product's answer and not the harness failing to press anything. KB-06 reads
 //          the first stop's accessible name the way assistive tech computes it, because the walk census prints
 //          `textContent`, which also counts the wordmark's decorative halves.
+//   RB-*   what this build tells a crawler. Two instruments, because the product gives crawlers two
+//          instructions that reach different readers: `/robots.txt`, which needs no fetch to be honoured and
+//          no JavaScript to run, and the `noindex, nofollow` meta that `src/hooks/use-noindex-route.ts` mounts
+//          on the three credential-bearing routes. RB-01 prints the served file split into `user-agent`
+//          records the way the standard does, so a `Disallow` written under one group is never credited to
+//          another — the shape that would hide a missing rule. RB-02 pins the census, RB-03 the two private
+//          doors refused in every group, RB-04 the published address reachable in every group (a
+//          `Disallow: /i/` would destroy the share card MD-* describes), and RB-07 feeds the parser a
+//          fabricated file that drops one door and blocks `/i/` to prove it reports both rather than passing
+//          by construction. RB-06 shows the served bytes are the tracked ones. RB-08/09/10 read a live head on
+//          each door route — a malformed credential, which all three adapters refuse locally, so the mount is
+//          observed with the stack down and on the page a leaked link actually lands on — RB-11 is the scope
+//          control (the public root's live head carries no such meta, or the rule would be taking the
+//          marketing and legal pages out of the index with the doors), and RB-12 releases one: a
+//          same-document transition out of a door must take the directive with it, proven by a marker set on
+//          `window` before the transition, because a marker that survived is the only evidence that the
+//          document never reloaded and the disappearance is the product's unmount rather than a fresh page.
 //
 // What it does NOT prove, so the report cannot over-claim: nothing about a signed-in screen or a guest door —
 // those need the local stack, which is down and stays a human decision to start, and so the guest document's
@@ -48,8 +66,11 @@
 // hosted deployment; the target is loopback only. Nothing about what WhatsApp does after the clicked door,
 // which happens on their servers. Nothing about a crawler's own cache or its user-agent-specific handling:
 // MD-* reads the document this server hands to a plain fetch, which is the half of P0-5 that is decidable
-// here. And the household/reviewer `last_used_at` behaviour the privacy copy describes is asserted here as
-// *text on the page*; the behaviour underneath it belongs to the Stage 7/8 door batteries.
+// here. RB-* inherits that limit twice over — a meta written by script is read by a crawler that runs this
+// bundle and by no one else, so the `X-Robots-Tag` that the unfurl-only crawlers would need is a hosting-layer
+// requirement this tier cannot serve or test, and no cell here can show that any real crawler obeyed the
+// instruction it reads. And the household/reviewer `last_used_at` behaviour the privacy copy describes is
+// asserted here as *text on the page*; the behaviour underneath it belongs to the Stage 7/8 door batteries.
 //
 // Run it against the built bytes:
 //   npm run build && npm run preview          (preview listens on 127.0.0.1:4173)
@@ -57,7 +78,7 @@
 // Nothing secret is taken from the command line and nothing secret is printed: the log records origins,
 // header *names*, storage key names and counts only.
 
-import { mkdirSync, readdirSync, statfsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statfsSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
 import { assertLoopback, openBrowser } from './stage5-browser-driver.mjs';
 
@@ -192,6 +213,49 @@ const PAGES = [
   },
 ];
 
+/** The doors that carry a credential in their path, and so are refused to crawlers by
+ *  `public/robots.txt`. `/i/` is not one of them: the published address is the one a chat app has to
+ *  fetch to draw a card, and RB-03 guards that. */
+const PRIVATE_DOORS = ['/r/', '/g/'];
+
+/** The groups this file declares, in order. Pinned so a census over zero groups can never read as a
+ *  clean one, and so a group added or renamed without a look goes red here. */
+const EXPECTED_GROUPS = ['Googlebot', 'Bingbot', 'Twitterbot', 'facebookexternalhit', '*'];
+
+/**
+ * robots.txt as the standard defines it: `user-agent` records separated by a blank line, each carrying
+ * its own `Allow`/`Disallow` list, comments stripped, unknown fields ignored. The blank line is the
+ * whole point of doing this here rather than grepping the text — a `Disallow` written under one group
+ * does not reach the next, so a flattened read would credit Googlebot with a rule only `*` carries and
+ * report a missing disallow as a present one.
+ */
+function parseRobotRecords(text) {
+  const records = [];
+  let current = null;
+  const close = () => { if (current !== null) { records.push(current); current = null; } };
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (line === '') { close(); continue; }
+    const separator = line.indexOf(':');
+    if (separator < 0) continue;
+    const field = line.slice(0, separator).trim().toLowerCase();
+    const value = line.slice(separator + 1).trim();
+    if (field !== 'user-agent' && field !== 'allow' && field !== 'disallow') continue;
+    current ??= { agents: [], allow: [], disallow: [] };
+    current[field === 'user-agent' ? 'agents' : field].push(value);
+  }
+  close();
+  return records;
+}
+
+const groupName = (record) => record.agents.join('+');
+const robotCensus = (records) => records.map((r) => `${groupName(r)}: allow=[${r.allow.join(' ')}] disallow=[${r.disallow.join(' ')}]`);
+/** Groups that failed to refuse one of the private doors. */
+const robotDoorMisses = (records) =>
+  records.flatMap((r) => PRIVATE_DOORS.filter((door) => !r.disallow.includes(door)).map((door) => `${groupName(r)}:${door}`));
+/** Groups that refused the published invitation, which no group may do. */
+const robotInvitationBlocked = (records) => records.filter((r) => r.disallow.includes('/i/')).map(groupName);
+
 const lines = [];
 const findings = [];
 const emit = (text) => { lines.push(text); process.stdout.write(`${text}\n`); };
@@ -281,6 +345,56 @@ async function main(argv) {
       .map((m) => `${m.key}="${String(m.content).slice(0, 60)}"`));
   measure('MD-04', 'preview-image properties on the root document (a card with no image renders text-only)',
     metas.filter((m) => m.key && /image/i.test(m.key)).map((m) => `${m.key}=${m.content}`));
+
+  // ------------------------------------------------------------------ RB-01..06 : the file a crawler reads first
+  // Fetched, not rendered, and read as records rather than as text. `dist/robots.txt` is a build input
+  // copied from `public/`, so this is the same artifact a hosted crawler would be handed.
+  let robotsText = '';
+  let robotsStatus = null;
+  let robotsWhy = null;
+  try {
+    const res = await fetch(`${opts.preview}/robots.txt`);
+    robotsStatus = res.status;
+    robotsText = await res.text();
+  } catch (e) { robotsWhy = e.message; }
+  const servedRobots = parseRobotRecords(robotsText);
+  const trackedRobots = (() => {
+    try { return readFileSync(`${REPO}public/robots.txt`, 'utf8'); } catch (e) { return `<<unreadable: ${e.message}>>`; }
+  })();
+  measure('RB-01', 'the served robots.txt, group by group as a crawler splits it',
+    `status=${robotsStatus ?? `failed: ${robotsWhy}`} chars=${robotsText.length} records=${servedRobots.length} ` +
+    robotCensus(servedRobots).join(' | '));
+  check('RB-02', 'the served file declares exactly the groups this build is shipped with',
+    `groups=${JSON.stringify(servedRobots.map((r) => r.agents.join('+')))} expected=${JSON.stringify(EXPECTED_GROUPS)}`,
+    servedRobots.length === EXPECTED_GROUPS.length &&
+      servedRobots.every((r) => r.agents.length === 1) &&
+      servedRobots.map((r) => r.agents[0]).join('|') === EXPECTED_GROUPS.join('|'));
+  const doorMisses = robotDoorMisses(servedRobots);
+  check('RB-03', 'every group in the served file refuses the reviewer door and the household door',
+    `records=${servedRobots.length} groups that failed to refuse one of ${PRIVATE_DOORS.join(', ')}=${JSON.stringify(doorMisses)}`,
+    servedRobots.length > 0 && doorMisses.length === 0);
+  const blockedInvitation = robotInvitationBlocked(servedRobots);
+  check('RB-04', 'and no group refuses the published invitation, which is the address the share card is drawn from',
+    `groups that disallow /i/=${JSON.stringify(blockedInvitation)} (an entry here would break MD-01 for every unfurl bot)`,
+    servedRobots.length > 0 && blockedInvitation.length === 0);
+  const servedToLf = robotsText.replace(/\r\n/g, '\n');
+  const trackedToLf = trackedRobots.replace(/\r\n/g, '\n');
+  measure('RB-05', 'served bytes against the tracked file, raw and after unifying line endings',
+    `identical=${robotsText === trackedRobots} identical-ignoring-CRLF=${servedToLf === trackedToLf} ` +
+    `served=${robotsText.length} tracked=${trackedRobots.length}`);
+  check('RB-06', 'the file the preview serves is the file the repository ships',
+    `directives after line-ending unification differ=${servedToLf !== trackedToLf}`, servedToLf === trackedToLf);
+  // Positive control on the instrument itself: the same two predicates, handed a file that drops one private
+  // door and blocks the published one. If they name both, then RB-03 and RB-04 are readings of the served
+  // bytes rather than answers the parser always gives.
+  const weakened = parseRobotRecords(
+    'User-agent: Googlebot\nAllow: /\nDisallow: /g/\n\nUser-agent: *\nAllow: /\nDisallow: /r/\nDisallow: /g/\nDisallow: /i/\n',
+  );
+  const controlMisses = robotDoorMisses(weakened);
+  const controlBlocks = robotInvitationBlocked(weakened);
+  check('RB-07', 'control: the record parser reports a dropped door and a blocked /i/ rather than scoring them clean',
+    `weakened groups=${weakened.length} door misses=${JSON.stringify(controlMisses)} /i/ blocked by=${JSON.stringify(controlBlocks)}`,
+    weakened.length === 2 && controlMisses.join('|') === 'Googlebot:/r/' && controlBlocks.join('|') === '*');
 
   const browser = await openBrowser({ cdpPort: opts.cdpPort });
   const shots = [];
@@ -417,6 +531,68 @@ async function main(argv) {
     check('LG-02', 'and the page it lands on is the policy, not a redirect to sign-in',
       `h1="${landedH1}"`, landedH1 === 'Privacy Policy');
 
+    // ------------------------------------------------------------------ RB-08..12 : the live head on each door
+    // A malformed credential is what makes the mount observable with the stack down: all three adapters
+    // refuse the shape before any request (`publicInvitation.ts:42`, `publicReview.ts:39`,
+    // `guestDoor.ts:51` — each one's `TOKEN_SHAPE`), so the page renders its refusal and the
+    // directive is still there to read — and
+    // that is the claim, because a posture mounted only on a successful resolve would leave precisely this
+    // page, the one a leaked or retired link actually lands on, indexable. The heading is matched per route
+    // so a cell cannot pass by reading a different page's head.
+    const BAD_CREDENTIAL = 'tooshort';
+    const headRobots = async (page) => page.evaluate(`(() => {
+      const tag = document.head.querySelector('meta[name="robots"]');
+      return tag === null ? null : tag.getAttribute('content');
+    })()`);
+    const doors = await browser.newPage('doors');
+    await doors.viewport(DESKTOP);
+    for (const [id, route, heading] of [
+      ['RB-08', 'i', 'This invitation is not available'],
+      ['RB-09', 'r', 'This review link is not available.'],
+      ['RB-10', 'g', 'This invitation link is not available.'],
+    ]) {
+      await doors.goto(`${opts.preview}/${route}/${BAD_CREDENTIAL}`);
+      const mounted = await doors.waitForSelector('h1', 20_000);
+      const robotsHere = await headRobots(doors);
+      const headingHere = norm(await doors.evaluate("document.querySelector('h1')?.textContent ?? null"));
+      check(id, `/${route}/<credential> mounts the directive for a crawler that runs this bundle`,
+        `h1 mounted=${mounted} h1="${headingHere}" robots=${shown(robotsHere)}`,
+        headingHere === heading && robotsHere === 'noindex, nofollow');
+    }
+
+    await doors.goto(`${opts.preview}/`);
+    await doors.waitForSelector('footer');
+    const rootRobots = await headRobots(doors);
+    check('RB-11', 'the public root asks for nothing — the rule is route-scoped, not a shell declaration',
+      `robots=${shown(rootRobots)} (a value here would take the marketing and legal pages out of the index too)`,
+      rootRobots === null);
+
+    // The release, proven from a door and as the product's own unmount rather than a fresh document: the
+    // directive is read *while standing on the door* before the transition, and a marker written on `window`
+    // is still there after it, which is only possible inside one document. Without that first reading this
+    // cell would pass from any page that never mounted the rule — a null compared against a null.
+    // A `history.pushState` alone would change the address bar and leave React Router on the old route, so
+    // the `popstate` the product's own router listens for is dispatched next — and the heading that comes
+    // back is what shows the route actually changed rather than the URL string having moved.
+    await doors.goto(`${opts.preview}/i/${BAD_CREDENTIAL}`);
+    await doors.waitForSelector('h1', 20_000);
+    const robotsBeforeRelease = await headRobots(doors);
+    const released = await doors.evaluate(`(() => {
+      window.__rbSameDocumentMarker = 'alive-through-the-transition';
+      window.history.pushState({}, '', '/cookie-policy');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+      return document.head.querySelector('meta[name="robots"]')?.getAttribute('content') ?? null;
+    })()`);
+    const policyMounted = await doors.waitForText('Cookie & Storage Policy', 8_000);
+    const marker = await doors.evaluate("window.__rbSameDocumentMarker ?? 'gone — the document reloaded'");
+    const robotsAfterRelease = await headRobots(doors);
+    const urlAfterRelease = await doors.currentUrl();
+    check('RB-12', 'leaving a door for a public page takes the directive with it, in the same document',
+      `on the door robots=${shown(robotsBeforeRelease)} route changed client-side=${policyMounted === true} ` +
+      `url=${urlAfterRelease} marker=${shown(marker)} during=${shown(released)} after=${shown(robotsAfterRelease)}`,
+      robotsBeforeRelease === 'noindex, nofollow' && policyMounted === true &&
+        marker === 'alive-through-the-transition' && robotsAfterRelease === null);
+
     // ------------------------------------------------------------------ LP-* per page, each in its own tab
     for (const spec of PAGES) {
       const page = await browser.newPage(spec.id);
@@ -551,7 +727,7 @@ async function main(argv) {
     emit('');
     emit(`cells observed = ${observed}, findings = ${findings.length}`);
     for (const f of findings) emit(`FINDING ${f}`);
-    emit(`verdict: ${findings.length === 0 ? 'PASS' : 'FAIL'} — the legal pages as one real browser saw them on the built bytes`);
+    emit(`verdict: ${findings.length === 0 ? 'PASS' : 'FAIL'} — the account-free public surface (legal copy, the crawler's own document, and the three doors' posture) as one real browser and one raw fetch saw them on the built bytes`);
     writeFileSync(opts.out, `${lines.join('\n')}\n`);
     process.stdout.write(`evidence written to ${opts.out}\n`);
   }
