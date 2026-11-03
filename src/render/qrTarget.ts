@@ -41,8 +41,12 @@
 /** The one path a printed invitation may carry: `/i/` then a 43-character base64url credential. */
 export const PUBLIC_INVITATION_PATH = /^\/i\/[A-Za-z0-9_-]{43}$/;
 
-/** The two doors that are never printed: a household's guest link and a relative's review link. */
-const PRIVATE_DOOR_PREFIXES = ["/g/", "/r/"];
+/** The two doors that are never printed: a household's guest link and a relative's review link.
+ *  Exported because the host's response contract has to route the same two prefixes: a crawler that
+ *  is told `noindex` about `/i/` by one module while another module forgets `/g/` and `/r/` is a
+ *  privacy posture that exists only in one of the two runtimes. Keeping the list here means the
+ *  printing door and the serving door cannot drift into two vocabularies for "private address". */
+export const PRIVATE_DOOR_PREFIXES = ["/g/", "/r/"];
 
 /** Why the door closed. A fixed vocabulary — a reason is a fact about this module, not a quote from
  *  the caller, because it ends up in a log line and a manifest column. */
@@ -93,6 +97,44 @@ const isPrivateOrigin = (hostname: string): boolean => {
 };
 
 /**
+ * The origin half of the ladder, in one place.
+ *
+ * `buildQrTarget` needs it because a printed plate that points at a laptop is a broken plate, and
+ * `scripts/deploy-pages.mjs` needs it because a *deployed* host whose browser talks to a machine on
+ * someone's desk is the same defect with a public URL in front of it. A second copy of the rule
+ * would be a second answer to "is this origin reachable by a guest", and the two would drift in the
+ * direction that matters — the one where a tool starts accepting what the printer refuses.
+ */
+const originOutcome = (value: unknown): { url: URL } | { reason: QrTargetRefusal } => {
+  if (typeof value !== "string") return { reason: "target-not-a-string" };
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return { reason: "target-unparsable" };
+  }
+
+  if (url.protocol !== "https:") return { reason: "target-not-https" };
+  if (url.username !== "" || url.password !== "") return { reason: "target-carries-credentials" };
+  if (url.search !== "" || url.hash !== "") return { reason: "target-carries-query" };
+  if (isPrivateOrigin(url.hostname)) return { reason: "target-origin-not-public" };
+
+  return { url };
+};
+
+/**
+ * The origin rule alone, named by refusal: `null` for an `https` origin with no credentials, no
+ * query, and a hostname a guest's phone could actually resolve. The two path-shaped refusals
+ * (`target-private-door`, `target-path-shape`) are deliberately absent — they belong to a printed
+ * invitation address, and a database origin has no business carrying either.
+ */
+export function originRefusal(value: unknown): QrTargetRefusal | null {
+  const outcome = originOutcome(value);
+  return "reason" in outcome ? outcome.reason : null;
+}
+
+/**
  * Read a printable invitation address, or refuse it by rule name.
  *
  * Total and side-effect-free: nothing here fetches, and nothing here throws on hostile input — the
@@ -101,19 +143,9 @@ const isPrivateOrigin = (hostname: string): boolean => {
  * printed (§11.1: the render pipeline requests nothing).
  */
 export function buildQrTarget(value: unknown): QrTargetOutcome {
-  if (typeof value !== "string") return refused("target-not-a-string");
-
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return refused("target-unparsable");
-  }
-
-  if (url.protocol !== "https:") return refused("target-not-https");
-  if (url.username !== "" || url.password !== "") return refused("target-carries-credentials");
-  if (url.search !== "" || url.hash !== "") return refused("target-carries-query");
-  if (isPrivateOrigin(url.hostname)) return refused("target-origin-not-public");
+  const origin = originOutcome(value);
+  if ("reason" in origin) return refused(origin.reason);
+  const { url } = origin;
 
   if (PRIVATE_DOOR_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
     return refused("target-private-door");

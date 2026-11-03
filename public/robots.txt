@@ -16,10 +16,13 @@
 #
 # The limit, in the product's own words: a meta written by script is seen by a crawler that runs the
 # bundle (Googlebot does) and by no one else. For the two unfurling crawlers `noindex` is a
-# hosting-layer `X-Robots-Tag` requirement, which is unbuilt because there is no hosting target yet
-# — see the "Open Graph preview for links" row of `docs/product/feature-readiness.md`. Those two
-# agents do not maintain a web index, so what is at stake in letting them in is the fetch, not an
-# index entry.
+# hosting-layer `X-Robots-Tag` requirement, and that header is now written — by
+# `src/host/pages-worker.ts`, for every `/i/`, `/r/` and `/g/` address and for no other — see the
+# "Open Graph preview for links" row of `docs/product/feature-readiness.md`. What is still true is
+# where it was measured: the Worker has only been run against a real Cloudflare runtime on
+# `127.0.0.1`, never on a deployed origin, so this file cannot claim a crawler has read that header.
+# Those two agents do not maintain a web index, so what is at stake in letting them in is the fetch,
+# not an index entry.
 #
 # Each named group repeats the two `Disallow` lines rather than relying on the `*` group below,
 # because a crawler that matches a named group is governed by that group alone: a `Disallow` written

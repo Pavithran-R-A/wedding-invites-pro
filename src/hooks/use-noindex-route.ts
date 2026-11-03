@@ -15,8 +15,10 @@
 // `facebookexternalhit` and `Twitterbot` have to be *allowed* on `/i/`, because a link a host shares
 // draws its card from that fetch and blocking it in `robots.txt` would destroy the Open Graph
 // contract; they do not execute the SPA, so for them `noindex` is a hosting-layer `X-Robots-Tag`
-// requirement. That requirement is on the seam list and is unimplemented, because there is no
-// hosting target to put a header on yet. Where an unfurl is not wanted at all — the reviewer's door
+// requirement. That requirement is written by `src/host/pages-worker.ts` for all three doors and is
+// verified against a real Cloudflare runtime by `scripts/host-response-contract.mjs` — on
+// `127.0.0.1`, which is why this comment still cannot say a crawler has read it: the Worker is in this
+// repository and not yet on a public origin. Where an unfurl is not wanted at all — the reviewer's door
 // and the household's door — `robots.txt` carries `Disallow`, which needs no fetch to be honoured.
 //
 // The element is claimed by identity rather than by position, and it is reference-counted: the first
@@ -32,8 +34,11 @@
 
 import { useEffect } from 'react';
 
-/** The directive this product asks of every crawler for a credential-bearing address. */
-export const NOINDEX_CONTENT = 'noindex, nofollow';
+import { NOINDEX_CONTENT } from '@/lib/robotsPosture';
+
+/** The directive this product asks of every crawler for a credential-bearing address. Re-exported
+ *  from `src/lib/robotsPosture.ts`, which is where the edge Worker reads the same string from. */
+export { NOINDEX_CONTENT };
 
 /** Marks the tag as this hook's own, so it can be re-used and removed without touching a
  *  `robots` meta that something else — the shell, a future host header — may have written. */

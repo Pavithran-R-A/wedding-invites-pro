@@ -12,8 +12,9 @@
 //     red in `npm test` instead of waiting for a browser tier.
 //   * `src/hooks/use-noindex-route.ts` writes `noindex, nofollow` for the three door routes. That is
 //     a script-written tag, so it governs a crawler that runs the bundle and nobody else; the
-//     unfurl-only crawlers that do not run it are the hosting layer's `X-Robots-Tag` job, which is
-//     still unbuilt because there is no hosting target. See the hook's own header.
+//     unfurl-only crawlers that do not run it are the hosting layer's `X-Robots-Tag` job, now written
+//     by `src/host/pages-worker.ts` and measured on a real runtime by `scripts/host-response-contract.mjs`
+//     — on loopback only, so no claim here says a crawler has obeyed it. See the hook's own header.
 //
 // What this file does NOT prove: that the served document is the one on disk (that is the browser
 // tier's `RB-*` cells), that any real crawler obeys either instruction (nothing here can show that),

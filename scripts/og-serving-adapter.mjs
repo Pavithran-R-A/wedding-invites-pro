@@ -60,7 +60,8 @@ import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parsePublicInvitation } from '../src/lib/publicInvitation.ts';
-import { buildOgMetadata, serializeOgMetaTags } from '../src/lib/ogMetadata.ts';
+import { buildOgMetadata } from '../src/lib/ogMetadata.ts';
+import { withOpenGraphTags } from '../src/lib/ogShellDocument.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HOST = '127.0.0.1';
@@ -104,14 +105,10 @@ if (!/<\/head>/i.test(shell)) throw new Error(`the shell at ${SHELL} has no </he
 /** Every `og:`/`twitter:` tag in the shell is the brand's, and only the brand's: the guest's own
  *  `<title>`, its `description`, its `referrer` and its `viewport` pass through untouched — §10.3
  *  explicitly keeps the page title's current behaviour, and §10.1 says nothing about the others.
- *  Matching the whole tag rather than a line keeps `index.html:34-46`, which writes two of its tags
- *  across several lines, from surviving the cut as a fragment. */
-const BRAND_TAG = /<meta\b[^>]*>/g;
-const OWNED_KEY = /\b(?:property|name)\s*=\s*["'](?:og:|twitter:)/i;
-const SHELL_WITHOUT_BRAND_TAGS = shell.replace(BRAND_TAG, (tag) => (OWNED_KEY.test(tag) ? '' : tag));
-
-const pageWith = (tags) =>
-  SHELL_WITHOUT_BRAND_TAGS.replace(/<\/head>/i, `${serializeOgMetaTags(tags)}\n  </head>`);
+ *  The removal and the insertion live in `src/lib/ogShellDocument.ts` rather than here so that this
+ *  harness and the edge Worker that Stage 12 puts in front of a real build cannot drift into two
+ *  readings of "the brand tags are gone". */
+const pageWith = (tags) => withOpenGraphTags(shell, tags);
 
 const readState = () => JSON.parse(readFileSync(STATE, 'utf8'));
 
