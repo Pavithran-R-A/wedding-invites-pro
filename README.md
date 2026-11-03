@@ -814,7 +814,85 @@ their own runner, `bash supabase/tests/stage7/run.sh`, which splits databases ra
 `80_family_review.sql`'s closing census counts cluster-wide: `review` (255 + 116) and `historic` (the twelve
 older suites on both chains).
 `--local` is always explicit: `supabase link`, `db push`, `db pull` and
-`db reset --linked` are not part of this project's workflow and are never run.
+`db reset --linked` are not part of this project's workflow and have never been run against a hosted project.
+That last clause is now
+superseded for exactly one command against exactly one ref, and the exception is recorded here because an
+operator who reads only this file would otherwise refuse the action the launch tracker authorises.
+
+**The one authorised hosted write.** Applying the versioned migrations to the dedicated pilot project
+`bohtowyresjgroaeashi` (`eu-west-1`) with `npx supabase db push`, behind a `--dry-run` whose pending list has
+been read back and matched file-for-file against `supabase/migrations/`. `db pull`, `supabase link` for any
+other ref, and `db reset --linked` remain excluded — `db reset` erases data, so it has no hosted form here —
+and no other project may be targeted at any time. Five things a clean apply does *not* settle, each of them
+measured in this repository rather than assumed:
+
+- **Exposing the schemas is a separate act from creating them, and it is a privacy control, not only a
+  convenience.** `supabase/config.toml:32` lists `schemas = ["public", "api"]`, and a schema absent from that
+  list is unreachable over REST whatever it is granted — which is how `private` and `internal_api` stay dark
+  and how the `api` RPCs answer at all. On a hosted project that list is an API setting, not a `config.toml`
+  value, and no migration in the chain changes it: `grep -i` over `supabase/migrations/` finds no
+  `ALTER ROLE` and no `pgrst.db_schemas` statement. Both halves of the consequence are now measured on the
+  replay described below. Left at `public`, every `api.*` call answers `404 PGRST202` and the product fails at
+  its first RPC while the schema looks perfect. Widened past `public, api`, the privileged bodies become
+  reachable, because `internal_api` grants schema USAGE to `anon` and `authenticated` on purpose
+  (`20260926150000_stage3_privileged_bodies_behind_wrappers.sql:111`, whose preceding comment calls it
+  "Load-bearing" and points at the section heading at `:54`, "THE ONE GRANT THIS LAYOUT FORCES, AND WHY IT IS
+  NOT A HOLE"). Read the hosted list back, set it to exactly `public, api`, and re-measure one `api` RPC
+  through HTTP before trusting the word "applied".
+- **A green hosted apply is not the chain the committed batteries certify.** Every stage runner builds its
+  database with `ls | grep -vE '_stage[0-9]+_'` and then `for stage in stage2 …`, which filters the two
+  `_stage0_` files out of the first group and never re-adds them in the loop — checked in all nine runners,
+  `supabase/tests/stage11/run.sh:262` and `:275` being the head of that family. The one runner that does apply
+  them, `supabase/tests/rls/run.sh:51`, stops at the published schema for the reason its own header gives. So
+  no recorded green chain has held all 37 files, while `db push` will run all 37 in migration-version order.
+  That gap was closed by measurement rather than argument: on a throwaway host cluster (PostgreSQL 17.10, data
+  directory in scratch outside the repository, stopped and deleted afterwards) the bootstrap and the Stage 6
+  storage fixture, then all 37 files in strict filename order, each in its own `--single-transaction` with
+  `ON_ERROR_STOP=1`, came back **37 of 37, exit 0** (`p1-logs/h22-replay-37.txt`). It lands on the head shape
+  the committed probe already measures — 41 names in `api`, 61 in `internal_api`, the same pair recorded seven
+  times at `DECLARED_HEAD=stage11` in `q11-logs/s11-q3-run-all-1.txt`. The same capture is the parity snapshot
+  to compare a hosted apply against: 20 tables in `public`, 13 in `private`, 8 in `legacy`, 50 RLS policies of
+  which 4 are on `storage.objects`, and three buckets (`invitation-outputs`, `invitation-previews`,
+  `wedding-assets`). Because that cluster is plain Postgres, two things it cannot certify: its `postgres` is a
+  superuser where the hosted migration role is not (that half was measured on the local stack, §12.4 of
+  `docs/audits/stage-6-storage-assets.md`), and its `storage` is the Stage 6 fixture, whose own header lists
+  what it does not reproduce. Its grant-shape numbers — 0 `EXECUTE` for `service_role` on `api` and
+  `internal_api`, for instance — are fixture-relative and are not hosted expectations.
+- **The one generated name in the chain resolves in the replay's favour.** `DROP CONSTRAINT
+  access_tokens_check3` (`20260926130000_stage3_publication_resolution_boundary.sql:192`) names a constraint
+  PostgreSQL produced *positionally*, so a from-zero build could in principle hand that number to a different
+  rule. Measured on the replay, the CHECK set immediately before Stage 3 runs is `access_tokens_check`
+  (`expiry_policy` against `expires_at`), `check1` (`expires_at` against `created_at`), `check2`
+  (`revoked_at`), `check3` (the `token_kind` CASE): the statement removes exactly the rule its comment says it
+  replaces, and a revoked-at bound still exists at head. The numbering starts at zero because the first
+  unnamed table-level CHECK carries no suffix, which is why "measured from `pg_constraint`, not guessed" at
+  `:186` was load-bearing rather than decorative. The other 17 unguarded drops are ordering-safe for the same
+  reason — each names an object an earlier file creates: `DROP POLICY "System insert logs"`
+  (`20260222072004_8c1864ad-1e55-4d32-841c-be13dcec62c9.sql:3` ← `20260222071941_b09d0299-796f-4d80-9f5a-e919fa705ffe.sql:192`),
+  the `DROP POLICY %I` loop (`20260925120700_stage2_archive_legacy_scaffold.sql:37`, self-guarding because it
+  iterates `pg_policy`), `payments_user_id_fkey` (`:98` ← `20260222071941_…sql:103`, moved by `:64` of the same
+  file), Stage 4's constraint and column drops (`20260927120000_stage4_tradition_pack_releases.sql:56`–`:65`,
+  `:677`, `:684` ← `20260925120100_stage2_canonical_domain.sql:15`–`:36` and `:89`, and
+  `20260925120200_stage2_versions_and_publication.sql:30`), Stage 8's two swaps
+  (`20261009120000_stage8_guest_invitations_rsvp.sql:67` ← `20260926130000_…sql:194`, and `:136` ←
+  `20260925120300_stage2_guests_approvals_rsvp.sql:87`), and `DROP INDEX
+  private.commerce_events_provider_event_uk` (`20261020120000_stage10_event_redelivery.sql:105` ←
+  `20261017120000_stage10_commerce_foundations.sql:337`, re-created at `:106`).
+- **A half-applied file cannot be re-run.** The three bucket `INSERT`s
+  (`20261006120000_stage6_wedding_asset_storage.sql:30`, `20261013120000_stage9_render_outputs.sql:47` and the
+  same file at `:69`) carry no `ON CONFLICT` guard, and that is now measured rather than inferred: replaying
+  the Stage 6 file onto a chain that already contains it fails with `duplicate key value violates unique
+  constraint "buckets_pkey"` (psql exit 3, `p1-logs/h22-parity-and-retry.txt`). On a fresh project the inserts
+  are safe, because the lifecycle columns stay NULL — the one shape
+  `storage.protect_bucket_control_columns()` admits (§12.4 of `docs/audits/stage-6-storage-assets.md`). The
+  response to a mid-chain failure is therefore to stop and read the migration journal, never to re-apply a
+  file.
+- **Row ceilings are configuration, not schema.** `max_rows = 1000` at `supabase/config.toml:34` is the
+  value the share-pagination limit was measured against; the hosted equivalent has not been read.
+
+None of the above has run against the hosted project. At the time of writing the Supabase CLI on this machine
+holds a token that the API rejects (`{"message":"Invalid access token"}`), so nothing has been read from or
+written to `bohtowyresjgroaeashi` and its migration state is reported by the launch tracker, not verified here.
 
 See [`docs/architecture/public-invitation-security.md`](docs/architecture/public-invitation-security.md)
 for the boundary those tests hold, and
