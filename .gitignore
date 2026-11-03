@@ -21,6 +21,12 @@ dist-ssr
 supabase/.temp/
 supabase/.branches/
 
+# Cloudflare wrangler scratch, written wherever the CLI is invoked from. It is rebuilt by the next
+# run, and a `wrangler pages dev` booted in this directory discovers `.env.local` — so its state can
+# hold the local stack's keys. `scripts/host-response-contract.mjs` and `scripts/deploy-pages.mjs`
+# both run wrangler from a scratch directory outside the repository precisely so this stays empty.
+.wrangler/
+
 # Local evidence a run writes for a human to look at (browser screenshots, traces).
 # Never committed: they name throwaway local tokens in their filenames or contents.
 artifacts/
