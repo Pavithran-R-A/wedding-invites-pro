@@ -13,6 +13,7 @@
     "pages:worker": "node scripts/build-pages-worker.mjs",
     "pages:build": "vite build && node scripts/build-pages-worker.mjs",
     "pages:contract": "node scripts/host-response-contract.mjs",
+    "launch:checklist": "node scripts/launch-checklist.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "product:check": "node scripts/check-product-contract.mjs",
