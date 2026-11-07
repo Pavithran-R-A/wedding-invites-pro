@@ -1,25 +1,23 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { BrandLockup } from '@/components/brand/BrandLockup';
+import { readAuthRedirectIntent, clearAuthRedirectIntent } from '@/lib/authRedirectIntent';
 
 const ResetPassword = () => {
   const [email, setEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isRecovery, setIsRecovery] = useState(false);
+  // The recovery arrival is a fact captured at load, before the auth client cleared the URL
+  // fragment. Reading the live hash here raced that cleanup and lost on refresh; the captured
+  // intent survives both. See src/lib/authRedirectIntent.ts.
+  const [isRecovery] = useState(() => readAuthRedirectIntent() === 'recovery');
   const { toast } = useToast();
-
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes('type=recovery')) {
-      setIsRecovery(true);
-    }
-  }, []);
+  const navigate = useNavigate();
 
   const handleRequestReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,7 +43,11 @@ const ResetPassword = () => {
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
+      // The password is set: forget the recovery hint so a refresh does not re-offer the form,
+      // and carry the host to their account instead of leaving them on a stale form.
+      clearAuthRedirectIntent();
       toast({ title: 'Password updated', description: 'You can now log in with your new password.' });
+      navigate('/dashboard');
     }
   };
 
